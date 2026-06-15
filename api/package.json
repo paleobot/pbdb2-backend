@@ -1,0 +1,27 @@
+{
+  "name": "pbdb2-api",
+  "version": "0.0.1",
+  "description": "API for PBDB2",
+  "homepage": "https://github.com/paleobot/pbdb2-api#readme",
+  "bugs": {
+    "url": "https://github.com/paleobot/pbdb2-api/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/paleobot/pbdb2-api.git"
+  },
+  "license": "ISC",
+  "author": "Douglas Meredith",
+  "type": "module",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "@fastify/autoload": "^6.0.0",
+    "@fastify/sensible": "^6.0.0",
+    "fastify": "^5.0.0",
+    "fastify-plugin": "^5.0.0"
+  }
+}
