@@ -1,31 +1,4 @@
-# resource-routes
-
-## Purpose
-
-The five PBDB2 resource route groups — references, authorities, collections,
-specimens, and schemas — exposing CRUD across HTTP verbs under the versioned
-base path, addressed by `permid`. Four are uniform; `schemas` returns an
-aggregate tree on read.
-
-## Requirements
-
-### Requirement: Resource route groups
-
-The system SHALL provide route groups for `references`, `authorities`,
-`collections`, `specimens`, and `schemas` under the versioned API base path.
-Each route group SHALL be addressable by `permid`.
-
-#### Scenario: Each resource group is mounted
-
-- **WHEN** a client requests the list endpoint of any of the five resources
-- **THEN** the request is handled by that resource's route group
-- **AND** the response uses the standard `data`/`meta`/`links` envelope
-
-#### Scenario: Single resource addressed by permid
-
-- **WHEN** a client requests a single resource by its `permid`
-- **THEN** the matching resource is returned in `data`
-- **AND** its `permid` is present in `data`
+## MODIFIED Requirements
 
 ### Requirement: CRUD verb coverage
 

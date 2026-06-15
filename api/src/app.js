@@ -18,12 +18,19 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
  * (`reply.sendData`, `fastify.authenticate`, …) exist by the time routes load.
  */
 export function build(opts = {}) {
+  // `pg` is a test seam, not a Fastify option: `build({ pg })` injects a fake
+  // postgres client so route logic can be driven with no database. The postgres
+  // plugin sees the decorator already exists and skips connecting.
+  const { pg, ...fastifyOpts } = opts;
+
   const app = Fastify({
     logger: false,
     // Treat `/api/v1` and `/api/v1/` as the same route (applies to all routes).
     routerOptions: { ignoreTrailingSlash: true },
-    ...opts,
+    ...fastifyOpts,
   });
+
+  if (pg) app.decorate('pg', pg);
 
   // Cross-cutting plugins first (each is fastify-plugin wrapped, so its
   // decorators apply to this root instance rather than being encapsulated).

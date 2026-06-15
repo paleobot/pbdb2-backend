@@ -5,7 +5,15 @@
  * pbdb2-migrations/play/server.js for the shape this mirrors), rather than a
  * flat record. So GET /:permid is written explicitly instead of via the shared
  * factory. Write handling for nested characters/states is out of scope here.
+ *
+ * READS are DB-backed when a connection is present: the list uses the generic
+ * head-read repository; the single read assembles the tree via schema-tree.js
+ * (404 on a miss). With no DB configured, both fall back to the stubs below.
+ * Write verbs remain stubbed (a later change).
  */
+
+import { repositoryForResource } from '../../../../lib/repository.js';
+import { readSchemaTree } from '../../../../lib/schema-tree.js';
 
 const stubSchema = (permid = 'sch-00000000') => ({
   permid,
@@ -27,16 +35,26 @@ const stubSchemaTree = (permid = 'sch-00000000') => ({
 
 export default async function schemas(fastify) {
   const write = { preHandler: fastify.authenticate };
+  const repository = repositoryForResource(fastify, 'schemas');
 
-  // List
-  fastify.get('/', async (_request, reply) =>
-    reply.sendList([stubSchema()], { meta: { type: 'schema' } }),
-  );
+  // List — flat heads via the generic repository (the tree shape is per-read)
+  fastify.get('/', async (_request, reply) => {
+    const items = repository ? await repository.list() : [stubSchema()];
+    return reply.sendList(items, { meta: { type: 'schema' } });
+  });
 
   // Single read — aggregate tree (schema -> characters -> states)
-  fastify.get('/:permid', async (request, reply) =>
-    reply.sendData(stubSchemaTree(request.params.permid), { type: 'schema' }),
-  );
+  fastify.get('/:permid', async (request, reply) => {
+    if (!repository) {
+      return reply.sendData(stubSchemaTree(request.params.permid), { type: 'schema' });
+    }
+
+    const tree = await readSchemaTree(fastify.pg, request.params.permid);
+    if (!tree) {
+      throw fastify.httpErrors.notFound(`No schema with permid '${request.params.permid}'`);
+    }
+    return reply.sendData(tree, { type: 'schema' });
+  });
 
   // Create
   fastify.post('/', write, async (_request, reply) => {
