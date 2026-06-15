@@ -52,4 +52,21 @@ export default fp(async (fastify) => {
       },
     });
   });
+
+  /**
+   * Index / discovery document. Same envelope, but `meta.type` is `index` and
+   * the resource-specific `meta` fields (removed, version) are omitted — an
+   * index node describes a path, not a stored record. `links` enumerates the
+   * node's children (the discovery plugin supplies them).
+   */
+  fastify.decorateReply('sendIndex', function sendIndex(data, { links = {} } = {}) {
+    return this.send({
+      data,
+      meta: { type: 'index' },
+      links: {
+        self: this.request.url,
+        ...links,
+      },
+    });
+  });
 });

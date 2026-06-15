@@ -18,7 +18,12 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
  * (`reply.sendData`, `fastify.authenticate`, …) exist by the time routes load.
  */
 export function build(opts = {}) {
-  const app = Fastify({ logger: false, ...opts });
+  const app = Fastify({
+    logger: false,
+    // Treat `/api/v1` and `/api/v1/` as the same route (applies to all routes).
+    routerOptions: { ignoreTrailingSlash: true },
+    ...opts,
+  });
 
   // Cross-cutting plugins first (each is fastify-plugin wrapped, so its
   // decorators apply to this root instance rather than being encapsulated).
