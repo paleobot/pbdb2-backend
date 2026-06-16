@@ -1,3 +1,5 @@
+import { referencesBase, hydrateReferenceHrefs } from './reference-hydration.js';
+
 /**
  * Registers the uniform CRUD verb coverage shared by references, authorities,
  * collections, and specimens. Each is permid-keyed and returns data in the
@@ -18,41 +20,47 @@
  * @param {(permid?: string) => object} opts.stub  builds a stub record
  * @param {{ readHead: (permid: string) => Promise<object|null>, list: () => Promise<object[]> }} [opts.repository]
  *   read repository; when omitted, reads use `stub`
+ * @param {import('./resource-tables.js').ReferenceConfig} [opts.references]
+ *   reference enrichment config; when present, resolved references get an `href`
  */
-export function registerCrudRoutes(fastify, { type, stub, repository }) {
+export function registerCrudRoutes(fastify, { type, stub, repository, references }) {
   const write = { preHandler: fastify.authenticate };
+  // Derived once from this group's mounted prefix, not hard-coded.
+  const refsBase = referencesBase(fastify.prefix);
+  const hydrate = (record) => hydrateReferenceHrefs(record, references, refsBase);
 
   // List
   fastify.get('/', async (_request, reply) => {
     const items = repository ? await repository.list() : [stub()];
+    items.forEach(hydrate);
     return reply.sendList(items, { meta: { type } });
   });
 
   // Single read
   fastify.get('/:permid', async (request, reply) => {
-    if (!repository) return reply.sendData(stub(request.params.permid), { type });
+    if (!repository) return reply.sendData(hydrate(stub(request.params.permid)), { type });
 
     const record = await repository.readHead(request.params.permid);
     if (!record) {
       throw fastify.httpErrors.notFound(`No ${type} with permid '${request.params.permid}'`);
     }
-    return reply.sendData(record, { type });
+    return reply.sendData(hydrate(record), { type });
   });
 
   // Create
   fastify.post('/', write, async (_request, reply) => {
     reply.code(201);
-    return reply.sendData(stub(), { type });
+    return reply.sendData(hydrate(stub()), { type });
   });
 
   // Full replace
   fastify.put('/:permid', write, async (request, reply) =>
-    reply.sendData(stub(request.params.permid), { type }),
+    reply.sendData(hydrate(stub(request.params.permid)), { type }),
   );
 
   // Partial update
   fastify.patch('/:permid', write, async (request, reply) =>
-    reply.sendData(stub(request.params.permid), { type }),
+    reply.sendData(hydrate(stub(request.params.permid)), { type }),
   );
 
   // Soft delete

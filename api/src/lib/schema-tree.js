@@ -9,15 +9,27 @@
  *    hierarchy in JS, then stripped — never exposed.
  *  - Every level filters to the current, non-removed version
  *    (`succeeded_by_id IS NULL AND NOT COALESCE(removed, false)`).
- *  - Reference enrichment (primaryReference / additionalReferences that the
- *    legacy resolved via JOIN) is DEFERRED with all relationship enrichment —
- *    see design.md. This returns schema payload + characters/states only.
+ *  - Reference enrichment (primaryReference / additionalReferences) is resolved
+ *    here too, reusing the shared `referenceProjections` helper so the schema
+ *    single-read can't drift from the generic repository engine. The schema
+ *    head's `reference_id` and its `additional_schema_refs` join rows resolve to
+ *    embedded `{ title, permid }` objects; `href` is hydrated at the route
+ *    boundary, and soft-removed references are suppressed in SQL.
  */
+
+import { referenceProjections } from './repository.js';
+import { descriptorFor } from './resource-tables.js';
+
+// Correlate the reference sub-selects to the schema head CTE (alias `ts`).
+const SCHEMA_REF_PROJECTIONS = referenceProjections(descriptorFor('schemas').references, 'ts');
+const SCHEMA_REF_COLUMNS = SCHEMA_REF_PROJECTIONS.length
+  ? `,\n  ${SCHEMA_REF_PROJECTIONS.join(',\n  ')}`
+  : '';
 
 const SCHEMA_TREE_QUERY = `
 WITH RECURSIVE
 target_schema AS (
-  SELECT s.id, s.permid, s.schema AS payload
+  SELECT s.id, s.permid, s.schema AS payload, s.reference_id
   FROM schemas s
   WHERE s.permid = $1
     AND s.succeeded_by_id IS NULL
@@ -55,7 +67,7 @@ state_tree AS (
 )
 SELECT
   ts.permid AS permid,
-  ts.payload AS payload,
+  ts.payload AS payload${SCHEMA_REF_COLUMNS},
   (
     SELECT COALESCE(json_agg(json_build_object(
       'id',                ct.id,
@@ -142,7 +154,13 @@ function assemble(row) {
     delete s._sortOrder;
   }
 
-  return { permid: row.permid, ...row.payload, characters: topChars };
+  return {
+    permid: row.permid,
+    ...row.payload,
+    primaryReference: row.primaryReference ?? null,
+    additionalReferences: row.additionalReferences ?? [],
+    characters: topChars,
+  };
 }
 
 /**

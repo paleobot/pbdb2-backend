@@ -14,11 +14,15 @@
 
 import { repositoryForResource } from '../../../../lib/repository.js';
 import { readSchemaTree } from '../../../../lib/schema-tree.js';
+import { descriptorFor } from '../../../../lib/resource-tables.js';
+import { referencesBase, hydrateReferenceHrefs } from '../../../../lib/reference-hydration.js';
 
 const stubSchema = (permid = 'sch-00000000') => ({
   permid,
   title: 'Stub schema',
   year: '2026',
+  primaryReference: { title: 'Stub reference', permid: 'ref-00000000' },
+  additionalReferences: [],
 });
 
 const stubSchemaTree = (permid = 'sch-00000000') => ({
@@ -36,40 +40,44 @@ const stubSchemaTree = (permid = 'sch-00000000') => ({
 export default async function schemas(fastify) {
   const write = { preHandler: fastify.authenticate };
   const repository = repositoryForResource(fastify, 'schemas');
+  const references = descriptorFor('schemas').references;
+  const refsBase = referencesBase(fastify.prefix);
+  const hydrate = (record) => hydrateReferenceHrefs(record, references, refsBase);
 
   // List — flat heads via the generic repository (the tree shape is per-read)
   fastify.get('/', async (_request, reply) => {
     const items = repository ? await repository.list() : [stubSchema()];
+    items.forEach(hydrate);
     return reply.sendList(items, { meta: { type: 'schema' } });
   });
 
   // Single read — aggregate tree (schema -> characters -> states)
   fastify.get('/:permid', async (request, reply) => {
     if (!repository) {
-      return reply.sendData(stubSchemaTree(request.params.permid), { type: 'schema' });
+      return reply.sendData(hydrate(stubSchemaTree(request.params.permid)), { type: 'schema' });
     }
 
     const tree = await readSchemaTree(fastify.pg, request.params.permid);
     if (!tree) {
       throw fastify.httpErrors.notFound(`No schema with permid '${request.params.permid}'`);
     }
-    return reply.sendData(tree, { type: 'schema' });
+    return reply.sendData(hydrate(tree), { type: 'schema' });
   });
 
   // Create
   fastify.post('/', write, async (_request, reply) => {
     reply.code(201);
-    return reply.sendData(stubSchema(), { type: 'schema' });
+    return reply.sendData(hydrate(stubSchema()), { type: 'schema' });
   });
 
   // Full replace
   fastify.put('/:permid', write, async (request, reply) =>
-    reply.sendData(stubSchema(request.params.permid), { type: 'schema' }),
+    reply.sendData(hydrate(stubSchema(request.params.permid)), { type: 'schema' }),
   );
 
   // Partial update
   fastify.patch('/:permid', write, async (request, reply) =>
-    reply.sendData(stubSchema(request.params.permid), { type: 'schema' }),
+    reply.sendData(hydrate(stubSchema(request.params.permid)), { type: 'schema' }),
   );
 
   // Soft delete

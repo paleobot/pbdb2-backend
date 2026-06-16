@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 import { build } from '../src/app.js';
+import { makeReadRepository } from '../src/lib/repository.js';
 
 /**
  * DB-backed reads, driven with NO database: `build({ pg })` injects a fake
@@ -160,4 +161,93 @@ test('specimens read stays stubbed and never touches the database', async (t) =>
   const res = await app.inject({ method: 'GET', url: '/api/v1/specimens/spc-1' });
   assert.equal(res.statusCode, 200);
   assert.equal(pg.calls.length, 0, 'no query should have run for specimens');
+});
+
+const collectionRefs = {
+  primary: { as: 'primaryReference', via: 'reference_id' },
+  additional: {
+    as: 'additionalReferences',
+    joinTable: 'additional_collection_refs',
+    joinKey: 'collection_id',
+  },
+};
+
+test('repository builds reference projections and merges them by their `as` key', async () => {
+  const pg = fakePg(() => ({
+    rows: [
+      {
+        permid: 'col-1',
+        payload: { name: 'Alpha' },
+        primaryReference: { title: 'Primary', permid: 'ref-9' },
+        additionalReferences: [{ title: 'Add', permid: 'ref-10' }],
+      },
+    ],
+  }));
+  const repo = makeReadRepository({
+    pg,
+    table: 'collections',
+    jsonbColumn: 'collection',
+    references: collectionRefs,
+  });
+
+  const rec = await repo.readHead('col-1');
+  assert.equal(rec.name, 'Alpha');
+  assert.deepEqual(rec.primaryReference, { title: 'Primary', permid: 'ref-9' });
+  assert.deepEqual(rec.additionalReferences, [{ title: 'Add', permid: 'ref-10' }]);
+
+  // The projection SQL: a primary scalar sub-select + an additional json_agg,
+  // both suppressing removed refs, over the join table.
+  const q = pg.calls[0].text;
+  assert.match(q, /json_build_object\('title', r\.reference->>'title', 'permid', r\.permid\)/);
+  assert.match(q, /FROM refs r WHERE r\.id = "collections"\."reference_id"/);
+  assert.match(q, /json_agg/);
+  assert.match(q, /"additional_collection_refs" j JOIN refs r/);
+  assert.match(q, /j\."collection_id" = "collections"\.id/);
+  assert.match(q, /NOT COALESCE\(r\.removed, false\)/);
+});
+
+test('repository without a references config emits no projections and merges nothing extra', async () => {
+  const pg = fakePg(() => ({ rows: [{ permid: 'ref-1', payload: { title: 'T' } }] }));
+  const repo = makeReadRepository({ pg, table: 'refs', jsonbColumn: 'reference' });
+
+  const rec = await repo.readHead('ref-1');
+  assert.deepEqual(Object.keys(rec).sort(), ['permid', 'title']);
+  assert.doesNotMatch(pg.calls[0].text, /json_build_object/);
+});
+
+test('enriched single read carries href hydrated from the route prefix', async (t) => {
+  const pg = fakePg(() => ({
+    rows: [
+      {
+        permid: 'col-1',
+        payload: { name: 'Alpha' },
+        primaryReference: { title: 'Primary', permid: 'ref-9' },
+        additionalReferences: [{ title: 'Add', permid: 'ref-10' }],
+      },
+    ],
+  }));
+  const app = build({ pg });
+  t.after(() => app.close());
+
+  const res = await app.inject({ method: 'GET', url: '/api/v1/collections/col-1' });
+  const { data } = res.json();
+  assert.equal(data.primaryReference.href, '/api/v1/references/ref-9');
+  assert.equal(data.additionalReferences[0].href, '/api/v1/references/ref-10');
+});
+
+test('stub reads expose the enriched reference shape with href (no DB configured)', async (t) => {
+  const app = build(); // no pg → stub path
+  t.after(() => app.close());
+
+  const authority = (await app.inject({ method: 'GET', url: '/api/v1/authorities/aut-x' })).json().data;
+  assert.equal(authority.reference.title, 'Stub reference');
+  assert.equal(authority.reference.href, '/api/v1/references/ref-00000000');
+
+  const collection = (await app.inject({ method: 'GET', url: '/api/v1/collections/col-x' })).json().data;
+  assert.equal(collection.primaryReference.href, '/api/v1/references/ref-00000000');
+  assert.deepEqual(collection.additionalReferences, []);
+
+  const schema = (await app.inject({ method: 'GET', url: '/api/v1/schemas/sch-x' })).json().data;
+  assert.equal(schema.primaryReference.href, '/api/v1/references/ref-00000000');
+  assert.deepEqual(schema.additionalReferences, []);
 });

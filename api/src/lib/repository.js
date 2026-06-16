@@ -28,12 +28,65 @@ function ident(name) {
 }
 
 /**
- * Shape a DB row into the public resource: the `permid` plus the JSONB payload.
- * Internal serial ids and the version-chain columns are NEVER selected, so they
- * cannot leak.
+ * Build the SELECT-list expressions that resolve a resource's references into
+ * embedded `{ title, permid }` objects, from the descriptor's `references`
+ * config. The persistence layer stays HTTP-agnostic: `href` is NOT built here —
+ * it is hydrated at the route boundary (see reference-hydration.js).
+ *
+ * Soft-removed references are suppressed in SQL (`NOT COALESCE(r.removed,
+ * false)`): a removed primary yields `NULL`, removed additional rows drop out of
+ * the aggregate — so the array count is always correct and no dangling link can
+ * form. `title` is read from the refs JSONB; `permid` is the lineage id. Because
+ * the backend swing trigger keeps the FK pointed at the current head, reading
+ * straight off the referenced row yields the current title + stable permid.
+ *
+ * @param {import('./resource-tables.js').ReferenceConfig} [references]
+ * @param {string} qualifier  SQL qualifier for the citing row (a quoted table
+ *   name for the generic select, or a CTE alias like `ts` for the schema tree)
+ * @returns {string[]} aliased SELECT-list expressions (empty when no references)
  */
-function toResource(row) {
-  return { permid: row.permid, ...row.payload };
+export function referenceProjections(references, qualifier) {
+  if (!references) return [];
+  const exprs = [];
+
+  if (references.primary) {
+    const { as, via } = references.primary;
+    exprs.push(
+      `(SELECT json_build_object('title', r.reference->>'title', 'permid', r.permid) ` +
+        `FROM refs r WHERE r.id = ${qualifier}.${ident(via)} ` +
+        `AND NOT COALESCE(r.removed, false)) AS ${ident(as)}`,
+    );
+  }
+
+  if (references.additional) {
+    const { as, joinTable, joinKey } = references.additional;
+    exprs.push(
+      `(SELECT COALESCE(json_agg(json_build_object('title', r.reference->>'title', 'permid', r.permid)), '[]'::json) ` +
+        `FROM ${ident(joinTable)} j JOIN refs r ON r.id = j.reference_id ` +
+        `WHERE j.${ident(joinKey)} = ${qualifier}.id ` +
+        `AND NOT COALESCE(r.removed, false)) AS ${ident(as)}`,
+    );
+  }
+
+  return exprs;
+}
+
+/**
+ * Shape a DB row into the public resource: the `permid` plus the JSONB payload,
+ * plus any resolved reference projections (merged in by their `as` key). Only
+ * keys named by the `references` config are merged, and only when present on the
+ * row — so a `null` primary is kept (removed → null) while a column absent from
+ * a test fake is skipped. Internal serial ids and version-chain columns are
+ * NEVER selected, so they cannot leak.
+ */
+function toResource(row, references) {
+  const result = { permid: row.permid, ...row.payload };
+  if (references) {
+    for (const cfg of Object.values(references)) {
+      if (cfg.as in row) result[cfg.as] = row[cfg.as];
+    }
+  }
+  return result;
 }
 
 /**
@@ -43,10 +96,14 @@ function toResource(row) {
  * @param {string} args.table        backing table name (from the descriptor)
  * @param {string} args.jsonbColumn  JSONB payload column (from the descriptor)
  */
-export function makeReadRepository({ pg, table, jsonbColumn }) {
+export function makeReadRepository({ pg, table, jsonbColumn, references }) {
   const from = ident(table);
   const payload = ident(jsonbColumn);
-  const select = `SELECT permid, ${payload} AS payload FROM ${from}`;
+  // Reference sub-selects correlate to the citing row via the quoted table name
+  // (the outer select is unaliased), keeping the head-select skeleton unchanged.
+  const projections = referenceProjections(references, from);
+  const projectionCols = projections.length ? `, ${projections.join(', ')}` : '';
+  const select = `SELECT permid, ${payload} AS payload${projectionCols} FROM ${from}`;
 
   return {
     /**
@@ -60,7 +117,7 @@ export function makeReadRepository({ pg, table, jsonbColumn }) {
         `${select} WHERE permid = $1 AND ${HEAD_FILTER} LIMIT 1`,
         [permid],
       );
-      return rows.length ? toResource(rows[0]) : null;
+      return rows.length ? toResource(rows[0], references) : null;
     },
 
     /**
@@ -68,7 +125,7 @@ export function makeReadRepository({ pg, table, jsonbColumn }) {
      */
     async list() {
       const { rows } = await pg.query(`${select} WHERE ${HEAD_FILTER} ORDER BY permid`);
-      return rows.map(toResource);
+      return rows.map((row) => toResource(row, references));
     },
   };
 }

@@ -129,3 +129,101 @@ export async function insertRef(pool, { permid, personId, reference = {}, remove
   );
   return rows[0];
 }
+
+/**
+ * Insert an interval row, returning its serial id. Collections require a
+ * (non-null) early/late age FK into `intervals`, so reference-enrichment fixtures
+ * seed one anchor interval to satisfy those columns.
+ */
+export async function insertInterval(
+  pool,
+  { permid, personId, name = 'Anchor', earlyAge = 100, lateAge = 90 },
+) {
+  const { rows } = await pool.query(
+    `INSERT INTO intervals (permid, authorizer_person_id, enterer_person_id, name, early_age, late_age)
+     VALUES ($1, $2, $2, $3, $4, $5)
+     RETURNING id`,
+    [permid, personId, name, earlyAge, lateAge],
+  );
+  return rows[0];
+}
+
+/**
+ * Insert an authority row, returning its serial id. `reference_id` is the
+ * single (primary) reference FK; pass `permid` to extend a lineage.
+ */
+export async function insertAuthority(
+  pool,
+  { permid, personId, authority = {}, referenceId, removed = null },
+) {
+  const { rows } = await pool.query(
+    `INSERT INTO authorities (permid, authorizer_person_id, enterer_person_id, authority, reference_id, removed)
+     VALUES ($1, $2, $2, $3::jsonb, $4, $5)
+     RETURNING id, permid`,
+    [permid, personId, JSON.stringify(authority), referenceId, removed],
+  );
+  return rows[0];
+}
+
+/**
+ * Insert a collection row, returning its serial id. `reference_id` is the
+ * primary reference; `earlyAgeId`/`lateAgeId` satisfy the non-null age FKs.
+ */
+export async function insertCollection(
+  pool,
+  { permid, personId, collection = {}, referenceId, earlyAgeId, lateAgeId, removed = null },
+) {
+  const { rows } = await pool.query(
+    `INSERT INTO collections
+       (permid, authorizer_person_id, enterer_person_id, collection, reference_id, early_age_id, late_age_id, removed)
+     VALUES ($1, $2, $2, $3::jsonb, $4, $5, $6, $7)
+     RETURNING id, permid`,
+    [permid, personId, JSON.stringify(collection), referenceId, earlyAgeId, lateAgeId, removed],
+  );
+  return rows[0];
+}
+
+/**
+ * Insert a schema row, returning its serial id. `reference_id` is the primary
+ * reference; pass `permid` to extend a lineage.
+ */
+export async function insertSchema(
+  pool,
+  { permid, personId, schema = {}, referenceId, removed = null },
+) {
+  const { rows } = await pool.query(
+    `INSERT INTO schemas (permid, authorizer_person_id, enterer_person_id, schema, reference_id, removed)
+     VALUES ($1, $2, $2, $3::jsonb, $4, $5)
+     RETURNING id, permid`,
+    [permid, personId, JSON.stringify(schema), referenceId, removed],
+  );
+  return rows[0];
+}
+
+/**
+ * Link an additional (secondary) reference to a collection via the
+ * `additional_collection_refs` join table.
+ */
+export async function insertAdditionalCollectionRef(pool, { collectionId, referenceId, personId }) {
+  const { rows } = await pool.query(
+    `INSERT INTO additional_collection_refs (authorizer_person_id, enterer_person_id, collection_id, reference_id)
+     VALUES ($1, $1, $2, $3)
+     RETURNING id`,
+    [personId, collectionId, referenceId],
+  );
+  return rows[0];
+}
+
+/**
+ * Link an additional (secondary) reference to a schema via the
+ * `additional_schema_refs` join table.
+ */
+export async function insertAdditionalSchemaRef(pool, { schemaId, referenceId, personId }) {
+  const { rows } = await pool.query(
+    `INSERT INTO additional_schema_refs (authorizer_person_id, enterer_person_id, schema_id, reference_id)
+     VALUES ($1, $1, $2, $3)
+     RETURNING id`,
+    [personId, schemaId, referenceId],
+  );
+  return rows[0];
+}
