@@ -127,6 +127,23 @@ export function makeReadRepository({ pg, table, jsonbColumn, references }) {
       const { rows } = await pg.query(`${select} WHERE ${HEAD_FILTER} ORDER BY permid`);
       return rows.map((row) => toResource(row, references));
     },
+
+    /**
+     * Current heads for a set of permids — the multi-entity read. Same head
+     * skeleton as `list()`, narrowed to the requested set via `permid = ANY($1)`.
+     * Returns only the permids that have a current, non-removed head; misses are
+     * simply absent (no error) — partial-success accounting is computed at the
+     * route boundary. Order is by permid, not request order.
+     *
+     * @param {string[]} permids
+     */
+    async readHeads(permids) {
+      const { rows } = await pg.query(
+        `${select} WHERE permid = ANY($1) AND ${HEAD_FILTER} ORDER BY permid`,
+        [permids],
+      );
+      return rows.map((row) => toResource(row, references));
+    },
   };
 }
 

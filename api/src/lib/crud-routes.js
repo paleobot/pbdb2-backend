@@ -1,4 +1,5 @@
 import { referencesBase, hydrateReferenceHrefs } from './reference-hydration.js';
+import { collectListFilters } from './list-filters.js';
 
 /**
  * Registers the uniform CRUD verb coverage shared by references, authorities,
@@ -29,8 +30,28 @@ export function registerCrudRoutes(fastify, { type, stub, repository, references
   const refsBase = referencesBase(fastify.prefix);
   const hydrate = (record) => hydrateReferenceHrefs(record, references, refsBase);
 
-  // List
-  fastify.get('/', async (_request, reply) => {
+  // List — and, when an `ids` filter is present, the multi-entity read. Both
+  // return the list envelope; only `/:permid` is singular.
+  fastify.get('/', async (request, reply) => {
+    const filters = collectListFilters(request.query, fastify.httpErrors);
+
+    if (filters.ids) {
+      // DB-backed: fetch the requested heads. Stub fallback: echo each id back
+      // as a stub record (so the shape matches the DB-backed path).
+      const found = repository
+        ? await repository.readHeads(filters.ids)
+        : filters.ids.map((permid) => stub(permid));
+      found.forEach(hydrate);
+
+      // Partial-success accounting is computed here, at the route boundary,
+      // against the requested set — the repository stays HTTP-agnostic.
+      const foundIds = new Set(found.map((record) => record.permid));
+      const missing = filters.ids.filter((id) => !foundIds.has(id));
+      return reply.sendList(found, {
+        meta: { type, requested: filters.ids.length, missing },
+      });
+    }
+
     const items = repository ? await repository.list() : [stub()];
     items.forEach(hydrate);
     return reply.sendList(items, { meta: { type } });
