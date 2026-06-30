@@ -28,6 +28,19 @@ function ident(name) {
 }
 
 /**
+ * Quote a SQL string literal. Used for a JSONB key in a `->>'key'` path, where
+ * the key is a string literal (not an identifier). The key originates only from
+ * the trusted descriptor's filter config (never request input); escaping keeps
+ * it exact and injection-proof regardless. Filter *values* are request input and
+ * are always bound as parameters, never passed here.
+ *
+ * @param {string} value
+ */
+function literal(value) {
+  return `'${String(value).replace(/'/g, "''")}'`;
+}
+
+/**
  * Build the SELECT-list expressions that resolve a resource's references into
  * embedded `{ title, permid }` objects, from the descriptor's `references`
  * config. The persistence layer stays HTTP-agnostic: `href` is NOT built here —
@@ -96,7 +109,7 @@ function toResource(row, references) {
  * @param {string} args.table        backing table name (from the descriptor)
  * @param {string} args.jsonbColumn  JSONB payload column (from the descriptor)
  */
-export function makeReadRepository({ pg, table, jsonbColumn, references }) {
+export function makeReadRepository({ pg, table, jsonbColumn, references, filters = {} }) {
   const from = ident(table);
   const payload = ident(jsonbColumn);
   // Reference sub-selects correlate to the citing row via the quoted table name
@@ -106,6 +119,10 @@ export function makeReadRepository({ pg, table, jsonbColumn, references }) {
   const select = `SELECT permid, ${payload} AS payload${projectionCols} FROM ${from}`;
 
   return {
+    // Declared field filters, exposed so the route seam knows which query params
+    // this resource accepts and the head read can translate them to predicates.
+    filters,
+
     /**
      * Current head for a `permid`, or null if there is no current, non-removed
      * version (missing lineage, superseded head, or soft-removed head).
@@ -121,28 +138,48 @@ export function makeReadRepository({ pg, table, jsonbColumn, references }) {
     },
 
     /**
-     * Current heads of every non-removed lineage in the table.
+     * Current heads, narrowed by optional criteria that compose into a single
+     * `WHERE` (the `translate` stage). Contributors:
+     *   - `HEAD_FILTER` — always
+     *   - `ids`    → `permid = ANY($n)`               (the multi-entity read)
+     *   - `fields` → `payload->>'<jsonPath>' = $n`    (one per declared filter)
+     * A bare call (no criteria) lists every current head. Filter *values* are
+     * bound as parameters; only declared filters translate (others are ignored).
+     * Order is by permid, not request order.
+     *
+     * @param {{ ids?: string[], fields?: Record<string, string> }} [criteria]
      */
-    async list() {
-      const { rows } = await pg.query(`${select} WHERE ${HEAD_FILTER} ORDER BY permid`);
+    async readHeads({ ids, fields } = {}) {
+      const predicates = [HEAD_FILTER];
+      const values = [];
+
+      if (ids) {
+        values.push(ids);
+        predicates.push(`permid = ANY($${values.length})`);
+      }
+
+      if (fields) {
+        for (const [param, value] of Object.entries(fields)) {
+          const def = filters[param];
+          if (!def) continue; // defensive: only declared filters reach SQL
+          values.push(value);
+          predicates.push(`${payload}->>${literal(def.jsonPath)} = $${values.length}`);
+        }
+      }
+
+      const { rows } = await pg.query(
+        `${select} WHERE ${predicates.join(' AND ')} ORDER BY permid`,
+        values,
+      );
       return rows.map((row) => toResource(row, references));
     },
 
     /**
-     * Current heads for a set of permids — the multi-entity read. Same head
-     * skeleton as `list()`, narrowed to the requested set via `permid = ANY($1)`.
-     * Returns only the permids that have a current, non-removed head; misses are
-     * simply absent (no error) — partial-success accounting is computed at the
-     * route boundary. Order is by permid, not request order.
-     *
-     * @param {string[]} permids
+     * Current heads of every non-removed lineage — a bare {@link readHeads}.
+     * Retained as a named convenience for the unfiltered list.
      */
-    async readHeads(permids) {
-      const { rows } = await pg.query(
-        `${select} WHERE permid = ANY($1) AND ${HEAD_FILTER} ORDER BY permid`,
-        [permids],
-      );
-      return rows.map((row) => toResource(row, references));
+    async list() {
+      return this.readHeads();
     },
   };
 }

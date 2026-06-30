@@ -19,8 +19,9 @@ import { collectListFilters } from './list-filters.js';
  * @param {object} opts
  * @param {string} opts.type   resource type label used in meta.type
  * @param {(permid?: string) => object} opts.stub  builds a stub record
- * @param {{ readHead: (permid: string) => Promise<object|null>, list: () => Promise<object[]> }} [opts.repository]
- *   read repository; when omitted, reads use `stub`
+ * @param {{ readHead: (permid: string) => Promise<object|null>, readHeads: (criteria?: object) => Promise<object[]>, filters?: object }} [opts.repository]
+ *   read repository; when omitted, reads use `stub`. `repository.filters` (when
+ *   present) declares the field-filter query params this resource accepts.
  * @param {import('./resource-tables.js').ReferenceConfig} [opts.references]
  *   reference enrichment config; when present, resolved references get an `href`
  */
@@ -30,29 +31,38 @@ export function registerCrudRoutes(fastify, { type, stub, repository, references
   const refsBase = referencesBase(fastify.prefix);
   const hydrate = (record) => hydrateReferenceHrefs(record, references, refsBase);
 
-  // List — and, when an `ids` filter is present, the multi-entity read. Both
-  // return the list envelope; only `/:permid` is singular.
+  // List — narrowed by any list filters: the multi-entity `ids` read and/or
+  // per-entity field filters, which compose into one query. All return the list
+  // envelope; only `/:permid` is singular. Field-filter params are recognized
+  // only when the repository declares them (so stub resources accept none).
   fastify.get('/', async (request, reply) => {
-    const filters = collectListFilters(request.query, fastify.httpErrors);
+    const filters = collectListFilters(request.query, fastify.httpErrors, repository?.filters);
 
     if (filters.ids) {
-      // DB-backed: fetch the requested heads. Stub fallback: echo each id back
-      // as a stub record (so the shape matches the DB-backed path).
+      // DB-backed: fetch the requested heads, narrowed by any field filters.
+      // Stub fallback: echo each id back as a stub record (field filters can't
+      // reach here — stub resources declare none — so the shape stays uniform).
       const found = repository
-        ? await repository.readHeads(filters.ids)
+        ? await repository.readHeads({ ids: filters.ids, fields: filters.fields })
         : filters.ids.map((permid) => stub(permid));
       found.forEach(hydrate);
 
-      // Partial-success accounting is computed here, at the route boundary,
-      // against the requested set — the repository stays HTTP-agnostic.
-      const foundIds = new Set(found.map((record) => record.permid));
-      const missing = filters.ids.filter((id) => !foundIds.has(id));
-      return reply.sendList(found, {
-        meta: { type, requested: filters.ids.length, missing },
-      });
+      // `requested`/`missing` is the pure multi-get's partial-success signal —
+      // it answers "which of these ids have no current head?", which is only
+      // well-defined when the id set is the sole constraint. A field filter turns
+      // this into a filtered query, so the accounting is suppressed: `missing`
+      // could not distinguish "no head" from "filtered out" (see design.md).
+      if (!filters.fields) {
+        const foundIds = new Set(found.map((record) => record.permid));
+        const missing = filters.ids.filter((id) => !foundIds.has(id));
+        return reply.sendList(found, {
+          meta: { type, requested: filters.ids.length, missing },
+        });
+      }
+      return reply.sendList(found, { meta: { type } });
     }
 
-    const items = repository ? await repository.list() : [stub()];
+    const items = repository ? await repository.readHeads({ fields: filters.fields }) : [stub()];
     items.forEach(hydrate);
     return reply.sendList(items, { meta: { type } });
   });

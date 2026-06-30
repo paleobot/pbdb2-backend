@@ -32,15 +32,31 @@
  * @property {PrimaryReference}      [primary]     single-FK reference
  * @property {AdditionalReferences}  [additional]  join-table references
  *
+ * Field filters are the list-endpoint query params that narrow by JSONB
+ * content (the `define` stage of the filter pipeline). They are declared as
+ * plain data so the source is swappable: hand-authored now, derivable from the
+ * `pbdb2-dev` JSON Schemas later, without changing the seam or repository that
+ * consume them. Each entry maps a public query-param name (snake_case) to the
+ * JSONB key it matches (camelCase) and the predicate kind.
+ *
+ * @typedef {object} FieldFilter
+ * @property {string} jsonPath  JSONB key within the payload to match (e.g. 'publicationType')
+ * @property {'eq'}   op        predicate kind — only equality today
+ *
  * @typedef {object} ResourceDescriptor
  * @property {string}          table        backing table name
  * @property {string}          jsonbColumn  JSONB payload column on that table
  * @property {ReferenceConfig} [references] optional reference enrichment config
+ * @property {Record<string, FieldFilter>} [filters] declared field filters (param → match spec)
  */
 
 /** @type {Record<string, ResourceDescriptor>} */
 export const RESOURCE_DESCRIPTORS = {
-  references: { table: 'refs', jsonbColumn: 'reference' },
+  references: {
+    table: 'refs',
+    jsonbColumn: 'reference',
+    filters: { publication_type: { jsonPath: 'publicationType', op: 'eq' } },
+  },
   authorities: {
     table: 'authorities',
     jsonbColumn: 'authority',
