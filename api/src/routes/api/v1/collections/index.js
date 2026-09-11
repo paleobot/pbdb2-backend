@@ -6,7 +6,7 @@ export default async function collections(fastify) {
   registerCrudRoutes(fastify, {
     type: 'collection',
     repository: repositoryForResource(fastify, 'collections'),
-    references: descriptorFor('collections').references,
+    links: descriptorFor('collections').links,
     stub: (permid = 'col-00000000') => ({
       permid,
       name: 'Stub collection',

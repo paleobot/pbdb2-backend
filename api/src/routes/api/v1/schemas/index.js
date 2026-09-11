@@ -15,7 +15,7 @@
 import { repositoryForResource } from '../../../../lib/repository.js';
 import { readSchemaTree } from '../../../../lib/schema-tree.js';
 import { descriptorFor } from '../../../../lib/resource-tables.js';
-import { referencesBase, hydrateReferenceHrefs } from '../../../../lib/reference-hydration.js';
+import { hydrateLinkHrefs } from '../../../../lib/link-hydration.js';
 
 const stubSchema = (permid = 'sch-00000000') => ({
   permid,
@@ -40,9 +40,8 @@ const stubSchemaTree = (permid = 'sch-00000000') => ({
 export default async function schemas(fastify) {
   const write = { preHandler: fastify.authenticate };
   const repository = repositoryForResource(fastify, 'schemas');
-  const references = descriptorFor('schemas').references;
-  const refsBase = referencesBase(fastify.prefix);
-  const hydrate = (record) => hydrateReferenceHrefs(record, references, refsBase);
+  const links = descriptorFor('schemas').links;
+  const hydrate = (record) => hydrateLinkHrefs(record, links, fastify.prefix);
 
   // List — flat heads via the generic repository (the tree shape is per-read)
   fastify.get('/', async (_request, reply) => {

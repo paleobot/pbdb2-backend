@@ -6,7 +6,7 @@ export default async function authorities(fastify) {
   registerCrudRoutes(fastify, {
     type: 'authority',
     repository: repositoryForResource(fastify, 'authorities'),
-    references: descriptorFor('authorities').references,
+    links: descriptorFor('authorities').links,
     stub: (permid = 'aut-00000000') => ({
       permid,
       taxonName: 'Stub taxon',

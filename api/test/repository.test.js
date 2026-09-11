@@ -163,16 +163,18 @@ test('specimens read stays stubbed and never touches the database', async (t) =>
   assert.equal(pg.calls.length, 0, 'no query should have run for specimens');
 });
 
-const collectionRefs = {
-  primary: { as: 'primaryReference', via: 'reference_id' },
-  additional: {
-    as: 'additionalReferences',
+const collectionLinks = {
+  primaryReference: { target: 'references', on: 'id', via: 'reference_id' },
+  additionalReferences: {
+    target: 'references',
+    on: 'id',
+    via: 'reference_id',
     joinTable: 'additional_collection_refs',
     joinKey: 'collection_id',
   },
 };
 
-test('repository builds reference projections and merges them by their `as` key', async () => {
+test('repository builds link projections and merges them by their output field name', async () => {
   const pg = fakePg(() => ({
     rows: [
       {
@@ -187,7 +189,7 @@ test('repository builds reference projections and merges them by their `as` key'
     pg,
     table: 'collections',
     jsonbColumn: 'collection',
-    references: collectionRefs,
+    links: collectionLinks,
   });
 
   const rec = await repo.readHead('col-1');
@@ -206,7 +208,7 @@ test('repository builds reference projections and merges them by their `as` key'
   assert.match(q, /NOT COALESCE\(r\.removed, false\)/);
 });
 
-test('repository without a references config emits no projections and merges nothing extra', async () => {
+test('repository without a links config emits no projections and merges nothing extra', async () => {
   const pg = fakePg(() => ({ rows: [{ permid: 'ref-1', payload: { title: 'T' } }] }));
   const repo = makeReadRepository({ pg, table: 'refs', jsonbColumn: 'reference' });
 

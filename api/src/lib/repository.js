@@ -13,7 +13,7 @@
  * crud-routes.js. `schemas` is the exception (see schema-tree.js).
  */
 
-import { descriptorFor } from './resource-tables.js';
+import { descriptorFor, targetFor } from './resource-tables.js';
 
 const HEAD_FILTER = 'succeeded_by_id IS NULL AND NOT COALESCE(removed, false)';
 
@@ -41,44 +41,74 @@ function literal(value) {
 }
 
 /**
- * Build the SELECT-list expressions that resolve a resource's references into
- * embedded `{ title, permid }` objects, from the descriptor's `references`
- * config. The persistence layer stays HTTP-agnostic: `href` is NOT built here —
- * it is hydrated at the route boundary (see reference-hydration.js).
+ * A name that was a SQL literal before link targets became data: the target's
+ * table and payload column, and a join table's FK column. They are interpolated
+ * unquoted so the generated SQL is unchanged from the hand-written form they
+ * replace; since they now come from the descriptor/registry rather than the
+ * template, the shape check is what keeps that safe. Names that were already
+ * interpolated (`via` on the citing table, `joinTable`, `joinKey`, the output
+ * field) keep their {@link ident} quoting.
  *
- * Soft-removed references are suppressed in SQL (`NOT COALESCE(r.removed,
- * false)`): a removed primary yields `NULL`, removed additional rows drop out of
- * the aggregate — so the array count is always correct and no dangling link can
- * form. `title` is read from the refs JSONB; `permid` is the lineage id. Because
- * the backend swing trigger keeps the FK pointed at the current head, reading
- * straight off the referenced row yields the current title + stable permid.
+ * @param {string} name
+ */
+function bareIdent(name) {
+  if (!/^[a-z_][a-z0-9_]*$/.test(name)) {
+    throw new Error(`Unsafe SQL identifier in link config: ${name}`);
+  }
+  return name;
+}
+
+/**
+ * Build the SELECT-list expressions that resolve a resource's declared links
+ * into embedded `{ <label>, permid }` objects, from the descriptor's `links`
+ * config. The target route group supplies the table, payload column and label
+ * key (see LINK_TARGETS); the declaration supplies the FK column and whether it
+ * holds the target's serial id or its `permid`. The persistence layer stays
+ * HTTP-agnostic: `href` is NOT built here — it is hydrated at the route
+ * boundary (see link-hydration.js).
  *
- * @param {import('./resource-tables.js').ReferenceConfig} [references]
+ * Soft-removed targets are suppressed in SQL (`NOT COALESCE(r.removed, false)`):
+ * a removed single-valued target yields `NULL`, removed join-table rows drop out
+ * of the aggregate — so the array count is always correct and no dangling link
+ * can form. The label is read from the target's JSONB; `permid` is the lineage
+ * id. Because the backend swing trigger keeps id-keyed FKs pointed at the
+ * current head, reading straight off the target row yields the current label +
+ * stable permid.
+ *
+ * @param {Record<string, import('./resource-tables.js').LinkDeclaration>} [links]
  * @param {string} qualifier  SQL qualifier for the citing row (a quoted table
  *   name for the generic select, or a CTE alias like `ts` for the schema tree)
- * @returns {string[]} aliased SELECT-list expressions (empty when no references)
+ * @returns {string[]} aliased SELECT-list expressions (empty when no links)
  */
-export function referenceProjections(references, qualifier) {
-  if (!references) return [];
+export function linkProjections(links, qualifier) {
+  if (!links) return [];
   const exprs = [];
 
-  if (references.primary) {
-    const { as, via } = references.primary;
-    exprs.push(
-      `(SELECT json_build_object('title', r.reference->>'title', 'permid', r.permid) ` +
-        `FROM refs r WHERE r.id = ${qualifier}.${ident(via)} ` +
-        `AND NOT COALESCE(r.removed, false)) AS ${ident(as)}`,
-    );
-  }
+  for (const [as, link] of Object.entries(links)) {
+    const target = targetFor(link.target);
+    if (!target) throw new Error(`Unknown link target: ${link.target}`);
 
-  if (references.additional) {
-    const { as, joinTable, joinKey } = references.additional;
-    exprs.push(
-      `(SELECT COALESCE(json_agg(json_build_object('title', r.reference->>'title', 'permid', r.permid)), '[]'::json) ` +
-        `FROM ${ident(joinTable)} j JOIN refs r ON r.id = j.reference_id ` +
-        `WHERE j.${ident(joinKey)} = ${qualifier}.id ` +
-        `AND NOT COALESCE(r.removed, false)) AS ${ident(as)}`,
-    );
+    const from = bareIdent(target.table);
+    const label = literal(target.label);
+    const object = `json_build_object(${label}, r.${bareIdent(target.payloadColumn)}->>${label}, 'permid', r.permid)`;
+    // An id-keyed link matches the target's internal id; a permid-keyed one
+    // matches its permid directly, needing no id→permid translation.
+    const matchOn = link.on === 'permid' ? 'permid' : 'id';
+
+    if (link.joinTable) {
+      exprs.push(
+        `(SELECT COALESCE(json_agg(${object}), '[]'::json) ` +
+          `FROM ${ident(link.joinTable)} j JOIN ${from} r ON r.${matchOn} = j.${bareIdent(link.via)} ` +
+          `WHERE j.${ident(link.joinKey)} = ${qualifier}.id ` +
+          `AND NOT COALESCE(r.removed, false)) AS ${ident(as)}`,
+      );
+    } else {
+      exprs.push(
+        `(SELECT ${object} ` +
+          `FROM ${from} r WHERE r.${matchOn} = ${qualifier}.${ident(link.via)} ` +
+          `AND NOT COALESCE(r.removed, false)) AS ${ident(as)}`,
+      );
+    }
   }
 
   return exprs;
@@ -86,17 +116,17 @@ export function referenceProjections(references, qualifier) {
 
 /**
  * Shape a DB row into the public resource: the `permid` plus the JSONB payload,
- * plus any resolved reference projections (merged in by their `as` key). Only
- * keys named by the `references` config are merged, and only when present on the
- * row — so a `null` primary is kept (removed → null) while a column absent from
- * a test fake is skipped. Internal serial ids and version-chain columns are
- * NEVER selected, so they cannot leak.
+ * plus any resolved link projections (merged in under their output field name).
+ * Only fields named by the `links` config are merged, and only when present on
+ * the row — so a `null` single-valued link is kept (removed → null) while a
+ * column absent from a test fake is skipped. Internal serial ids and
+ * version-chain columns are NEVER selected, so they cannot leak.
  */
-function toResource(row, references) {
+function toResource(row, links) {
   const result = { permid: row.permid, ...row.payload };
-  if (references) {
-    for (const cfg of Object.values(references)) {
-      if (cfg.as in row) result[cfg.as] = row[cfg.as];
+  if (links) {
+    for (const as of Object.keys(links)) {
+      if (as in row) result[as] = row[as];
     }
   }
   return result;
@@ -109,12 +139,12 @@ function toResource(row, references) {
  * @param {string} args.table        backing table name (from the descriptor)
  * @param {string} args.jsonbColumn  JSONB payload column (from the descriptor)
  */
-export function makeReadRepository({ pg, table, jsonbColumn, references, filters = {} }) {
+export function makeReadRepository({ pg, table, jsonbColumn, links, filters = {} }) {
   const from = ident(table);
   const payload = ident(jsonbColumn);
-  // Reference sub-selects correlate to the citing row via the quoted table name
+  // Link sub-selects correlate to the citing row via the quoted table name
   // (the outer select is unaliased), keeping the head-select skeleton unchanged.
-  const projections = referenceProjections(references, from);
+  const projections = linkProjections(links, from);
   const projectionCols = projections.length ? `, ${projections.join(', ')}` : '';
   const select = `SELECT permid, ${payload} AS payload${projectionCols} FROM ${from}`;
 
@@ -134,7 +164,7 @@ export function makeReadRepository({ pg, table, jsonbColumn, references, filters
         `${select} WHERE permid = $1 AND ${HEAD_FILTER} LIMIT 1`,
         [permid],
       );
-      return rows.length ? toResource(rows[0], references) : null;
+      return rows.length ? toResource(rows[0], links) : null;
     },
 
     /**
@@ -171,7 +201,7 @@ export function makeReadRepository({ pg, table, jsonbColumn, references, filters
         `${select} WHERE ${predicates.join(' AND ')} ORDER BY permid`,
         values,
       );
-      return rows.map((row) => toResource(row, references));
+      return rows.map((row) => toResource(row, links));
     },
 
     /**

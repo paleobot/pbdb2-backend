@@ -1,4 +1,4 @@
-import { referencesBase, hydrateReferenceHrefs } from './reference-hydration.js';
+import { hydrateLinkHrefs } from './link-hydration.js';
 import { collectListFilters } from './list-filters.js';
 
 /**
@@ -22,14 +22,14 @@ import { collectListFilters } from './list-filters.js';
  * @param {{ readHead: (permid: string) => Promise<object|null>, readHeads: (criteria?: object) => Promise<object[]>, filters?: object }} [opts.repository]
  *   read repository; when omitted, reads use `stub`. `repository.filters` (when
  *   present) declares the field-filter query params this resource accepts.
- * @param {import('./resource-tables.js').ReferenceConfig} [opts.references]
- *   reference enrichment config; when present, resolved references get an `href`
+ * @param {Record<string, import('./resource-tables.js').LinkDeclaration>} [opts.links]
+ *   link enrichment config; when present, resolved links get an `href`
  */
-export function registerCrudRoutes(fastify, { type, stub, repository, references }) {
+export function registerCrudRoutes(fastify, { type, stub, repository, links }) {
   const write = { preHandler: fastify.authenticate };
-  // Derived once from this group's mounted prefix, not hard-coded.
-  const refsBase = referencesBase(fastify.prefix);
-  const hydrate = (record) => hydrateReferenceHrefs(record, references, refsBase);
+  // Each link's href base is derived from this group's mounted prefix and the
+  // link's own target group, not hard-coded.
+  const hydrate = (record) => hydrateLinkHrefs(record, links, fastify.prefix);
 
   // List — narrowed by any list filters: the multi-entity `ids` read and/or
   // per-entity field filters, which compose into one query. All return the list

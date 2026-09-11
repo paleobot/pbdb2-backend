@@ -9,21 +9,21 @@
  *    hierarchy in JS, then stripped — never exposed.
  *  - Every level filters to the current, non-removed version
  *    (`succeeded_by_id IS NULL AND NOT COALESCE(removed, false)`).
- *  - Reference enrichment (primaryReference / additionalReferences) is resolved
- *    here too, reusing the shared `referenceProjections` helper so the schema
- *    single-read can't drift from the generic repository engine. The schema
- *    head's `reference_id` and its `additional_schema_refs` join rows resolve to
+ *  - Link enrichment (primaryReference / additionalReferences) is resolved here
+ *    too, reusing the shared `linkProjections` helper so the schema single-read
+ *    can't drift from the generic repository engine. The schema head's
+ *    `reference_id` and its `additional_schema_refs` join rows resolve to
  *    embedded `{ title, permid }` objects; `href` is hydrated at the route
- *    boundary, and soft-removed references are suppressed in SQL.
+ *    boundary, and soft-removed targets are suppressed in SQL.
  */
 
-import { referenceProjections } from './repository.js';
+import { linkProjections } from './repository.js';
 import { descriptorFor } from './resource-tables.js';
 
-// Correlate the reference sub-selects to the schema head CTE (alias `ts`).
-const SCHEMA_REF_PROJECTIONS = referenceProjections(descriptorFor('schemas').references, 'ts');
-const SCHEMA_REF_COLUMNS = SCHEMA_REF_PROJECTIONS.length
-  ? `,\n  ${SCHEMA_REF_PROJECTIONS.join(',\n  ')}`
+// Correlate the link sub-selects to the schema head CTE (alias `ts`).
+const SCHEMA_LINK_PROJECTIONS = linkProjections(descriptorFor('schemas').links, 'ts');
+const SCHEMA_LINK_COLUMNS = SCHEMA_LINK_PROJECTIONS.length
+  ? `,\n  ${SCHEMA_LINK_PROJECTIONS.join(',\n  ')}`
   : '';
 
 const SCHEMA_TREE_QUERY = `
@@ -67,7 +67,7 @@ state_tree AS (
 )
 SELECT
   ts.permid AS permid,
-  ts.payload AS payload${SCHEMA_REF_COLUMNS},
+  ts.payload AS payload${SCHEMA_LINK_COLUMNS},
   (
     SELECT COALESCE(json_agg(json_build_object(
       'id',                ct.id,
