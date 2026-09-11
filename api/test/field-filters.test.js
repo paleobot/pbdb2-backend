@@ -123,18 +123,43 @@ test('empty publication_type value is a 400', async (t) => {
   assert.equal(res.json().error.statusCode, 400);
 });
 
-test('unknown query param is ignored — no filtering, no 400', async (t) => {
+test('unknown query param is rejected with a 400 naming it', async (t) => {
+  // This reverses the previous leniency, under which the param was ignored and
+  // the request returned an unfiltered 200 — a response indistinguishable from
+  // "everything matched". See the add-taxa-reads design.md.
   const pg = fakeRefsPg(REFS);
   const app = build({ pg });
   t.after(() => app.close());
 
   const res = await app.inject({ method: 'GET', url: '/api/v1/references?colour=blue' });
-  assert.equal(res.statusCode, 200, 'an unrecognized param is not rejected');
+  assert.equal(res.statusCode, 400, 'an unrecognized param is rejected');
+  assert.match(res.json().error.message, /colour/, 'the error names the offending param');
+  // The request never reached the database.
+  assert.equal(pg.calls.length, 0, 'no query was issued for a rejected request');
+});
 
-  const body = res.json();
-  assert.equal(body.data.length, 3, 'the unknown param did not filter the result');
-  // No field predicate reached SQL.
-  assert.ok(!pg.calls.some((c) => /->>'/.test(c.text)), 'no JSONB field predicate was built');
+test('an unknown param is rejected on a single read too, not just a list', async (t) => {
+  // Strictness must not differ by endpoint shape.
+  const pg = fakeRefsPg(REFS);
+  const app = build({ pg });
+  t.after(() => app.close());
+
+  const res = await app.inject({ method: 'GET', url: '/api/v1/references/ref-1?colour=blue' });
+  assert.equal(res.statusCode, 400);
+  assert.match(res.json().error.message, /colour/);
+});
+
+test('a declared filter is still accepted after the strictness change', async (t) => {
+  const pg = fakeRefsPg(REFS);
+  const app = build({ pg });
+  t.after(() => app.close());
+
+  const res = await app.inject({
+    method: 'GET',
+    url: '/api/v1/references?publication_type=journal%20article',
+  });
+  assert.equal(res.statusCode, 200);
+  assert.ok(pg.calls.some((c) => /->>'/.test(c.text)), 'the declared filter reached SQL');
 });
 
 test('regression: bare list and ids-only multi-get still behave through the unified read', async (t) => {

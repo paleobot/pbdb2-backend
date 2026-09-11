@@ -29,7 +29,7 @@ include `self` plus one entry per immediate child path.
 - **WHEN** a client requests `/api/v1`
 - **THEN** the system responds with HTTP 200
 - **AND** `links` includes an entry for each resource route group (references,
-  authorities, collections, specimens, schemas)
+  authorities, collections, specimens, schemas, taxa)
 
 ### Requirement: Discovery links derived from the route tree
 

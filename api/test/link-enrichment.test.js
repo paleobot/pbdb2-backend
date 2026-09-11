@@ -91,15 +91,11 @@ test('a link to a non-references target resolves via that target and hydrates it
   });
 });
 
-test('a permid-keyed link matches on permid and yields the same object shape', async (t) => {
-  // A self-referential target has to be registered to be linkable; register it
-  // for this test only rather than shipping a taxa entry ahead of the resource.
-  const targets = (await import('../src/lib/resource-tables.js')).LINK_TARGETS;
-  targets.taxa = { table: 'taxa', payloadColumn: 'taxon', label: 'name' };
-  t.after(() => {
-    delete targets.taxa;
-  });
-
+test('a permid-keyed link matches on permid and yields the same object shape', async () => {
+  // `taxa` is a real registered target now, so no fixture is needed. It was
+  // previously registered test-locally as `{ payloadColumn: 'taxon' }` — a
+  // column that does not exist — which is what hid the plain-column gap until
+  // the resource actually arrived.
   const pg = fakePg(() => ({
     rows: [{ permid: 'txn-1', payload: {}, accepted: { name: 'Calymene', permid: 'txn-9' } }],
   }));
@@ -121,6 +117,29 @@ test('a permid-keyed link matches on permid and yields the same object shape', a
     permid: 'txn-9',
     href: '/api/v1/taxa/txn-9',
   });
+});
+
+test('a plain-column target reads its label from the column, not a payload', () => {
+  const [expr] = linkProjections({ accepted: conceptLink }, '"taxa"');
+
+  // The label comes straight off the column; there is no `->>` dereference,
+  // because `taxa` has no JSONB payload column to dereference.
+  assert.match(expr, /json_build_object\('name', r\.name, 'permid', r\.permid\) FROM taxa r/);
+  assert.doesNotMatch(expr, /->>/);
+  assert.doesNotMatch(expr, /taxon/, 'no payload column is referenced');
+});
+
+test('a target declaring no label source throws rather than emitting bad SQL', async (t) => {
+  const targets = (await import('../src/lib/resource-tables.js')).LINK_TARGETS;
+  targets.broken = { table: 'broken' };
+  t.after(() => {
+    delete targets.broken;
+  });
+
+  assert.throws(
+    () => linkProjections({ x: { target: 'broken', on: 'id', via: 'x_id' } }, '"taxa"'),
+    /declares no label source/,
+  );
 });
 
 test('links to two different groups each hydrate against their own group base', () => {
@@ -206,6 +225,8 @@ test('the link-target registry keys are route group names', () => {
     payloadColumn: 'reference',
     label: 'title',
   });
+  // The plain-column form declares `labelColumn` and no payload column at all.
+  assert.deepEqual(targetFor('taxa'), { table: 'taxa', labelColumn: 'name' });
   assert.equal(targetFor('nope'), undefined);
   assert.throws(
     () => linkProjections({ x: { target: 'nope', on: 'id', via: 'x_id' } }, '"taxa"'),

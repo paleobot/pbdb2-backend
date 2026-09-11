@@ -270,6 +270,46 @@ makes it precisely the 457 kB case — but the client has explicitly asked, and 
 shape is identical to a page. Stated rather than inherited, because `ids` already
 carries bespoke rules (it rejects `limit`/`cursor`).
 
+### `meta.removed` and `meta.version` stay on taxa responses
+
+`sendData` injects `removed: false` and `version: { supersedes: null,
+supersededBy: null }` into every single-resource response. Taxa has no version
+chain, and its `removed` column is dead (see above), so the question arose during
+implementation whether these should be omitted for a non-versioned resource.
+
+_Decision:_ keep them, unchanged and uniform.
+
+They are not inaccurate. A taxon genuinely has no predecessor and no successor,
+and genuinely is not removed; the fields are trivially true rather than false.
+The earlier framing of them as "asserting something untrue" was wrong.
+
+The deciding argument is that uniformity here is operational, not aesthetic. A
+generic client written as `if (res.meta.version.supersededBy) { … }` works
+correctly against every resource, and taxa's answer — no successor — is the
+operationally correct one. Omitting the fields would make that same client throw
+on taxa (`meta.version` absent, so the dereference raises) and force it to know
+which resources are versioned. Omission does not make clients safer; it makes
+them special-case.
+
+It is also what `api-foundation` already requires: "The envelope SHALL reserve
+`meta.version` and `links` relationship entries even when their values are
+placeholders." Keeping them needs no amendment; omitting them would need one.
+
+_Reversibility, since this is the direction that is harder to undo:_ removing the
+fields later is breaking for any client dereferencing `meta.version.*` on a
+taxon — a throw, not an `undefined`. There are no clients yet, and a breaking
+envelope revision has a designated home in a future `/api/v2`, so the exposure is
+a version bump rather than a trap. Recorded because "we thought about this and
+chose uniformity" is not recoverable from the code, which simply looks like
+nothing happened.
+
+_Note the contrast with the query-param decision above_, where the asymmetry ran
+the other way: there, leniency silently produced wrong-looking-right answers and
+tightening later would break working clients, so strictness belonged at v1. Here
+the extra fields cost nothing and removing them would break correct clients. The
+two decisions point opposite ways for the same reason — what the client can
+safely assume.
+
 ### Unrecognized query parameters become a 400, on every resource
 
 `resource-routes` currently requires lenient handling: "an unrecognized query

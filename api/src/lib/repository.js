@@ -61,21 +61,59 @@ function bareIdent(name) {
 }
 
 /**
+ * Build the embedded `{ <label>, permid }` object for one link target, reading
+ * the label from whichever source the target declares: a key inside a JSONB
+ * payload column, or a plain column on the table. The emitted shape is
+ * identical either way, so a citing resource cannot tell which kind of target
+ * it linked to.
+ *
+ * A target declaring neither form throws here — a named error at projection
+ * time, rather than SQL that fails against a column that does not exist.
+ *
+ * @param {import('./resource-tables.js').LinkTarget} target
+ * @param {string} group  the target's route group name, for the error message
+ */
+function labelObject(target, group) {
+  if (target.labelColumn) {
+    // Plain-column label (a derived table with no payload): the column name is
+    // also the emitted field name, mirroring how `label` doubles up below.
+    const name = literal(target.labelColumn);
+    return `json_build_object(${name}, r.${bareIdent(target.labelColumn)}, 'permid', r.permid)`;
+  }
+
+  if (target.payloadColumn && target.label) {
+    const label = literal(target.label);
+    return `json_build_object(${label}, r.${bareIdent(target.payloadColumn)}->>${label}, 'permid', r.permid)`;
+  }
+
+  throw new Error(
+    `Link target '${group}' declares no label source: expected either ` +
+      `\`payloadColumn\` + \`label\` (a JSONB key) or \`labelColumn\` (a plain column)`,
+  );
+}
+
+/**
  * Build the SELECT-list expressions that resolve a resource's declared links
  * into embedded `{ <label>, permid }` objects, from the descriptor's `links`
- * config. The target route group supplies the table, payload column and label
- * key (see LINK_TARGETS); the declaration supplies the FK column and whether it
- * holds the target's serial id or its `permid`. The persistence layer stays
+ * config. The target route group supplies the table and the label source (see
+ * LINK_TARGETS); the declaration supplies the FK column and whether it holds
+ * the target's serial id or its `permid`. The persistence layer stays
  * HTTP-agnostic: `href` is NOT built here — it is hydrated at the route
  * boundary (see link-hydration.js).
  *
  * Soft-removed targets are suppressed in SQL (`NOT COALESCE(r.removed, false)`):
  * a removed single-valued target yields `NULL`, removed join-table rows drop out
  * of the aggregate — so the array count is always correct and no dangling link
- * can form. The label is read from the target's JSONB; `permid` is the lineage
- * id. Because the backend swing trigger keeps id-keyed FKs pointed at the
- * current head, reading straight off the target row yields the current label +
- * stable permid.
+ * can form. The label is read from the target's declared source (JSONB key or
+ * plain column); `permid` is the lineage id. Because the backend swing trigger
+ * keeps id-keyed FKs pointed at the current head, reading straight off the
+ * target row yields the current label + stable permid.
+ *
+ * The suppression predicate is applied uniformly, including to targets whose
+ * `removed` column is never written (`taxa`). There it is a harmless no-op —
+ * the column exists, so no 42703, and it is always NULL — and keeping it
+ * uniform means the shared machinery has one rule rather than a per-target
+ * exemption. Taxa's OWN read applies no such predicate; see taxa-repository.js.
  *
  * @param {Record<string, import('./resource-tables.js').LinkDeclaration>} [links]
  * @param {string} qualifier  SQL qualifier for the citing row (a quoted table
@@ -91,8 +129,7 @@ export function linkProjections(links, qualifier) {
     if (!target) throw new Error(`Unknown link target: ${link.target}`);
 
     const from = bareIdent(target.table);
-    const label = literal(target.label);
-    const object = `json_build_object(${label}, r.${bareIdent(target.payloadColumn)}->>${label}, 'permid', r.permid)`;
+    const object = labelObject(target, link.target);
     // An id-keyed link matches the target's internal id; a permid-keyed one
     // matches its permid directly, needing no id→permid translation.
     const matchOn = link.on === 'permid' ? 'permid' : 'id';
@@ -257,5 +294,16 @@ export function makeReadRepository({ pg, table, jsonbColumn, links, filters = {}
 export function repositoryForResource(fastify, resource) {
   const descriptor = descriptorFor(resource);
   if (!descriptor || !fastify.hasDecorator('pg')) return undefined;
+
+  // A descriptor with no payload column describes a table this engine cannot
+  // read — no JSONB to select, and no version chain for HEAD_FILTER to filter.
+  // Fail by name here rather than emitting SQL that dies with a 42703.
+  if (!descriptor.jsonbColumn) {
+    throw new Error(
+      `Resource '${resource}' has no JSONB payload column and cannot use the generic ` +
+        `repository; it needs a dedicated read module (see taxa-repository.js)`,
+    );
+  }
+
   return makeReadRepository({ pg: fastify.pg, ...descriptor });
 }

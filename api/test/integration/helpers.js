@@ -278,3 +278,50 @@ export async function insertAdditionalSchemaRef(pool, { schemaId, referenceId, p
   );
   return rows[0];
 }
+
+/**
+ * Insert a `taxa` row, returning its permid.
+ *
+ * Rows are inserted DIRECTLY rather than by seeding opinions and calling
+ * `rebuild_taxa()`. Populating the table is the backend's job and is tested
+ * there; what this repo's integration tests must prove is that the read path
+ * works against the REAL schema — the actual columns, the `dictionaries`-schema
+ * joins, and the ltree round-trip. A direct insert exercises all of that while
+ * keeping the fixture tree small enough to assert against exactly.
+ *
+ * `classification_path` is built from concept permids, root-first, with hyphens
+ * replaced by underscores (ltree labels cannot contain `-`). Note it ends at the
+ * row's own CONCEPT, which for a synonym is a different row's permid — that
+ * asymmetry is the whole point of the decoder.
+ *
+ * @param {object} args
+ * @param {string} args.permid
+ * @param {string} args.name
+ * @param {string} args.rank              a `dictionaries.taxonomy_ranks` value
+ * @param {string[]} args.conceptPath     concept permids, root-first, INCLUDING own concept
+ * @param {string} [args.conceptPermid]   defaults to `permid` (an accepted name)
+ * @param {string} [args.containing]      containing concept permid; omit for a root
+ * @param {number} [args.authorityId]
+ * @param {string} [args.nomenclaturalStatus]  a `dictionaries.nomenclatural_statuses` value
+ */
+export async function insertTaxon(
+  pool,
+  { permid, name, rank, conceptPath, conceptPermid, containing, authorityId, nomenclaturalStatus },
+) {
+  const ltree = conceptPath.map((p) => p.replaceAll('-', '_')).join('.');
+  const concept = conceptPermid ?? permid;
+
+  const { rows } = await pool.query(
+    `INSERT INTO taxa
+       (permid, name, rank_id, authority_id, original_permid, accepted_spelling_permid,
+        concept_permid, containing_concept_permid, classification_path, nomenclatural_status_id)
+     VALUES ($1, $2,
+             (SELECT id FROM dictionaries.taxonomy_ranks WHERE taxonomy_rank = $3),
+             $4, $1, $1, $5, $6, $7::ltree,
+             (SELECT id FROM dictionaries.nomenclatural_statuses WHERE status = $8))
+     RETURNING permid`,
+    [permid, name, rank, authorityId ?? null, concept, containing ?? null, ltree,
+     nomenclaturalStatus ?? null],
+  );
+  return rows[0].permid;
+}

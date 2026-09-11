@@ -58,3 +58,35 @@ export function hydrateLinkHrefs(record, links, prefix) {
 function addHref(link, base) {
   if (link && link.permid) link.href = `${base}/${link.permid}`;
 }
+
+/**
+ * Add `href` to every entry of a record's nested `containingTaxa` chain.
+ *
+ * The chain is a self-referential nesting rather than a flat link field, so
+ * {@link hydrateLinkHrefs} does not reach it: each entry carries its own
+ * `containingTaxa`, root-ward, until a null. Entries point into the citing
+ * group itself, so the base is derived from that group's own name.
+ *
+ * Iterative rather than recursive on purpose — the chain reaches depth 70 in
+ * real data, and this keeps hydration flat regardless of how deep the taxonomy
+ * grows. Safe for a missing or null chain (a root taxon), and for a list item
+ * that carries no chain at all because it was not requested.
+ *
+ * The base is the citing group's own mounted prefix: a chain entry is another
+ * taxon, so it is addressed in the same group, and no cross-group derivation is
+ * needed.
+ *
+ * @template T
+ * @param {T} record
+ * @param {string} prefix  the citing route group's `fastify.prefix`
+ * @param {string} [field] the chain field name
+ * @returns {T}
+ */
+export function hydrateChainHrefs(record, prefix, field = 'containingTaxa') {
+  if (!record) return record;
+
+  for (let node = record[field]; node; node = node[field]) {
+    addHref(node, prefix);
+  }
+  return record;
+}

@@ -15,6 +15,9 @@
 
 import { decodeCursor } from './cursor.js';
 
+/** Query parameters every list endpoint accepts, regardless of resource. */
+export const UNIVERSAL_PARAMS = ['ids', 'limit', 'cursor'];
+
 /** Max distinct ids accepted by a single multi-entity read. */
 export const MAX_IDS = 100;
 
@@ -42,7 +45,14 @@ export const MAX_LIMIT = 1000;
  * - present with an empty value → 400 (mirrors the `ids` rule)
  * - values are opaque strings — NO enum validation (provisional; an
  *   enum-bearing JSON Schema will later be able to reject out-of-enum values)
- * - unrecognized params are ignored (lenient; also provisional)
+ * - unrecognized params are REJECTED with a 400 naming them (see
+ *   `rejectUnknownParams` for why this is strict rather than lenient)
+ *
+ * Expansions (per-entity, from `expansionDefs`):
+ * - a declared param with `true` / `false` → opt-in response content
+ * - any other value, including the bare valueless form → 400
+ * - permitted alongside `ids`, unlike `limit`/`cursor`: a multi-entity read is a
+ *   list and carries list semantics, so it opts into the same expansions
  *
  * Pagination (`limit` / `cursor`):
  * - `limit` absent → {@link DEFAULT_LIMIT}; empty, non-integer, zero, negative,
@@ -61,11 +71,20 @@ export const MAX_LIMIT = 1000;
  *   `fastify.httpErrors` (from @fastify/sensible)
  * @param {Record<string, { jsonPath: string, op: string }>} [filterDefs]
  *   the resource's declared field filters (its `define` stage)
+ * @param {Record<string, { type: 'boolean' }>} [expansionDefs]
+ *   the resource's declared expansion parameters
  * @returns {{ ids?: string[], fields?: Record<string, string>,
+ *   expansions?: Record<string, boolean>,
  *   page: { limit: number, cursor?: { permid: string, direction: 'next'|'prev' } } }}
  */
-export function collectListFilters(query, httpErrors, filterDefs = {}) {
+export function collectListFilters(query, httpErrors, filterDefs = {}, expansionDefs = {}) {
   const filters = {};
+
+  rejectUnknownParams(query, httpErrors, [
+    ...UNIVERSAL_PARAMS,
+    ...Object.keys(filterDefs),
+    ...Object.keys(expansionDefs),
+  ]);
 
   // `'ids' in query` is what distinguishes `?ids=` (present, empty → 400) from
   // an absent `ids` (list everything) — the two are deliberately not the same.
@@ -105,9 +124,94 @@ export function collectListFilters(query, httpErrors, filterDefs = {}) {
     filters.fields = fields;
   }
 
+  const expansions = collectExpansions(query, httpErrors, expansionDefs);
+  if (expansions) {
+    filters.expansions = expansions;
+  }
+
   filters.page = collectPage(query, httpErrors, 'ids' in query);
 
   return filters;
+}
+
+/**
+ * Reject any query parameter the resource does not recognize, with a 400 naming
+ * it. This applies to single reads as well as lists (see `rejectUnknownQuery`).
+ *
+ * This REPLACES the previous leniency, under which an unrecognized parameter was
+ * ignored. The reason is specific to this API rather than general strictness: a
+ * silently ignored parameter produces a response indistinguishable from a
+ * correct one. `?includeContainingTax=true` yields a taxon with no chain, which
+ * reads exactly like a taxon with no ancestors; a misspelled field filter yields
+ * an unfiltered list, which reads exactly like everything matching. On a
+ * scientific database, a wrong answer that looks right is worse than an error.
+ *
+ * It is the same reasoning that already rejects an oversized `limit` rather than
+ * clamping it: silence surfaces as missing data much later.
+ *
+ * Filter VALUES stay opaque — a well-formed value matching nothing still yields
+ * an empty 200. Only parameter NAMES are validated here.
+ *
+ * @param {Record<string, unknown>} query
+ * @param {import('fastify').FastifyInstance['httpErrors']} httpErrors
+ * @param {string[]} recognized
+ */
+function rejectUnknownParams(query, httpErrors, recognized) {
+  const known = new Set(recognized);
+  const unknown = Object.keys(query).filter((param) => !known.has(param));
+
+  if (unknown.length > 0) {
+    throw httpErrors.badRequest(
+      `Unrecognized query parameter${unknown.length > 1 ? 's' : ''}: ` +
+        `\`${unknown.join('`, `')}\`. This resource accepts \`${recognized.join('`, `')}\``,
+    );
+  }
+}
+
+/**
+ * Validate a single read's query parameters. A single read takes no filters and
+ * no pagination, so it recognizes only what the resource declares as expansions
+ * — today, nothing on any resource, since the taxa chain is unconditional on a
+ * single read.
+ *
+ * Without this, strictness would differ by endpoint shape: an unknown parameter
+ * would be a 400 on a list and silently ignored on a single read.
+ *
+ * @param {Record<string, unknown>} query  `request.query`
+ * @param {import('fastify').FastifyInstance['httpErrors']} httpErrors
+ * @param {string[]} [recognized]  parameters this single read accepts
+ */
+export function rejectUnknownQuery(query, httpErrors, recognized = []) {
+  rejectUnknownParams(query, httpErrors, recognized);
+}
+
+/**
+ * Parse declared expansion parameters into `{ <param>: boolean }`, or undefined
+ * when the request asks for none.
+ *
+ * Expansions are opt-in response content, not filters: they widen what each
+ * record carries rather than narrowing which records are returned. Today the
+ * only one is the taxa containing-chain.
+ *
+ * Values are strictly `true` or `false` — matching `limit`'s strictness, and
+ * rejecting the bare valueless form, which is genuinely ambiguous (presence as
+ * truth, or an empty value?). Stating it beats resolving it in a direction the
+ * client did not choose.
+ */
+function collectExpansions(query, httpErrors, expansionDefs) {
+  const expansions = {};
+
+  for (const param of Object.keys(expansionDefs)) {
+    if (!(param in query)) continue;
+
+    const raw = String(query[param]).trim();
+    if (raw !== 'true' && raw !== 'false') {
+      throw httpErrors.badRequest(`\`${param}\` must be exactly \`true\` or \`false\``);
+    }
+    expansions[param] = raw === 'true';
+  }
+
+  return Object.keys(expansions).length > 0 ? expansions : undefined;
 }
 
 /**

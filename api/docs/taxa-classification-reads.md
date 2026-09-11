@@ -19,6 +19,14 @@ This document records the **measurements** behind those decisions so the
 numbers instead of re-deriving them. Design decisions themselves live in that
 change's `design.md`; what is here is the evidence.
 
+> **The decisions are in `openspec/changes/add-taxa-reads/design.md`.** When this
+> document was written that file did not yet exist, and the forward reference
+> above dangled for a day — long enough for decisions made alongside these
+> measurements to be lost and have to be recovered. It exists now, and it is the
+> place to look for *why*: the path-over-CTE choice, the read-only 405 surface,
+> why no depth cap, and why `removed` is not filtered (§9 below). Read it before
+> re-deriving anything from the numbers here.
+
 All figures were measured **2026-09-10** against the local development database
 (`PG_DATABASE=pbdb`, the same one `pbdb2-migrations` loads). They are a snapshot
 of a dev dataset, not a production guarantee — but the dataset is real migrated
@@ -91,6 +99,45 @@ authority_id IS NULL ........................................        0
 `accepted` is therefore load-bearing — nearly a third of rows point elsewhere —
 while `nomenclaturalStatus` is null for 98.4% of rows. `authority_id` is never
 null in this dataset, though the column is nullable and code should handle it.
+
+### One concept, many rows
+
+A concept is shared by every synonym and alternate spelling of it, so resolving
+an ancestor by `concept_permid` alone is not enough:
+
+```
+distinct concept_permids ....................... 358,494
+rows where permid = concept_permid ............. 358,494   (exactly one per concept)
+concepts with no such row ...........................  0
+concepts with more than one .........................  0
+max rows sharing a single concept ................... 88
+```
+
+Exactly one row per concept satisfies `permid = concept_permid`, across all rows.
+That predicate is what the ancestor fetch must pin: without it, one chain level
+can fan out into all 88 rows carrying that concept.
+
+### `removed` is dead on this table
+
+```
+rows with a non-null `removed` .......................  0
+```
+
+Not "none yet" — by construction. `rebuild_taxa()` names `removed` in neither its
+`INSERT` column list nor its `ON CONFLICT DO UPDATE SET`, and rows its derivation
+stops producing are **hard-deleted**:
+
+```sql
+-- create_new.sql, rebuild_taxa()
+DELETE FROM taxa t
+WHERE NOT EXISTS (SELECT 1 FROM _rebuild_taxa_src s WHERE s.permid = t.permid);
+```
+
+Soft deletion is honored one layer upstream instead: `derive_taxa()` reads the
+opinion tables through `WHERE n.removed IS NOT TRUE AND n.succeeded_by_id IS NULL`,
+so a taxon whose supporting opinions are all removed simply stops being produced.
+By the time a row exists in `taxa` it has already passed that filter, which is why
+the API applies no `removed` predicate of its own.
 
 ---
 
