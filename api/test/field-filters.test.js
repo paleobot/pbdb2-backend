@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 import { build } from '../src/app.js';
+import { DEFAULT_LIMIT } from '../src/lib/list-filters.js';
 
 /**
  * Per-entity field filters on `references` (publication_type). The fake pg
@@ -61,7 +62,7 @@ test('references filtered by publication_type returns only matching heads', asyn
   const q = pg.calls.find((c) => /->>'publicationType' = \$1/.test(c.text));
   assert.ok(q, 'a publicationType-bound query ran');
   assert.match(q.text, /succeeded_by_id IS NULL/);
-  assert.deepEqual(q.values, ['book']);
+  assert.deepEqual(q.values, ['book', DEFAULT_LIMIT + 1]);
 });
 
 test('field filter composes with ids in a single WHERE', async (t) => {
@@ -92,7 +93,7 @@ test('field filter composes with ids in a single WHERE', async (t) => {
   assert.ok(q, 'a composed query ran');
   assert.match(q.text, /permid = ANY\(\$1\)/);
   assert.match(q.text, /->>'publicationType' = \$2/);
-  assert.deepEqual(q.values, [['ref-1', 'ref-2'], 'book']);
+  assert.deepEqual(q.values, [['ref-1', 'ref-2'], 'book', DEFAULT_LIMIT + 1]);
 });
 
 test('field filter with no match is an empty 200 with no missing accounting', async (t) => {

@@ -315,3 +315,59 @@ test('removed additional references are omitted from the array', async (t) => {
   const head = await collectionsRepo().readHead(collectionPermid);
   assert.deepEqual(head.additionalReferences, [{ title: 'Live', permid: livePermid }]);
 });
+
+/**
+ * Keyset pagination against real PostgreSQL. This matters beyond the unit tier
+ * because `permid` is a UUID column: `permid > $1` and `ORDER BY permid` follow
+ * PostgreSQL's uuid comparison, not the string comparison a JS fake uses, and
+ * the parameter arrives as text to be cast. Paging has to agree with the
+ * database's own ordering or pages silently skip or repeat rows.
+ */
+test('keyset pagination pages through real heads in the database\'s own order', async (t) => {
+  if (!ctx.available) return t.skip(ctx.reason);
+
+  const minted = [];
+  for (let i = 0; i < 7; i += 1) {
+    const permid = newPermid();
+    minted.push(permid);
+    await insertRef(ctx.pool, { permid, personId, reference: { title: `Page ${i}` } });
+  }
+
+  // The order the database itself reports is the contract paging must match.
+  const { rows: ordered } = await ctx.pool.query(
+    `SELECT permid FROM refs
+     WHERE permid = ANY($1) AND succeeded_by_id IS NULL AND NOT COALESCE(removed, false)
+     ORDER BY permid`,
+    [minted],
+  );
+  const expected = ordered.map((r) => r.permid);
+  assert.equal(expected.length, 7);
+
+  // Walk forward in pages of 3, following the cursor the repository produces.
+  const seen = [];
+  let cursor;
+  let hasMore = true;
+  let pages = 0;
+  while (hasMore) {
+    const page = await refsRepo().readHeads({ ids: minted, page: { limit: 3, cursor } });
+    seen.push(...page.records.map((r) => r.permid));
+    hasMore = page.hasMore;
+    cursor = { permid: page.records[page.records.length - 1].permid, direction: 'next' };
+    pages += 1;
+    assert.ok(pages <= 4, 'paging terminates');
+  }
+
+  assert.deepEqual(seen, expected, 'every head exactly once, in the database order');
+
+  // And back: a reverse page returns the preceding records, ascending.
+  const back = await refsRepo().readHeads({
+    ids: minted,
+    page: { limit: 3, cursor: { permid: expected[6], direction: 'prev' } },
+  });
+  assert.deepEqual(
+    back.records.map((r) => r.permid),
+    expected.slice(3, 6),
+    'the reverse keyset returns the preceding page, re-reversed to ascending',
+  );
+  assert.equal(back.hasMore, true, 'and reports that more lie behind it');
+});

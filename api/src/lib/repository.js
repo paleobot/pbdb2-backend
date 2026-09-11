@@ -14,6 +14,8 @@
  */
 
 import { descriptorFor, targetFor } from './resource-tables.js';
+import { DEFAULT_LIMIT } from './list-filters.js';
+import { BACKWARD } from './cursor.js';
 
 const HEAD_FILTER = 'succeeded_by_id IS NULL AND NOT COALESCE(removed, false)';
 
@@ -168,18 +170,30 @@ export function makeReadRepository({ pg, table, jsonbColumn, links, filters = {}
     },
 
     /**
-     * Current heads, narrowed by optional criteria that compose into a single
-     * `WHERE` (the `translate` stage). Contributors:
+     * One page of current heads, narrowed by optional criteria that compose
+     * into a single `WHERE` (the `translate` stage). Contributors:
      *   - `HEAD_FILTER` — always
      *   - `ids`    → `permid = ANY($n)`               (the multi-entity read)
      *   - `fields` → `payload->>'<jsonPath>' = $n`    (one per declared filter)
-     * A bare call (no criteria) lists every current head. Filter *values* are
-     * bound as parameters; only declared filters translate (others are ignored).
-     * Order is by permid, not request order.
+     *   - `page`   → `permid > $n` / `permid < $n`    (the keyset cursor)
+     * Filter *values* are bound as parameters; only declared filters translate
+     * (others are ignored). A bare call is the first page of every head.
      *
-     * @param {{ ids?: string[], fields?: Record<string, string> }} [criteria]
+     * `ORDER BY permid` is the contract, not an incidental detail: the keyset
+     * names a position in that total order, so it is what keeps pages from
+     * skipping or repeating records when rows are inserted between requests.
+     * A backward page walks DESC and is reversed before returning, so `records`
+     * ascends by `permid` whichever way the client travelled.
+     *
+     * The query asks for `limit + 1` rows: the extra row is never returned as
+     * data, it only answers "is there a further page?" without a second query.
+     *
+     * @param {{ ids?: string[], fields?: Record<string, string>,
+     *   page?: { limit?: number, cursor?: { permid: string, direction: 'next'|'prev' } }
+     * }} [criteria]
+     * @returns {Promise<{ records: object[], hasMore: boolean }>}
      */
-    async readHeads({ ids, fields } = {}) {
+    async readHeads({ ids, fields, page } = {}) {
       const predicates = [HEAD_FILTER];
       const values = [];
 
@@ -197,19 +211,36 @@ export function makeReadRepository({ pg, table, jsonbColumn, links, filters = {}
         }
       }
 
+      const { limit = DEFAULT_LIMIT, cursor } = page ?? {};
+      const backward = cursor?.direction === BACKWARD;
+
+      if (cursor) {
+        values.push(cursor.permid);
+        predicates.push(`permid ${backward ? '<' : '>'} $${values.length}`);
+      }
+
+      values.push(limit + 1);
       const { rows } = await pg.query(
-        `${select} WHERE ${predicates.join(' AND ')} ORDER BY permid`,
+        `${select} WHERE ${predicates.join(' AND ')} ` +
+          `ORDER BY permid ${backward ? 'DESC' : 'ASC'} LIMIT $${values.length}`,
         values,
       );
-      return rows.map((row) => toResource(row, links));
+
+      const hasMore = rows.length > limit;
+      const pageRows = hasMore ? rows.slice(0, limit) : rows;
+      if (backward) pageRows.reverse();
+
+      return { records: pageRows.map((row) => toResource(row, links)), hasMore };
     },
 
     /**
-     * Current heads of every non-removed lineage — a bare {@link readHeads}.
-     * Retained as a named convenience for the unfiltered list.
+     * The first page of current heads, as a plain array — a named convenience
+     * for callers that want heads without paging (it is still bounded by
+     * `DEFAULT_LIMIT`; no read is unbounded).
      */
     async list() {
-      return this.readHeads();
+      const { records } = await this.readHeads();
+      return records;
     },
   };
 }

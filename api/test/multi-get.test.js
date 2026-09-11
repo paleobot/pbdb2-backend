@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 import { build } from '../src/app.js';
+import { DEFAULT_LIMIT } from '../src/lib/list-filters.js';
 
 /**
  * Multi-entity read via the `ids` list filter. Driven with NO database:
@@ -57,7 +58,7 @@ test('multi-get returns exactly the requested subset, missing empty', async (t) 
   const q = pg.calls.find((c) => c.text.includes('permid = ANY($1)'));
   assert.ok(q, 'a multi-head query ran');
   assert.match(q.text, /succeeded_by_id IS NULL/);
-  assert.deepEqual(q.values, [['ref-1', 'ref-2']]);
+  assert.deepEqual(q.values, [['ref-1', 'ref-2'], DEFAULT_LIMIT + 1]);
 });
 
 test('multi-get partial success: unknown ids land in meta.missing, others returned', async (t) => {
