@@ -96,6 +96,72 @@ export async function setupTestDb() {
   return { available: true, pool, dbName, teardown };
 }
 
+// Monotonic-counter state for newPermid(). The counter occupies the 12 bits of
+// rand_a (byte 6's low nibble plus byte 7), so it holds 4096 mints per ms.
+let lastMs = 0n;
+let seq = 0;
+const MAX_SEQ = 0xfff;
+
+/**
+ * Mint a UUIDv7 for use as a `permid`.
+ *
+ * Every versioned table declares
+ * `permid uuid NOT NULL CHECK ((get_byte(uuid_send(permid), 6) >> 4) = 7)` —
+ * the high nibble of byte 6 is the UUID version, so the column accepts v7 and
+ * nothing else. `crypto.randomUUID()` emits v4 and is rejected, and there is no
+ * `uuidv7()` to call in the database either: it arrives in PostgreSQL 18 and
+ * `create_new.sql` defines no helper of its own. The schema's own comment on the
+ * taxa/opinions tables settles the question — permids are "APP-MINTED uuidv7" —
+ * so minting is the application's job, and the fixtures do it here.
+ *
+ * Layout per RFC 9562: 48-bit big-endian Unix timestamp in milliseconds, then
+ * the version nibble, then random bits with the variant nibble pinned.
+ *
+ * Values are strictly increasing, including within a single millisecond, so
+ * `ORDER BY permid` over minted fixtures is insertion order. That keeps any
+ * assertion about permid ordering deterministic rather than dependent on which
+ * random tail happened to sort first.
+ */
+export function newPermid() {
+  const bytes = randomBytes(16);
+
+  const now = BigInt(Date.now());
+  if (now > lastMs) {
+    lastMs = now;
+    seq = 0;
+  } else if (seq < MAX_SEQ) {
+    // Same millisecond (or a clock that went backwards): keep advancing the
+    // counter so successive permids still sort in mint order.
+    seq += 1;
+  } else {
+    // Counter exhausted for this millisecond. Borrow from the next one rather
+    // than let the counter wrap and silently break monotonicity.
+    lastMs += 1n;
+    seq = 0;
+  }
+  const ms = lastMs;
+
+  for (let i = 5; i >= 0; i -= 1) {
+    bytes[i] = Number((ms >> BigInt(8 * (5 - i))) & 0xffn);
+  }
+
+  // Byte 6 high nibble = version 7; its low nibble plus byte 7 carry the
+  // monotonic counter, so intra-millisecond mints stay ordered.
+  bytes[6] = 0x70 | ((seq >> 8) & 0x0f);
+  bytes[7] = seq & 0xff;
+  // Byte 8 high bits = variant 0b10.
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+
+  const hex = bytes.toString('hex');
+  return [
+    hex.slice(0, 8),
+    hex.slice(8, 12),
+    hex.slice(12, 16),
+    hex.slice(16, 20),
+    hex.slice(20),
+  ].join('-');
+}
+
 /**
  * Bootstrap a person row. `persons.authorizer_person_id` is NOT NULL and
  * self-referential, so the very first person authorizes itself (explicit id,
@@ -131,24 +197,6 @@ export async function insertRef(pool, { permid, personId, reference = {}, remove
 }
 
 /**
- * Insert an interval row, returning its serial id. Collections require a
- * (non-null) early/late age FK into `intervals`, so reference-enrichment fixtures
- * seed one anchor interval to satisfy those columns.
- */
-export async function insertInterval(
-  pool,
-  { permid, personId, name = 'Anchor', earlyAge = 100, lateAge = 90 },
-) {
-  const { rows } = await pool.query(
-    `INSERT INTO intervals (permid, authorizer_person_id, enterer_person_id, name, early_age, late_age)
-     VALUES ($1, $2, $2, $3, $4, $5)
-     RETURNING id`,
-    [permid, personId, name, earlyAge, lateAge],
-  );
-  return rows[0];
-}
-
-/**
  * Insert an authority row, returning its serial id. `reference_id` is the
  * single (primary) reference FK; pass `permid` to extend a lineage.
  */
@@ -167,18 +215,21 @@ export async function insertAuthority(
 
 /**
  * Insert a collection row, returning its serial id. `reference_id` is the
- * primary reference; `earlyAgeId`/`lateAgeId` satisfy the non-null age FKs.
+ * primary reference; pass `permid` to extend a lineage.
+ *
+ * No age FKs: `collections.early_age_id` / `late_age_id` are commented out in the
+ * current backend schema, so fixtures no longer seed an anchor `intervals` row.
  */
 export async function insertCollection(
   pool,
-  { permid, personId, collection = {}, referenceId, earlyAgeId, lateAgeId, removed = null },
+  { permid, personId, collection = {}, referenceId, removed = null },
 ) {
   const { rows } = await pool.query(
     `INSERT INTO collections
-       (permid, authorizer_person_id, enterer_person_id, collection, reference_id, early_age_id, late_age_id, removed)
-     VALUES ($1, $2, $2, $3::jsonb, $4, $5, $6, $7)
+       (permid, authorizer_person_id, enterer_person_id, collection, reference_id, removed)
+     VALUES ($1, $2, $2, $3::jsonb, $4, $5)
      RETURNING id, permid`,
-    [permid, personId, JSON.stringify(collection), referenceId, earlyAgeId, lateAgeId, removed],
+    [permid, personId, JSON.stringify(collection), referenceId, removed],
   );
   return rows[0];
 }

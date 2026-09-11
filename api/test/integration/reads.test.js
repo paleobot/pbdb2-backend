@@ -7,8 +7,8 @@ import { descriptorFor } from '../../src/lib/resource-tables.js';
 import {
   setupTestDb,
   seedPerson,
+  newPermid,
   insertRef,
-  insertInterval,
   insertAuthority,
   insertCollection,
   insertSchema,
@@ -18,8 +18,9 @@ import {
 
 /**
  * Integration tier: real PostgreSQL, real lineage triggers, real recursive CTE.
- * Provisions one ephemeral database for the file; each test uses unique permids
- * so assertions are independent. Skips cleanly when no database is reachable.
+ * Provisions one ephemeral database for the file; each test mints its own
+ * permids via `newPermid()` so assertions are independent. Skips cleanly when no
+ * database is reachable.
  */
 let ctx = { available: false, reason: 'not initialized' };
 let personId;
@@ -43,7 +44,7 @@ const collectionsRepo = () => makeReadRepository({ pg: ctx.pool, ...descriptorFo
 test('readHead returns the current head and excludes superseded versions', async (t) => {
   if (!ctx.available) return t.skip(ctx.reason);
 
-  const permid = 'ref-lineage-a';
+  const permid = newPermid();
   await insertRef(ctx.pool, { permid, personId, reference: { title: 'v1' } });
   await insertRef(ctx.pool, { permid, personId, reference: { title: 'v2' } }); // triggers → head
 
@@ -55,7 +56,7 @@ test('readHead returns the current head and excludes superseded versions', async
 test('readHead excludes a soft-removed head', async (t) => {
   if (!ctx.available) return t.skip(ctx.reason);
 
-  const permid = 'ref-removed-a';
+  const permid = newPermid();
   await insertRef(ctx.pool, { permid, personId, reference: { title: 'gone' }, removed: true });
 
   assert.equal(await refsRepo().readHead(permid), null);
@@ -63,15 +64,15 @@ test('readHead excludes a soft-removed head', async (t) => {
 
 test('readHead returns null for an unknown permid', async (t) => {
   if (!ctx.available) return t.skip(ctx.reason);
-  assert.equal(await refsRepo().readHead('ref-nope'), null);
+  assert.equal(await refsRepo().readHead(newPermid()), null);
 });
 
 test('list returns one record per non-removed lineage head', async (t) => {
   if (!ctx.available) return t.skip(ctx.reason);
 
-  const live1 = 'ref-list-live-1';
-  const live2 = 'ref-list-live-2';
-  const removed = 'ref-list-removed';
+  const live1 = newPermid();
+  const live2 = newPermid();
+  const removed = newPermid();
   await insertRef(ctx.pool, { permid: live1, personId, reference: { title: 'L1 v1' } });
   await insertRef(ctx.pool, { permid: live1, personId, reference: { title: 'L1 v2' } }); // 2 versions, 1 head
   await insertRef(ctx.pool, { permid: live2, personId, reference: { title: 'L2' } });
@@ -90,8 +91,12 @@ test('list returns one record per non-removed lineage head', async (t) => {
 test('schema tree assembles current versions, keyed by permid', async (t) => {
   if (!ctx.available) return t.skip(ctx.reason);
 
+  const schemaPermid = newPermid();
+  const charPermid = newPermid();
+  const statePermid = newPermid();
+
   const ref = await insertRef(ctx.pool, {
-    permid: 'ref-for-schema',
+    permid: newPermid(),
     personId,
     reference: { title: 'Backing ref' },
   });
@@ -99,28 +104,28 @@ test('schema tree assembles current versions, keyed by permid', async (t) => {
   const { rows: [schema] } = await ctx.pool.query(
     `INSERT INTO schemas (permid, authorizer_person_id, enterer_person_id, schema, reference_id)
      VALUES ($1, $2, $2, $3::jsonb, $4) RETURNING id`,
-    ['sch-int-1', personId, JSON.stringify({ title: 'Leaf architecture' }), ref.id],
+    [schemaPermid, personId, JSON.stringify({ title: 'Leaf architecture' }), ref.id],
   );
 
   const { rows: [char] } = await ctx.pool.query(
     `INSERT INTO characters (permid, authorizer_person_id, enterer_person_id, parent_schema_id, character, sort_order)
      VALUES ($1, $2, $2, $3, $4::jsonb, $5) RETURNING id`,
-    ['chr-int-1', personId, schema.id, JSON.stringify({ name: 'Margin' }), 1],
+    [charPermid, personId, schema.id, JSON.stringify({ name: 'Margin' }), 1],
   );
 
   await ctx.pool.query(
     `INSERT INTO states (permid, authorizer_person_id, enterer_person_id, parent_character_id, state, sort_order)
      VALUES ($1, $2, $2, $3, $4::jsonb, $5)`,
-    ['stt-int-1', personId, char.id, JSON.stringify({ name: 'Entire' }), 1],
+    [statePermid, personId, char.id, JSON.stringify({ name: 'Entire' }), 1],
   );
 
-  const tree = await readSchemaTree(ctx.pool, 'sch-int-1');
-  assert.equal(tree.permid, 'sch-int-1');
+  const tree = await readSchemaTree(ctx.pool, schemaPermid);
+  assert.equal(tree.permid, schemaPermid);
   assert.equal(tree.title, 'Leaf architecture');
   assert.equal(tree.characters.length, 1);
-  assert.equal(tree.characters[0].permid, 'chr-int-1');
+  assert.equal(tree.characters[0].permid, charPermid);
   assert.equal(tree.characters[0].name, 'Margin');
-  assert.equal(tree.characters[0].states[0].permid, 'stt-int-1');
+  assert.equal(tree.characters[0].states[0].permid, statePermid);
   assert.equal(tree.characters[0].states[0].name, 'Entire');
 
   // No internal serial id leaked into the tree.
@@ -129,7 +134,7 @@ test('schema tree assembles current versions, keyed by permid', async (t) => {
 
 test('schema tree returns null for an unknown permid', async (t) => {
   if (!ctx.available) return t.skip(ctx.reason);
-  assert.equal(await readSchemaTree(ctx.pool, 'sch-nope'), null);
+  assert.equal(await readSchemaTree(ctx.pool, newPermid()), null);
 });
 
 // --- Reference enrichment -------------------------------------------------
@@ -139,160 +144,174 @@ test('schema tree returns null for an unknown permid', async (t) => {
 test('authority read embeds its single reference', async (t) => {
   if (!ctx.available) return t.skip(ctx.reason);
 
+  const refPermid = newPermid();
+  const authorityPermid = newPermid();
+
   const ref = await insertRef(ctx.pool, {
-    permid: 'ref-aut-enrich',
+    permid: refPermid,
     personId,
     reference: { title: 'Cited work' },
   });
   await insertAuthority(ctx.pool, {
-    permid: 'aut-enrich',
+    permid: authorityPermid,
     personId,
     authority: { taxonName: 'Calymene' },
     referenceId: ref.id,
   });
 
-  const head = await authoritiesRepo().readHead('aut-enrich');
-  assert.deepEqual(head.reference, { title: 'Cited work', permid: 'ref-aut-enrich' });
+  const head = await authoritiesRepo().readHead(authorityPermid);
+  assert.deepEqual(head.reference, { title: 'Cited work', permid: refPermid });
 });
 
 test('collection read embeds primary and additional references', async (t) => {
   if (!ctx.available) return t.skip(ctx.reason);
 
-  const primary = await insertRef(ctx.pool, { permid: 'ref-col-primary', personId, reference: { title: 'Primary' } });
-  const add1 = await insertRef(ctx.pool, { permid: 'ref-col-add-1', personId, reference: { title: 'Add 1' } });
-  const add2 = await insertRef(ctx.pool, { permid: 'ref-col-add-2', personId, reference: { title: 'Add 2' } });
-  const interval = await insertInterval(ctx.pool, { permid: 'int-col', personId });
+  const primaryPermid = newPermid();
+  const add1Permid = newPermid();
+  const add2Permid = newPermid();
+  const collectionPermid = newPermid();
+
+  const primary = await insertRef(ctx.pool, { permid: primaryPermid, personId, reference: { title: 'Primary' } });
+  const add1 = await insertRef(ctx.pool, { permid: add1Permid, personId, reference: { title: 'Add 1' } });
+  const add2 = await insertRef(ctx.pool, { permid: add2Permid, personId, reference: { title: 'Add 2' } });
   const col = await insertCollection(ctx.pool, {
-    permid: 'col-enrich',
+    permid: collectionPermid,
     personId,
     collection: { name: 'Quarry A' },
     referenceId: primary.id,
-    earlyAgeId: interval.id,
-    lateAgeId: interval.id,
   });
   await insertAdditionalCollectionRef(ctx.pool, { collectionId: col.id, referenceId: add1.id, personId });
   await insertAdditionalCollectionRef(ctx.pool, { collectionId: col.id, referenceId: add2.id, personId });
 
-  const head = await collectionsRepo().readHead('col-enrich');
-  assert.deepEqual(head.primaryReference, { title: 'Primary', permid: 'ref-col-primary' });
+  const head = await collectionsRepo().readHead(collectionPermid);
+  assert.deepEqual(head.primaryReference, { title: 'Primary', permid: primaryPermid });
   const titles = head.additionalReferences.map((r) => r.title).sort();
   assert.deepEqual(titles, ['Add 1', 'Add 2']);
-  assert.deepEqual(head.additionalReferences.map((r) => r.permid).sort(), ['ref-col-add-1', 'ref-col-add-2']);
+  assert.deepEqual(
+    head.additionalReferences.map((r) => r.permid).sort(),
+    [add1Permid, add2Permid].sort(),
+  );
 });
 
 test('collection with no additional references yields an empty array', async (t) => {
   if (!ctx.available) return t.skip(ctx.reason);
 
-  const primary = await insertRef(ctx.pool, { permid: 'ref-col-noadd', personId, reference: { title: 'Only primary' } });
-  const interval = await insertInterval(ctx.pool, { permid: 'int-col-noadd', personId });
+  const collectionPermid = newPermid();
+
+  const primary = await insertRef(ctx.pool, { permid: newPermid(), personId, reference: { title: 'Only primary' } });
   await insertCollection(ctx.pool, {
-    permid: 'col-noadd',
+    permid: collectionPermid,
     personId,
     referenceId: primary.id,
-    earlyAgeId: interval.id,
-    lateAgeId: interval.id,
   });
 
-  const head = await collectionsRepo().readHead('col-noadd');
+  const head = await collectionsRepo().readHead(collectionPermid);
   assert.deepEqual(head.additionalReferences, []);
 });
 
 test('schema tree embeds primary and additional references', async (t) => {
   if (!ctx.available) return t.skip(ctx.reason);
 
-  const primary = await insertRef(ctx.pool, { permid: 'ref-sch-primary', personId, reference: { title: 'Schema primary' } });
-  const add1 = await insertRef(ctx.pool, { permid: 'ref-sch-add-1', personId, reference: { title: 'Schema add 1' } });
+  const primaryPermid = newPermid();
+  const add1Permid = newPermid();
+  const schemaPermid = newPermid();
+
+  const primary = await insertRef(ctx.pool, { permid: primaryPermid, personId, reference: { title: 'Schema primary' } });
+  const add1 = await insertRef(ctx.pool, { permid: add1Permid, personId, reference: { title: 'Schema add 1' } });
   const schema = await insertSchema(ctx.pool, {
-    permid: 'sch-enrich',
+    permid: schemaPermid,
     personId,
     schema: { title: 'Leaf architecture' },
     referenceId: primary.id,
   });
   await insertAdditionalSchemaRef(ctx.pool, { schemaId: schema.id, referenceId: add1.id, personId });
 
-  const tree = await readSchemaTree(ctx.pool, 'sch-enrich');
-  assert.deepEqual(tree.primaryReference, { title: 'Schema primary', permid: 'ref-sch-primary' });
-  assert.deepEqual(tree.additionalReferences, [{ title: 'Schema add 1', permid: 'ref-sch-add-1' }]);
+  const tree = await readSchemaTree(ctx.pool, schemaPermid);
+  assert.deepEqual(tree.primaryReference, { title: 'Schema primary', permid: primaryPermid });
+  assert.deepEqual(tree.additionalReferences, [{ title: 'Schema add 1', permid: add1Permid }]);
 });
 
 test('edited reference is reflected on re-read; permid is stable (FK swing tracks head)', async (t) => {
   if (!ctx.available) return t.skip(ctx.reason);
 
-  const v1 = await insertRef(ctx.pool, { permid: 'ref-swing', personId, reference: { title: 'v1' } });
-  await insertAuthority(ctx.pool, { permid: 'aut-swing', personId, referenceId: v1.id });
+  const refPermid = newPermid();
+  const authorityPermid = newPermid();
+
+  const v1 = await insertRef(ctx.pool, { permid: refPermid, personId, reference: { title: 'v1' } });
+  await insertAuthority(ctx.pool, { permid: authorityPermid, personId, referenceId: v1.id });
 
   // A new version of the reference: the swing trigger moves authority.reference_id
   // from v1 to the new head, so a plain join now yields the new title.
-  await insertRef(ctx.pool, { permid: 'ref-swing', personId, reference: { title: 'v2' } });
+  await insertRef(ctx.pool, { permid: refPermid, personId, reference: { title: 'v2' } });
 
-  const head = await authoritiesRepo().readHead('aut-swing');
-  assert.deepEqual(head.reference, { title: 'v2', permid: 'ref-swing' });
+  const head = await authoritiesRepo().readHead(authorityPermid);
+  assert.deepEqual(head.reference, { title: 'v2', permid: refPermid });
 });
 
 test('edited collection retains its additional references (join FK swung to new head)', async (t) => {
   if (!ctx.available) return t.skip(ctx.reason);
 
-  const primary = await insertRef(ctx.pool, { permid: 'ref-col-swing-p', personId, reference: { title: 'P' } });
-  const add = await insertRef(ctx.pool, { permid: 'ref-col-swing-a', personId, reference: { title: 'A' } });
-  const interval = await insertInterval(ctx.pool, { permid: 'int-col-swing', personId });
+  const addPermid = newPermid();
+  const collectionPermid = newPermid();
+
+  const primary = await insertRef(ctx.pool, { permid: newPermid(), personId, reference: { title: 'P' } });
+  const add = await insertRef(ctx.pool, { permid: addPermid, personId, reference: { title: 'A' } });
   const v1 = await insertCollection(ctx.pool, {
-    permid: 'col-swing',
+    permid: collectionPermid,
     personId,
     collection: { name: 'v1' },
     referenceId: primary.id,
-    earlyAgeId: interval.id,
-    lateAgeId: interval.id,
   });
   await insertAdditionalCollectionRef(ctx.pool, { collectionId: v1.id, referenceId: add.id, personId });
 
   // New version of the collection: additional_collection_refs.collection_id is
   // swung to the new head, so the additional ref survives the edit.
   await insertCollection(ctx.pool, {
-    permid: 'col-swing',
+    permid: collectionPermid,
     personId,
     collection: { name: 'v2' },
     referenceId: primary.id,
-    earlyAgeId: interval.id,
-    lateAgeId: interval.id,
   });
 
-  const head = await collectionsRepo().readHead('col-swing');
+  const head = await collectionsRepo().readHead(collectionPermid);
   assert.equal(head.name, 'v2', 'reads the new head');
-  assert.deepEqual(head.additionalReferences, [{ title: 'A', permid: 'ref-col-swing-a' }]);
+  assert.deepEqual(head.additionalReferences, [{ title: 'A', permid: addPermid }]);
 });
 
 test('removed primary reference resolves to null', async (t) => {
   if (!ctx.available) return t.skip(ctx.reason);
 
+  const authorityPermid = newPermid();
+
   const ref = await insertRef(ctx.pool, {
-    permid: 'ref-removed-primary',
+    permid: newPermid(),
     personId,
     reference: { title: 'Gone' },
     removed: true,
   });
-  await insertAuthority(ctx.pool, { permid: 'aut-removed-ref', personId, referenceId: ref.id });
+  await insertAuthority(ctx.pool, { permid: authorityPermid, personId, referenceId: ref.id });
 
-  const head = await authoritiesRepo().readHead('aut-removed-ref');
+  const head = await authoritiesRepo().readHead(authorityPermid);
   assert.equal(head.reference, null);
 });
 
 test('removed additional references are omitted from the array', async (t) => {
   if (!ctx.available) return t.skip(ctx.reason);
 
-  const primary = await insertRef(ctx.pool, { permid: 'ref-col-sup-p', personId, reference: { title: 'P' } });
-  const live = await insertRef(ctx.pool, { permid: 'ref-col-sup-live', personId, reference: { title: 'Live' } });
-  const gone = await insertRef(ctx.pool, { permid: 'ref-col-sup-gone', personId, reference: { title: 'Gone' }, removed: true });
-  const interval = await insertInterval(ctx.pool, { permid: 'int-col-sup', personId });
+  const livePermid = newPermid();
+  const collectionPermid = newPermid();
+
+  const primary = await insertRef(ctx.pool, { permid: newPermid(), personId, reference: { title: 'P' } });
+  const live = await insertRef(ctx.pool, { permid: livePermid, personId, reference: { title: 'Live' } });
+  const gone = await insertRef(ctx.pool, { permid: newPermid(), personId, reference: { title: 'Gone' }, removed: true });
   const col = await insertCollection(ctx.pool, {
-    permid: 'col-suppress',
+    permid: collectionPermid,
     personId,
     referenceId: primary.id,
-    earlyAgeId: interval.id,
-    lateAgeId: interval.id,
   });
   await insertAdditionalCollectionRef(ctx.pool, { collectionId: col.id, referenceId: live.id, personId });
   await insertAdditionalCollectionRef(ctx.pool, { collectionId: col.id, referenceId: gone.id, personId });
 
-  const head = await collectionsRepo().readHead('col-suppress');
-  assert.deepEqual(head.additionalReferences, [{ title: 'Live', permid: 'ref-col-sup-live' }]);
+  const head = await collectionsRepo().readHead(collectionPermid);
+  assert.deepEqual(head.additionalReferences, [{ title: 'Live', permid: livePermid }]);
 });
