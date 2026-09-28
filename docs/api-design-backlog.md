@@ -325,6 +325,55 @@ for credentials, for example with `gitleaks`.
 
 Nothing deploys from these repos yet, so nothing needs re-pointing.
 
+## Human-facing identifiers
+
+**Deferred; permids stay UUIDv7.** Some advisory committee members have proposed replacing UUID
+permids with integers. The underlying need is probably an identifier people can cite, say and type
+("PBDB col. 12345"). That can be met with a short *handle* beside the permid, without changing the
+permid. The case against integer permids is written up separately for the committee (claude.ai doc
+"Why pbdb2 permids are UUIDs"). In short: integers would collide with 25 years of cited Classic
+integer IDs; an integer permid could be confused with the integer version `id` with no type error;
+and integers need a central sequence to mint.
+
+**Where to store it: a registry table.** It shouldn't go in the payload, because a handle is
+system-minted and immutable like the permid, not user-editable data. A column on each versioned
+table would repeat on every version row, so a plain `UNIQUE(handle)` fails. It would need a partial
+index on heads or a trigger per table. A registry table avoids both:
+
+```
+handles
+ handle (PK) │ entity_type │ permid UNIQUE
+─────────────┼─────────────┼──────────────
+ COL-300417  │ collection  │ 0192…a7f3
+```
+
+- The primary key makes handles globally unique, across entity types too.
+- `UNIQUE(permid)` gives each entity at most one handle.
+- It's one row per entity, so it has nothing to do with versioning: written once at creation, never
+  updated.
+- Lookup is handle → permid → head version.
+- Limitation: `handles.permid` can't be a foreign key to a versioned table, where permid isn't unique.
+  The audit could check for orphans.
+
+**Format: open.** Options:
+1. *Prefixed per-type sequence* (`COL-300417`). Uniqueness comes from the sequence. The prefix, plus
+   starting above the legacy maximum, rules out confusion with Classic numbers. Needs the database to
+   mint, and reveals creation order.
+2. *Option 1 plus a check digit* (`COL-300417-6`, e.g. ORCID's ISO 7064 mod 11-2). Catches mistyped
+   citations. The leaning.
+3. *Random short code* (`COL-8K3F-2QXA`, Crockford base32, 40 bits). Insert, and retry on a key
+   collision. Can be minted anywhere and reveals nothing, but is harder to read aloud.
+4. *Legacy continuity*: migrated records keep their Classic number, and new ones are numbered above
+   the legacy maximum. Old citations keep working. PBot records, merges and splits need policy.
+
+Truncating the UUID is not an option. It's not guaranteed unique, so it would still need the
+constraint and retry: option 3, only uglier.
+
+**Minting.** The handle is minted where the permid is, when an entity's first version is inserted:
+in each migration script, and on live writes in the API create path or a version trigger
+(`preceded_by_id IS NULL`). It's purely additive, so it can be backfilled for every existing entity
+in one pass whenever an API or UI needs it. Nothing needs it yet.
+
 ## Known data issues that affect the API
 
 - **PBot self-parent state.** One PBot state (`ed088383…`, "other") is its own parent and is skipped
