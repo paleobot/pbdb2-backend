@@ -1,7 +1,7 @@
 // Migrates the classic MariaDB `specimens` table (167,150 rows) into the new
 // PostgreSQL `specimens` table. Specimens only: occurrences, measurements, and the
 // revised collections pass each land separately. See
-// openspec/specs/specimen-migration/spec.md and payloadSchemas/mappings/specimens.md.
+// openspec/specs/specimen-migration/spec.md and src/specimens-migration/docs/specimens.md.
 //
 // Two properties of the source shape nearly everything below.
 //

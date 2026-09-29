@@ -2,9 +2,9 @@ import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { collectEnumSources, loadEnums, applyEnums, resolveEnums } from '../lib/enums.js';
 import { createAjv } from '../lib/ajv.js';
-import { pg } from '../../src/lib/pg-pool.js';
+import { getPg, closePg } from './pg.js';
 
-after(() => pg.end());
+after(() => closePg());
 
 const source = () => ({
   type: 'object',
@@ -74,6 +74,7 @@ test('refuses a derived variant', () => {
 });
 
 test('loadEnums reads in id order, one query per pair (real DB)', async () => {
+  const pg = getPg();
   let queries = 0;
   const counting = { query: (...a) => { queries++; return pg.query(...a); } };
   const map = await loadEnums(counting, collectEnumSources(source()));
@@ -83,6 +84,7 @@ test('loadEnums reads in id order, one query per pair (real DB)', async () => {
 });
 
 test('missing table throws naming it (real DB)', async () => {
+  const pg = getPg();
   await assert.rejects(
     resolveEnums(pg, { properties: { a: { type: 'string', 'x-enumFrom': { table: 'no_such_table', column: 'name' } } } }),
     /dictionaries\.no_such_table\.name/,

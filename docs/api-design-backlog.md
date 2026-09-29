@@ -182,6 +182,19 @@ Revisit if writes will come from anywhere other than the API.
 
 *Reasoning:* the `payload-schema-variants` change (archived 2026-09-18).
 
+## Editable dictionaries and the seed-fidelity test
+
+**Open; decide before dictionaries become editable.** `payload-schema-enums` requires each snapshotted
+dictionary table to equal `payloadSchemas/tests/fixtures/legacy-enums.json` exactly, in order, and
+`payloadSchemas/tests/dictionary-seeds.test.js` asserts it. That freezes the seeds at their
+conversion-time values. Once the API lets curators add, rename or retire dictionary values, the
+requirement must loosen, for example to "the seeds include every value present in migrated data".
+Open: the new wording, whether the test checks `create_new.sql` or the live table, and whether
+retired values stay in the table for old rows.
+
+*Reasoning:* the `split-payload-schemas` change, which kept the test in `payloadSchemas/` because it
+guards the DDL, not migration code.
+
 ---
 
 ## API responses vs. the `out` variants
@@ -262,7 +275,7 @@ pbdb2-backend/
 ├── payloadSchemas/            ◀──┐   │    durable
 ├── api/  ───────────────────────┼───┤
 └── migrations/  ────────────────┴───┘    leaf: src/, mariadb/, play/, pg-*.js,
-                                          payloadSchemas' mappings/*.md
+                                          mapping docs (in each migration's `docs/`)
 ```
 
 When migrations retires, a `retire-migrations` change removes `migrations/`, its workspace entry and
@@ -292,10 +305,13 @@ spec against it"). Run `openspec init` once at the root with the expanded workfl
 (`new`/`ff`/`continue`/`verify`), not the API's core profile.
 
 **Order of work:**
-1. *Prerequisite change: split `payloadSchemas/`* into durable and migration-only parts. Needed under
-   any option. `tests/enums.test.js` and `tests/dictionary-seeds.test.js` import the migrations pool
-   (`src/lib/pg-pool.js`). `mappings/*.md` belong to migrations. `legacyIDs` stays durable, since it
-   is persisted data.
+1. *Prerequisite change: `split-payload-schemas`.* Small, because `payloadSchemas/lib/` and the
+   sources already import nothing from migration code. The work: the mapping docs move from
+   `payloadSchemas/` to each migration's `docs/`; the two DB tests stop importing
+   `src/lib/pg-pool.js` and use a tests-local pg helper that fails per test without exiting; and a
+   guard test in `npm test` enforces that nothing under `payloadSchemas/` imports outside it. The
+   seed-fidelity test (`tests/dictionary-seeds.test.js`) stays: it checks the DDL's seeds, not
+   migration code. `legacyIDs` stays durable, since it is persisted data.
 2. Housekeeping: decide `graph-visuals`; delete merged/stale branches (`patch-derive-taxa`,
    `backup/ddm-dev-pre-merge`, …); finish or park `clade-hierarchy-user-guide`; clear the untracked
    root files.

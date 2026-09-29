@@ -7,16 +7,16 @@
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { pg } from '../../src/lib/pg-pool.js';
+import { getPg, closePg } from './pg.js';
 
 const legacy = JSON.parse(readFileSync(new URL('./fixtures/legacy-enums.json', import.meta.url), 'utf8'));
 
-after(() => pg.end());
+after(() => closePg());
 
 for (const [key, expected] of Object.entries(legacy)) {
   const [table, column] = key.split('.');
   test(`dictionaries.${key} matches the legacy enum`, async () => {
-    const { rows } = await pg.query(`SELECT "${column}" AS v FROM dictionaries."${table}" ORDER BY id`);
+    const { rows } = await getPg().query(`SELECT "${column}" AS v FROM dictionaries."${table}" ORDER BY id`);
     assert.deepEqual(rows.map((r) => r.v), expected);
   });
 }

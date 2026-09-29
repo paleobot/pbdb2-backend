@@ -2,7 +2,7 @@
 // assignment_opinions / name_opinions / validity_opinions. Replaces the 48
 // hand-written (status, spelling_reason) handlers under
 // migration_exploration/opinions/ with one streamlined script whose structure
-// mirrors payloadSchemas/mappings/opinions.md: three canonical dispositions
+// mirrors src/opinions-migration/docs/opinions.md: three canonical dispositions
 // (assignment / concept / validity), one universal spelling_reason → name
 // crosswalk applied as an independent second (dual) emission, and the named
 // exceptions (misspelling of; nomen oblitum's per-row branch; the mistagged

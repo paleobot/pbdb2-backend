@@ -78,7 +78,7 @@ Where today's paths go:
 |---|---|
 | `postgresql/create_new.sql` | `db/create_new.sql` |
 | `payloadSchemas/*.schema.js`, `lib/`, `tests/` | unchanged, `payloadSchemas/` at the root |
-| `payloadSchemas/mappings/*.md` (legacy → payload mappings) | `migrations/` |
+| `src/*-migration/docs/` (legacy → payload mappings, moved out of `payloadSchemas/`) | with `src/`, under `migrations/src/` |
 | `src/` | `migrations/src/` |
 | `mariadb/`, `play/`, `migration_exploration/`, `pg-*.js` | `migrations/` |
 | `docs/`, `openspec/` | unchanged, at the root |
@@ -118,11 +118,13 @@ first-class and can be changed in the same proposal as a migration or an API rou
 
 Two OpenSpec changes, with some housekeeping between them. Each is reviewed like any other change.
 
-**1. Split `payloadSchemas/` into lasting and migration-only parts.** This happens first, inside
-the current layout, and is the only step that changes code rather than moving it. For example,
-`tests/enums.test.js` and `tests/dictionary-seeds.test.js` currently borrow the migrations'
-database connection (`src/lib/pg-pool.js`). Under the rule above they need their own. The legacy
-mapping docs move to the migration side.
+**1. Split `payloadSchemas/` from the migrations (`split-payload-schemas`).** This happens first,
+inside the current layout, and it is small: the payload-schema code already imports nothing from
+the migrations. The legacy mapping docs move out of `payloadSchemas/` to a `docs/` folder in
+each migration's directory, with their names unchanged. `tests/enums.test.js` and
+`tests/dictionary-seeds.test.js` stop borrowing the migrations' database connection
+(`src/lib/pg-pool.js`) and get their own. A guard test in `npm test` now enforces the rule above for
+`payloadSchemas/`, so the move itself only relocates files.
 
 **2. Housekeeping.** Before the move, in-flight work should be merged or parked, and branches that
 are fully merged can go. *No branch is deleted without its owner agreeing.* Some remote branches

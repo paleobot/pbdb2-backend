@@ -1,7 +1,7 @@
 # Classic opinions → assignment/name/validity_opinions migration — pair-based field mapping
 
 Companion to [`DESIGN.md`](./DESIGN.md) (the pair-based decomposition rationale, §1–§7) and
-[`payloadSchemas/mappings/authorities-opinions.md`](../payloadSchemas/mappings/authorities-opinions.md)
+[`src/authority-opinions-migration/docs/authorities-opinions.md`](../src/authority-opinions-migration/docs/authorities-opinions.md)
 (the pre-existing mapping doc this one extends the same style to). Every legacy `opinions` row is
 handled by exactly one `migration_exploration/opinions/<status-folder>/<spelling_reason>.js` — this
 document gives the field-level mapping for each of the 48 `(status, spelling_reason)` pairs, in the same

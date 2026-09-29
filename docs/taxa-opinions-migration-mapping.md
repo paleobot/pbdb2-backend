@@ -18,7 +18,7 @@ column of §9.1 for this one status; `child_no`/`parent_no` are both just same-n
 target. Next is starting B4 (§8).
 **Scope:** the legacy→new *opinion* migration (OpenSpec change **B4 = `migrate-taxa-opinions`**,
 not yet started). This is the detailed, laid-out successor to the flat
-`payloadSchemas/mappings/collections.txt`, needed because the opinion migration is a
+`src/collections-migration/docs/collections.txt`, needed because the opinion migration is a
 *decomposition*, not a column-for-column copy.
 
 Companion design doc: `docs/classic-taxa-opinions.md` (§9.8 the identity inversion, §9.8.4.1–.2 the

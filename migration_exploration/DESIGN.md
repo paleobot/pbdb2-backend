@@ -295,7 +295,7 @@ All 48 pairs are implemented and pass `node --check`. Every pair falls into exac
 - **Root-level `migrate-assignment-opinions.js` still skips rootless `belongs to` rows.** The pre-existing,
   untouched baseline script (see "Relationship to existing scripts" at the top of this doc) has not been
   updated to match the rootless fix described in §3: it still treats `parent_spelling_no = 0` as a `parent_spelling_zero` skip
-  rather than inserting `containing_permid = NULL`. `payloadSchemas/mappings/authorities-opinions.md`
+  rather than inserting `containing_permid = NULL`. `src/authority-opinions-migration/docs/authorities-opinions.md`
   documents that script's real current behavior accurately, so it is not wrong today — but both need to be
   updated together once the root-level script adopts this handling, so the production baseline and its
   mapping doc stop disagreeing with the rule this rework already applies.
