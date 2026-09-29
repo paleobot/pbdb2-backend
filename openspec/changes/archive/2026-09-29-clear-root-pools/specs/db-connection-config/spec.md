@@ -1,20 +1,4 @@
-# db-connection-config Specification
-
-## Purpose
-Defines how migration scripts obtain and configure database connections: environment-variable-based
-credentials via `.env`, the set of connection-pool modules available (`src/lib/pg-pool.js`,
-`src/lib/mariadb-pool.js`, `src/lib/db.js`), and the full `.env` variable schema each expects.
-## Requirements
-### Requirement: Environment-based connection configuration
-The system SHALL read database connection parameters from a `.env` file using the `dotenv` package. The `.env` file MUST NOT be committed to version control. A `.env.example` file with placeholder values SHALL be committed as documentation.
-
-#### Scenario: .env file present with valid values
-- **WHEN** a migration script is executed and a `.env` file exists with all required variables populated
-- **THEN** the script connects to both MariaDB and PostgreSQL using those values
-
-#### Scenario: .env file missing or incomplete
-- **WHEN** a migration script is executed and the `.env` file is missing or has empty required variables
-- **THEN** the script exits with a clear error message indicating which variables are missing
+## MODIFIED Requirements
 
 ### Requirement: Shared connection module
 The system SHALL provide database connection pools as separate modules that can be imported
@@ -126,3 +110,12 @@ that omits them is unaffected.
 - **WHEN** `PG_CLASSIC_*`, `PG_PLAY_*`, and `PG_MIGRATED_*` are not set
 - **THEN** every script under `src/` and `npm test` behave exactly as when they are set
 
+## REMOVED Requirements
+
+### Requirement: Postgres-ported Classic connection module
+**Reason**: `pg-classic-pool.js` moves into `migration_exploration/testing/`, its only consumer. That folder
+is superseded and not described by the specs, and nothing under `src/` uses a Postgres-ported copy of
+Classic.
+**Migration**: None needed for the migrations. Scripts in `migration_exploration/testing/` import
+`./pg-classic-pool.js` instead of `../../pg-classic-pool.js`; its `PG_CLASSIC_*` variables and behavior
+are unchanged. A future `src/` script that needs Postgres-ported Classic adds a pool under `src/lib/`.

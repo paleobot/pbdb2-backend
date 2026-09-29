@@ -9,8 +9,8 @@
 // Stops immediately (leaving pg_play's state as-is for inspection) the first
 // time a handler exits non-zero. Expected skip-and-log conditions inside a
 // handler are not failures -- only a thrown/uncaught error or a FATAL exit is.
-import { pgMigrated, closePgMigrated } from '../../pg-migrated-pool.js';
-import { pgPlay, closePgPlay } from '../../pg-play-pool.js';
+import { pgMigrated, closePgMigrated } from './pg-migrated-pool.js';
+import { pgPlay, closePgPlay } from './pg-play-pool.js';
 import { spawn } from 'node:child_process';
 import { PAIRS, REPO_ROOT } from './pairs.js';
 

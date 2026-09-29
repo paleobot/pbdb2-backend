@@ -14,7 +14,7 @@
 // violation in well-formed data -- rather than one lineage's own rank
 // history against itself. Uses only already-joined _dt_linmeta values, no
 // new joins.
-import { pgPlay, closePgPlay } from '../../pg-play-pool.js';
+import { pgPlay, closePgPlay } from './pg-play-pool.js';
 
 function ms(ns) { return Number(ns) / 1e6; }
 

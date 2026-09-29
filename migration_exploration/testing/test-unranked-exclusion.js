@@ -7,7 +7,7 @@
 // members, then re-peel (which drops everything that was only downstream of
 // the now-removed cycle) and repeats until no survivors remain. Each outer
 // iteration finds exactly one more distinct cycle.
-import { pgPlay, closePgPlay } from '../../pg-play-pool.js';
+import { pgPlay, closePgPlay } from './pg-play-pool.js';
 
 function ms(ns) { return Number(ns) / 1e6; }
 

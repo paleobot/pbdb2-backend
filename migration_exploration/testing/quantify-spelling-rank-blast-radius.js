@@ -5,7 +5,7 @@
 // shipped fixes + the new rule, restricted to concepts NOT downstream of the
 // 2 known remaining cycles (Elasmotheriini/Elasmotheriina, Hyriidae/Hyriinae),
 // so the count reflects unintended collateral changes, not the intended fix.
-import { pgPlay, closePgPlay } from '../../pg-play-pool.js';
+import { pgPlay, closePgPlay } from './pg-play-pool.js';
 
 function ms(ns) { return Number(ns) / 1e6; }
 

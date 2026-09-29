@@ -25,7 +25,7 @@
 // openspec/changes/derive-clade-attachments/tasks.md) still cut the exact
 // same opinions as before this fix -- i.e. is_senior only changed the one
 // case it was written for.
-import { pgPlay, closePgPlay } from '../../pg-play-pool.js';
+import { pgPlay, closePgPlay } from './pg-play-pool.js';
 
 // The full cut set observed before this fix (18 opinions across 5 cycles),
 // captured while investigating the Ornithopoda/Clypeodonta case.

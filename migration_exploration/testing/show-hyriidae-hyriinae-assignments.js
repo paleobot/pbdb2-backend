@@ -1,4 +1,4 @@
-import { pgPlay, closePgPlay } from '../../pg-play-pool.js';
+import { pgPlay, closePgPlay } from './pg-play-pool.js';
 
 async function main() {
   const client = await pgPlay.connect();

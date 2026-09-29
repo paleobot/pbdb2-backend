@@ -13,8 +13,8 @@
 //     spelling_reason = 'Y' ORDER BY opinion_no ASC`).stream();
 // This shim intercepts that query text and answers it from pg_classic instead of
 // a real MariaDB connection.
-import { pgClassic, closePgClassic } from '../../pg-classic-pool.js';
-import { pgPlay, closePgPlay } from '../../pg-play-pool.js';
+import { pgClassic, closePgClassic } from './pg-classic-pool.js';
+import { pgPlay, closePgPlay } from './pg-play-pool.js';
 
 const ORDER_BY_OPINION_NO = /ORDER BY opinion_no ASC/i;
 const FULL_RUN_PAGE_SIZE = 5000;

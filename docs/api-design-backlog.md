@@ -274,7 +274,7 @@ pbdb2-backend/
 ├── db/create_new.sql          ◀──────┐
 ├── payloadSchemas/            ◀──┐   │    durable
 ├── api/  ───────────────────────┼───┤
-└── migrations/  ────────────────┴───┘    leaf: src/, mariadb/, play/, pg-*.js,
+└── migrations/  ────────────────┴───┘    leaf: src/, mariadb/, migration_exploration/,
                                           mapping docs (in each migration's `docs/`)
 ```
 

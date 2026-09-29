@@ -13,7 +13,7 @@
 // shares its own lineage's currently-accepted rank. This is a static
 // per-candidate filter (same shape/cost as the two already-shipped
 // exclusions), not graph-based cycle detection.
-import { pgPlay, closePgPlay } from '../../pg-play-pool.js';
+import { pgPlay, closePgPlay } from './pg-play-pool.js';
 
 function ms(ns) { return Number(ns) / 1e6; }
 

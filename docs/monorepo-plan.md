@@ -24,8 +24,7 @@ today they live in two repos:
  │ postgresql/create_new.sql│◀─ ─ ─ ─ ─ ─ ─│ integration tests query  │  a database built
  │                          │              │ a DB built from it       │  elsewhere, by hand
  │ payloadSchemas/          │              │                          │
- │ play/server.js           │─ ─ ─ ─ ─ ─ ─▶│ schema-tree.js           │  copied, and now
- │ pg-pool.js               │─ ─ ─ ─ ─ ─ ─▶│ config.js                │  drifting
+ │ src/lib/pg-pool.js       │─ ─ ─ ─ ─ ─ ─▶│ config.js                │  copied, and now drifting
  └──────────────────────────┘              └──────────────────────────┘
 ```
 
@@ -67,9 +66,7 @@ pbdb2-backend/
 └── migrations/           the migration scripts and everything specific to legacy data
     ├── src/              run-migrations.js, *-migration/ dirs
     ├── mariadb/          legacy DB analysis
-    ├── migration_exploration/
-    ├── play/
-    └── pg-*.js
+    └── migration_exploration/
 ```
 
 Where today's paths go:
@@ -80,7 +77,7 @@ Where today's paths go:
 | `payloadSchemas/*.schema.js`, `lib/`, `tests/` | unchanged, `payloadSchemas/` at the root |
 | `src/*-migration/docs/` (legacy → payload mappings, moved out of `payloadSchemas/`) | with `src/`, under `migrations/src/` |
 | `src/` | `migrations/src/` |
-| `mariadb/`, `play/`, `migration_exploration/`, `pg-*.js` | `migrations/` |
+| `mariadb/`, `migration_exploration/` | `migrations/` |
 | `docs/`, `openspec/` | unchanged, at the root |
 | the `pbdb2-api` repo | `api/` |
 

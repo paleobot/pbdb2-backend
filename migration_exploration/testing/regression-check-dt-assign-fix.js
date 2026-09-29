@@ -15,7 +15,7 @@
 // still unfixed) against derive_taxa_analyzed(seed) (fixed) row-for-row.
 // Equality confirms this fix changes nothing for concepts it isn't meant to
 // touch.
-import { pgPlay, closePgPlay } from '../../pg-play-pool.js';
+import { pgPlay, closePgPlay } from './pg-play-pool.js';
 
 const SAMPLE_SIZE = 500;
 

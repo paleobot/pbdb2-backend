@@ -5,7 +5,6 @@ Keep `payloadSchemas/` self-contained so it outlives the migrations: its modules
 only files under `payloadSchemas/`, npm packages and Node built-ins. Its database-backed tests get their
 connection from a tests-local helper that fails clearly without exiting, and a guard test in `npm test`
 enforces the boundary. The rule is one-way: migrations may import from `payloadSchemas/`.
-
 ## Requirements
 ### Requirement: `payloadSchemas/` depends on nothing outside itself
 Every JavaScript file under `payloadSchemas/`, including its tests, SHALL import and read only:
@@ -15,8 +14,7 @@ Every JavaScript file under `payloadSchemas/`, including its tests, SHALL import
 
 A relative import specifier (static `import … from`, side-effect `import '…'`, or dynamic `import('…')`) and a
 file read through `new URL('…', import.meta.url)` SHALL resolve to a path inside `payloadSchemas/`. In
-particular, nothing under `payloadSchemas/` SHALL import from `src/`, `migration_exploration/`, `play/` or the
-repository-root `pg-*.js` modules.
+particular, nothing under `payloadSchemas/` SHALL import from `src/` or `migration_exploration/`.
 
 The rule is one-way. Code outside `payloadSchemas/` MAY import from it, including its test fixtures:
 `src/collections-migration/tests/test-collections-transforms.js` reading
@@ -96,3 +94,4 @@ is the only check on the dictionary seeds in `create_new.sql`.
 #### Scenario: Closing an unused pool
 - **WHEN** a test file's `after` hook closes the pool and no test requested a connection
 - **THEN** the close succeeds without creating a pool or raising an error
+

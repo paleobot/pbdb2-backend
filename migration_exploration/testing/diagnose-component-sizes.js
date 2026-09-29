@@ -10,7 +10,7 @@
 // components larger/equal to the real ones, never smaller, so it's a safe
 // upper-bound diagnostic for "is there a giant component," not a byte-for-byte
 // stand-in for derive_taxa()'s own union-find.
-import { pgPlay, closePgPlay } from '../../pg-play-pool.js';
+import { pgPlay, closePgPlay } from './pg-play-pool.js';
 
 async function componentSizes(client, label, edgeClassFilter) {
   console.log(`=== ${label} ===`);

@@ -3,7 +3,7 @@
 // through _dt_node, then looks up a few of the formerly-self-referential
 // concepts by name to confirm each now resolves to either a genuine
 // non-self-referential container or NULL (rootless) -- never back to itself.
-import { pgPlay, closePgPlay } from '../../pg-play-pool.js';
+import { pgPlay, closePgPlay } from './pg-play-pool.js';
 
 async function main() {
   const client = await pgPlay.connect();

@@ -18,7 +18,7 @@
 // a non-current rank-spelling regardless of whether it caused a problem. It
 // should have a blast radius close to the targeted-negation option, while
 // still being a general algorithm robust to any future cycle shape.
-import { pgPlay, closePgPlay } from '../../pg-play-pool.js';
+import { pgPlay, closePgPlay } from './pg-play-pool.js';
 
 function ms(ns) { return Number(ns) / 1e6; }
 

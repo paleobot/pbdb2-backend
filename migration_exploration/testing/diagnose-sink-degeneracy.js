@@ -4,7 +4,7 @@
 // WITHOUT running its expensive LATERAL degenerate-group tiebreak. Tells us
 // how many lineage groups have 0 sinks (a lineage-level cycle) or 2+ sinks
 // (a genuine tie), i.e. the actual input size to the slow part of _dt_linmeta.
-import { pgPlay, closePgPlay } from '../../pg-play-pool.js';
+import { pgPlay, closePgPlay } from './pg-play-pool.js';
 
 function ms(ns) { return Number(ns) / 1e6; }
 async function timed(client, label, sql) {

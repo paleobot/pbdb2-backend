@@ -5,7 +5,7 @@
 // all into one combined plan. If this alone brings it from 6+ minutes down to
 // the ~2s the manually-split version achieved, that confirms CTE inlining
 // (not missing stats, not the LATERAL branch) as the actual root cause.
-import { pgPlay, closePgPlay } from '../../pg-play-pool.js';
+import { pgPlay, closePgPlay } from './pg-play-pool.js';
 
 function ms(ns) { return Number(ns) / 1e6; }
 async function timed(client, label, sql) {

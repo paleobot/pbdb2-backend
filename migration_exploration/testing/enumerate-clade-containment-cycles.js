@@ -15,7 +15,7 @@
 // isn't required, but it's kept for parity/precedent with the Linnaean-side
 // script.
 import { readFileSync } from 'fs';
-import { pgPlay, closePgPlay } from '../../pg-play-pool.js';
+import { pgPlay, closePgPlay } from './pg-play-pool.js';
 
 function ms(ns) { return Number(ns) / 1e6; }
 

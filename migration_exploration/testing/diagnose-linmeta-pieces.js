@@ -5,7 +5,7 @@
 // timed temp tables: eligible, roots (sc.n=1 branch only, now known to be the
 // only branch that ever contributes), spelling, then the final join +
 // correlated subquery on its own.
-import { pgPlay, closePgPlay } from '../../pg-play-pool.js';
+import { pgPlay, closePgPlay } from './pg-play-pool.js';
 
 function ms(ns) { return Number(ns) / 1e6; }
 async function timed(client, label, sql) {

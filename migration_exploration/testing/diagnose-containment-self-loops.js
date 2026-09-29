@@ -10,7 +10,7 @@
 //      which has a legacy assignment opinion pointing at the other" (the
 //      _dt_assign pooling-by-rank mechanism) or something else
 //   3. checks whether it correlates with the non-species rank-pooling branch
-import { pgPlay, closePgPlay } from '../../pg-play-pool.js';
+import { pgPlay, closePgPlay } from './pg-play-pool.js';
 
 function ms(ns) { return Number(ns) / 1e6; }
 async function timed(client, label, sql) {

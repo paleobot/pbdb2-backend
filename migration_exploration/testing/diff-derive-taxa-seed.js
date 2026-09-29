@@ -17,7 +17,7 @@
 //   node migration_exploration/testing/diff-derive-taxa-seed.js [fnName]
 //   (fnName defaults to 'derive_taxa'; derive_taxa_clades's own parameter is
 //   named `permids`, not `seed`, but is passed positionally here either way)
-import { pgPlay, closePgPlay } from '../../pg-play-pool.js';
+import { pgPlay, closePgPlay } from './pg-play-pool.js';
 import { SEED_BATTERY } from './seed-scoping-fixtures.js';
 
 function rowsEqual(a, b, columns) {

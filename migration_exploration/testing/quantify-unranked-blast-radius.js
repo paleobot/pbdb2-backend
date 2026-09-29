@@ -13,7 +13,7 @@
 // downstream survivor set (via peeling) into permanent-named temp tables,
 // then build the pipeline WITH the unranked exclusion (the "after" state,
 // matching create_new.sql's validated fix) and diff.
-import { pgPlay, closePgPlay } from '../../pg-play-pool.js';
+import { pgPlay, closePgPlay } from './pg-play-pool.js';
 
 function ms(ns) { return Number(ns) / 1e6; }
 

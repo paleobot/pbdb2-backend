@@ -10,7 +10,7 @@
 // server-side evaluation of every row, but returns only one row to the client,
 // so result-set transfer/deserialization time isn't conflated with derivation
 // compute time.
-import { pgPlay, closePgPlay } from '../../pg-play-pool.js';
+import { pgPlay, closePgPlay } from './pg-play-pool.js';
 
 function ms(ns) {
   return Number(ns) / 1e6;

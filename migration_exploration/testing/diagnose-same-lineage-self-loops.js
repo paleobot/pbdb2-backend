@@ -6,7 +6,7 @@
 // 'misspelling of' token whose target column was corrected from child_no to
 // parent_spelling_no in bd83132, 2026-08-21) or 'misspelling' (the curatorial
 // spelling_reason='misspelling' token, untouched by that fix).
-import { pgPlay, closePgPlay } from '../../pg-play-pool.js';
+import { pgPlay, closePgPlay } from './pg-play-pool.js';
 
 function ms(ns) { return Number(ns) / 1e6; }
 async function timed(client, label, sql) {

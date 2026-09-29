@@ -11,7 +11,7 @@
 // reverse): repeatedly delete any node whose parent isn't itself still
 // present. Whatever survives to a fixed point is exactly the cycle(s) plus
 // anything permanently downstream of one -- O(V+E), no per-node bounded walk.
-import { pgPlay, closePgPlay } from '../../pg-play-pool.js';
+import { pgPlay, closePgPlay } from './pg-play-pool.js';
 
 function ms(ns) { return Number(ns) / 1e6; }
 
