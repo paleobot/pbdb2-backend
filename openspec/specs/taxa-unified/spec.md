@@ -74,10 +74,10 @@ independently derived, and a concept's `taxa_attachments` rows MAY include edges
 
 ### Requirement: derive_taxa() resolves containment cycles by cutting, never raising
 
-Consistent with `derive_linnaean()` and `derive_taxa_clades()` — neither of which raises on a genuine
-containment cycle either, only on cycle-breaking-loop non-convergence — `derive_taxa()` SHALL always
-resolve containment cycles by cutting edges and SHALL NOT raise an error merely because a cycle was
-found. A direct self-reference SHALL be resolved to `containing_concept_permid = NULL` by the pooling
+`derive_taxa()` SHALL always resolve containment cycles by cutting edges and SHALL NOT raise an error
+merely because a cycle was found, consistent with `derive_linnaean()` and `derive_taxa_clades()`,
+neither of which raises on a genuine containment cycle either, only on cycle-breaking-loop
+non-convergence. A direct self-reference SHALL be resolved to `containing_concept_permid = NULL` by the pooling
 exclusion and SHALL NOT reach the cycle-cutting loop. A genuine cycle spanning two or more distinct
 concepts SHALL be broken by iteratively cutting the single weakest winning containment edge among that
 round's cycle members — by `evidence ASC, yr ASC NULLS FIRST, is_senior ASC, opinion_id ASC`, the same
