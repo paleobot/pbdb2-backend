@@ -266,23 +266,28 @@ prerequisite was never exposed to an earlier step at all.
 - **THEN** the runner records those orphan counts in the run log and does not fail the step, because an orphan is a recorded outcome rather than an unresolved prerequisite
 
 ### Requirement: `--createdb` initializes an empty database and cannot reset a populated one
-When `--createdb` is passed, the runner SHALL execute the entire contents of `postgresql/create_new.sql`
-as a single `pg` query through the existing pool, before preflight's dictionary and emptiness checks and
-before the first step.
+When `--createdb` is passed, the runner SHALL apply the DDL: the files `postgresql/[0-9][0-9]-*.sql`
+(`01-dictionaries.sql`, `02-core.sql`, `03-taxa.sql`, see `ddl-layout`), read in sorted name order and
+concatenated, executed as a single `pg` query through the existing pool, before preflight's dictionary
+and emptiness checks and before the first step.
 
-The file contains no `psql` meta-commands, no `COPY`, and no explicit `BEGIN`/`COMMIT`, so PostgreSQL
-executes it as one implicit transaction: it either applies completely or rolls back completely. The runner
-SHALL NOT shell out to `psql`, which would require an external binary and a separately constructed
-connection string and would leave a partially built schema on failure.
+The files contain no `psql` meta-commands, no `COPY`, and no explicit `BEGIN`/`COMMIT`, so PostgreSQL
+executes the concatenation as one implicit transaction: it either applies completely or rolls back
+completely. The runner SHALL NOT shell out to `psql`, which would require an external binary and a
+separately constructed connection string and would leave a partially built schema on failure.
 
-The file has no top-level `DROP` and begins with an unqualified `CREATE SCHEMA dictionaries`, so applying
-it to a database that already has that schema fails before any row is touched. `--createdb` therefore
-initializes an empty database and SHALL NOT be described or used as a way to reset a populated one.
-Creating the database itself is outside the runner's scope.
+The files have no top-level `DROP`, and the concatenation begins with `01-dictionaries.sql`'s unqualified
+`CREATE SCHEMA dictionaries`, so applying it to a database that already has that schema fails before any
+row is touched. `--createdb` therefore initializes an empty database and SHALL NOT be described or used as
+a way to reset a populated one. Creating the database itself is outside the runner's scope.
 
 #### Scenario: Schema is applied atomically
-- **WHEN** `--createdb` is passed against an empty database and a statement partway through the file fails
-- **THEN** the whole script rolls back and the database is left empty, rather than partially built
+- **WHEN** `--createdb` is passed against an empty database and a statement in any of the three files fails
+- **THEN** the whole script rolls back and the database is left empty, rather than partially built, even if earlier files applied without error
+
+#### Scenario: Files are applied in load order
+- **WHEN** `--createdb` is passed against an empty database
+- **THEN** `01-dictionaries.sql`, `02-core.sql` and `03-taxa.sql` are applied in that order, and the resulting schema and dictionary seeds are the complete target DDL
 
 #### Scenario: Populated database is protected
 - **WHEN** `--createdb` is passed against a database that already contains the `dictionaries` schema
