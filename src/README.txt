@@ -4,7 +4,7 @@ To run full migration on clean db:
     createdb -h localhost -U postgres pbdb
     node src/run-migrations.js --createdb
 
---createdb initializes an EMPTY database from postgresql/create_new.sql; it
+--createdb initializes an EMPTY database from the DDL (postgresql/0*.sql); it
 cannot reset a populated one, hence the drop and create. A full run takes about
 3 minutes.
 

@@ -8,7 +8,8 @@ context: |
   Target: PostgreSQL with schemas (e.g. dictionaries, plus domain schemas)
 
   Key files:
-    - postgresql/create_new.sql — Target PostgreSQL schema definitions and seed data
+    - postgresql/01-dictionaries.sql, 02-core.sql, 03-taxa.sql — the target DDL, applied in that order:
+      dictionary tables + seeds; tables the application writes; derived taxa tables + derive/rebuild functions
     - payloadSchemas/reference.schema.js — JSON Schema validation (ajv/fastify) for API payloads
     - mariadb/PBDBLegacy-DeepAnalysis/ — Deep analysis of the legacy database:
       - analysis-summary.md — Executive summary of findings

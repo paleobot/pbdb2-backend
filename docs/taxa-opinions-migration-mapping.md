@@ -29,8 +29,8 @@ mapping and the calls that must be made before B4 can be written.
 Source of truth for all counts below: live MariaDB `pbdb_archive` (MariaDB 10.11), queried
 2026-08-03, except where marked **(2026-08-18)** — those were re-probed live against the
 Postgres-ported mirror (`pg-classic-pool.js`, `PG_CLASSIC_*`) during this round of decisions.
-Target schema: `postgresql/create_new.sql` (taxa/opinions block ~L4701–5018; exact offsets have
-shifted since 2026-08-07 as the dictionaries grew).
+Target schema: `postgresql/02-core.sql` (the opinion ledgers) and `postgresql/03-taxa.sql` (the
+derivation). Both were in `create_new.sql` until `split-create-new-sql` (2026-09-29).
 
 > **MIGRATION vs. DERIVATION — read this before any other section.** Migration writes every
 > qualifying legacy opinion as its own ledger row, unconditionally. It NEVER compares `evidence` /

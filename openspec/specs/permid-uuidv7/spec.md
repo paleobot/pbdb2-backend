@@ -90,7 +90,7 @@ When a migration stops using an externally-sourced identifier (e.g. PBot `pbotID
 - **THEN** the row's JSONB contains `legacyIDs.pbotID` equal to the original PBot `pbotID`
 
 ### Requirement: Database enforces UUIDv7 version on in-scope permid columns
-The target schema in `postgresql/create_new.sql` SHALL apply a CHECK constraint on each minted permid column
+The target schema (the DDL, `postgresql/02-core.sql` and `postgresql/03-taxa.sql`) SHALL apply a CHECK constraint on each minted permid column
 asserting the UUID version nibble is 7, using `CHECK ((get_byte(uuid_send(permid), 6) >> 4) = 7)`. This form
 is valid on PostgreSQL 16; it MAY be replaced with `uuid_extract_version(permid) = 7` once the database is on
 PostgreSQL 18.
@@ -135,7 +135,7 @@ that statement checkable: every other minted column is enumerated as requiring t
 are excluded by name rather than by absence from a short list.
 
 #### Scenario: No CHECK on deferred tables
-- **WHEN** `create_new.sql` is applied
+- **WHEN** the DDL is applied
 - **THEN** neither `timescales.permid` nor `intervals.permid` has a UUIDv7 CHECK constraint
 ### Requirement: Minted permid on an unversioned table is UNIQUE
 A table that mints a `permid` and is **not** versioned SHALL declare `permid uuid NOT NULL UNIQUE`, and SHALL
@@ -145,7 +145,7 @@ On a versioned table, many rows share one `permid` — one per edit — and "one
 what holds instead is "one *head* per permid", enforced by `place_in_lineage()`, which raises on a second row
 with the same permid and `succeeded_by_id IS NULL`. An unversioned table has no succession chain to carry that
 guarantee, so `UNIQUE (permid)` carries it directly. `taxa_linnaean` already states this reasoning inline in
-`postgresql/create_new.sql`; this requirement generalises it so that the next unversioned minting table does
+`postgresql/03-taxa.sql`; this requirement generalises it so that the next unversioned minting table does
 not have to rediscover it.
 
 `persons` is such a table: it mints a permid and stays unversioned, so `persons.permid` is
@@ -164,7 +164,7 @@ columns, so calling it on a table lacking them fails rather than silently misbeh
 - **THEN** PostgreSQL rejects the write with a not-null violation
 
 #### Scenario: persons is not versioned
-- **WHEN** `create_new.sql` is executed
+- **WHEN** the DDL is applied
 - **THEN** `persons` has no `preceded_by_id` or `succeeded_by_id` column, and no `install_version_triggers('persons')` call appears in the schema
 
 #### Scenario: Versioned table permid stays non-unique

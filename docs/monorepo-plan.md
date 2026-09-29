@@ -21,7 +21,7 @@ today they live in two repos:
 ```
  pbdb2-migrations                          pbdb2-api
  ┌──────────────────────────┐              ┌──────────────────────────┐
- │ postgresql/create_new.sql│◀─ ─ ─ ─ ─ ─ ─│ integration tests query  │  a database built
+ │ postgresql/0*.sql (DDL)  │◀─ ─ ─ ─ ─ ─ ─│ integration tests query  │  a database built
  │                          │              │ a DB built from it       │  elsewhere, by hand
  │ payloadSchemas/          │              │                          │
  │ src/lib/pg-pool.js       │─ ─ ─ ─ ─ ─ ─▶│ config.js                │  copied, and now drifting
@@ -60,7 +60,9 @@ pbdb2-backend/
 ├── openspec/             one root: today's specs + the API's specs
 ├── docs/
 ├── db/
-│   └── create_new.sql    the DDL: tables, triggers, derive_*/rebuild_* functions
+│   ├── 01-dictionaries.sql  the DDL: dictionary tables and their seeds,
+│   ├── 02-core.sql          the tables the API writes (entities, opinion ledgers),
+│   └── 03-taxa.sql          derived taxa tables and the derive_*/rebuild_* functions
 ├── payloadSchemas/       the annotated sources and lib/ (variants, codecs, enums, storage)
 ├── api/                  what is now pbdb2-api
 └── migrations/           the migration scripts and everything specific to legacy data
@@ -73,7 +75,7 @@ Where today's paths go:
 
 | Today | After the move |
 |---|---|
-| `postgresql/create_new.sql` | `db/create_new.sql` |
+| `postgresql/01-dictionaries.sql`, `02-core.sql`, `03-taxa.sql` | `db/`, same names |
 | `payloadSchemas/*.schema.js`, `lib/`, `tests/` | unchanged, `payloadSchemas/` at the root |
 | `src/*-migration/docs/` (legacy → payload mappings, moved out of `payloadSchemas/`) | with `src/`, under `migrations/src/` |
 | `src/` | `migrations/src/` |
@@ -94,7 +96,7 @@ So the layout follows one rule: `migrations/` may use anything else in the repo,
 may use `migrations/`.
 
 ```
-db/create_new.sql          ◀──────┐
+db/*.sql                   ◀──────┐
 payloadSchemas/            ◀──┐   │     lasting
 api/  ───────────────────────┼───┤
 migrations/  ────────────────┴───┘     temporary: uses everything, nothing uses it
@@ -132,7 +134,7 @@ also be finished or parked.
 We'll agree on a time together.
 
 **4. The move (second change).**
-- One commit moves everything into the new layout, with `create_new.sql` going to `db/`. The same
+- One commit moves everything into the new layout, with the three DDL files going to `db/`. The same
   change fixes every import and file path that pointed at the old locations, including
   `run-migrations.js`. `migration_exploration/` moves as-is and is not fixed up: nothing depends
   on it, so its scripts may break and it retires with the rest of `migrations/`.
@@ -142,7 +144,7 @@ We'll agree on a time together.
   `package.json`.
 - Check: `npm test` passes, the full migration run reproduces its totals, and the API's
   integration tests pass. They run against an existing database (the one named in `.env`), as they
-  do today. Having them build a fresh test database from `db/create_new.sql` is possible once both
+  do today. Having them build a fresh test database from the DDL files in `db/` is possible once both
   live in one repo, but it isn't part of the move.
 
 **5. Rename and archive.** `pbdb2-migrations` becomes `pbdb2-backend` on GitHub. `pbdb2-api` is
@@ -158,7 +160,8 @@ After the move:
 - `git pull`. The move comes through as a normal commit.
 - Run `npm install` once at the repo root.
 - Update anything local that uses the old paths, such as a shell alias or a
-  `psql -f postgresql/create_new.sql`, which becomes `db/create_new.sql`.
+  `psql -f postgresql/01-dictionaries.sql` and the other two, which become `db/01-dictionaries.sql`
+  and so on.
 - Your `.env` may need copying into `migrations/`. The move change will say exactly where each
   `.env` goes.
 - Optionally: `git remote set-url origin git@github.com:paleobot/pbdb2-backend.git`

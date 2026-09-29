@@ -11,7 +11,7 @@ The schema SHALL define three append-only assertion tables — `name_opinions`, 
 
 #### Scenario: The three opinion tables are present with their key columns
 
-- **WHEN** `create_new.sql` is applied to an empty database
+- **WHEN** the DDL is applied to an empty database
 - **THEN** `name_opinions`, `assignment_opinions`, and `validity_opinions` each exist with the columns above, and no `rank_opinions`, `rename_opinions`, `type_opinions`, or `trait_opinions` table exists
 
 #### Scenario: permid columns are not foreign keys
@@ -137,7 +137,7 @@ Each `name_opinions` row SHALL carry an `edge_class text NOT NULL` copy of its r
 
 #### Scenario: validity_opinions has no target column
 
-- **WHEN** `validity_opinions` is inspected after applying `create_new.sql`
+- **WHEN** `validity_opinions` is inspected after applying the DDL
 - **THEN** it has no `target_permid` and no `targeted` column, and `nomenclatural_status_id` is a plain (non-composite) FK to `dictionaries.nomenclatural_statuses`
 
 #### Scenario: Only nomen nudum bars candidacy
@@ -151,17 +151,17 @@ Each `name_opinions` row SHALL carry an `edge_class text NOT NULL` copy of its r
 
 #### Scenario: The ledger and annotations get the trigger helper
 
-- **WHEN** the schema is inspected after applying `create_new.sql`
+- **WHEN** the schema is inspected after applying the DDL
 - **THEN** version triggers are installed on `taxon_annotations` but not on `taxa_linnaean`, and `taxa_linnaean` has no `preceded_by_id`/`succeeded_by_id` columns and a `UNIQUE (permid)` constraint
 
 #### Scenario: The opinion tables do not get the trigger helper
 
-- **WHEN** the schema is inspected after applying `create_new.sql`
+- **WHEN** the schema is inspected after applying the DDL
 - **THEN** no version triggers exist on `name_opinions`, `assignment_opinions`, or `validity_opinions`, and each has a hand-created partial index on `(permid) WHERE succeeded_by_id IS NULL`
 
 ### Requirement: permid columns enforce uuidv7
 
-Every `permid`-bearing column (the opinion tables, `taxa_linnaean`, `taxon_annotations`) and `homonyms.homonym_group_id` SHALL enforce version 7 via `CHECK ((get_byte(uuid_send(<col>), 6) >> 4) = 7)`, consistent with the `permid-uuidv7` convention already in `create_new.sql`.
+Every `permid`-bearing column (the opinion tables, `taxa_linnaean`, `taxon_annotations`) and `homonyms.homonym_group_id` SHALL enforce version 7 via `CHECK ((get_byte(uuid_send(<col>), 6) >> 4) = 7)`, consistent with the `permid-uuidv7` convention already in the DDL.
 
 #### Scenario: A non-v7 uuid is rejected
 
@@ -174,7 +174,7 @@ The schema SHALL define `taxon_annotations` (versioned curatorial prose: `common
 
 #### Scenario: Annotations and homonyms exist independently of the ledger
 
-- **WHEN** `create_new.sql` is applied to an empty database
+- **WHEN** the DDL is applied to an empty database
 - **THEN** `taxon_annotations` and `homonyms` exist, and `taxa_linnaean` has no `has_homonym` column
 
 #### Scenario: A homonym group spans more than two members
@@ -208,16 +208,16 @@ The schema SHALL define `taxon_annotations` (versioned curatorial prose: `common
 
 ### Requirement: The obsolete taxa/opinions block is removed and the schema builds clean
 
-The pre-inversion `taxa` / `assignment_opinions` / `rank_opinions` / `rename_opinions` / `homonyms` block SHALL be removed from `create_new.sql`, with no residual FK columns of the form `taxon_id`/`parent_taxon_id → taxa_linnaean("id")`. `create_new.sql` SHALL apply successfully to an empty database, with the taxa/opinions block placed after its dependencies (`persons`, `refs`, `authorities`, the `dictionaries.*` seeds, and the versioning/permid infrastructure) and after `CREATE EXTENSION IF NOT EXISTS ltree`.
+The pre-inversion `taxa` / `assignment_opinions` / `rank_opinions` / `rename_opinions` / `homonyms` block SHALL be removed from the DDL, with no residual FK columns of the form `taxon_id`/`parent_taxon_id → taxa_linnaean("id")`. The DDL SHALL apply successfully to an empty database, with the taxa/opinions tables placed after their dependencies (`persons`, `refs`, `authorities`, the `dictionaries.*` seeds, and the versioning/permid infrastructure) and the tables using `ltree` after `CREATE EXTENSION IF NOT EXISTS ltree`.
 
-#### Scenario: create_new.sql runs end-to-end on an empty database
+#### Scenario: The DDL runs end-to-end on an empty database
 
-- **WHEN** `create_new.sql` is applied to a fresh, empty PostgreSQL database
+- **WHEN** the DDL is applied to a fresh, empty PostgreSQL database
 - **THEN** it completes without error and the `ltree` extension is present
 
 #### Scenario: No pre-inversion swing FKs remain
 
-- **WHEN** `create_new.sql` is searched for `REFERENCES taxa_linnaean("id")`
+- **WHEN** the DDL files are searched for `REFERENCES taxa_linnaean("id")`
 - **THEN** no matches exist at all — `taxa_linnaean` is not versioned and carries no `preceded_by_id`/`succeeded_by_id` of its own, and no `taxon_id` or `parent_taxon_id` FK to `taxa_linnaean("id")` exists either
 
 ### Requirement: Lineage grouping collapses spellings of one name
@@ -483,7 +483,7 @@ The schema SHALL define a `taxa_linnaean` table with one row per name-as-spelled
 
 #### Scenario: The taxa ledger has the derived triad and provenance
 
-- **WHEN** `create_new.sql` is applied to an empty database
+- **WHEN** the DDL is applied to an empty database
 - **THEN** `taxa_linnaean` exists with `original_permid`, `accepted_spelling_permid`, `concept_permid` all `NOT NULL`, `classification_path` of type `ltree`, the three `winning_*_opinion_id` FKs, and no `authorizer_person_id`, `enterer_person_id`, or `winning_rank_opinion_id`
 
 #### Scenario: taxa.rank_id is mandatory

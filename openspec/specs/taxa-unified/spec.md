@@ -19,7 +19,7 @@ the derived identity triad (`original_permid`, `accepted_spelling_permid`, `conc
 
 #### Scenario: The combined ledger has the same identity shape as the Linnaean ledger
 
-- **WHEN** `create_new.sql` is applied to an empty database
+- **WHEN** the DDL is applied to an empty database
 - **THEN** `taxa` exists with the same identity/classification/provenance columns as `taxa_linnaean`,
   and is a distinct table from `taxa_linnaean` and `taxa_clades`
 

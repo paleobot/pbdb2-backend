@@ -215,7 +215,7 @@ const STEPS = [
 
 const STEP_NAMES = STEPS.map((s) => s.name);
 
-// Seeded by postgresql/create_new.sql. Every migration reads at least one of these,
+// Seeded by postgresql/01-dictionaries.sql. Every migration reads at least one of these,
 // so an unseeded target fails partway through the pipeline rather than at the start.
 // The last nine are payload vocabularies (x-enumFrom sources) that the
 // collections, specimens and refs steps resolve into their validation schemas.
@@ -412,7 +412,7 @@ async function preflightConnectivity(pg, groups) {
   try {
     await pg.query('SELECT 1');
   } catch (err) {
-    // Creating the database, and installing the extensions create_new.sql assumes,
+    // Creating the database, and installing the extensions the DDL assumes,
     // are both outside the runner. Say so rather than surfacing a bare driver error.
     if (err.code === '3D000') {
       throw new CheckFailure(
@@ -591,24 +591,29 @@ async function runAudit(selected) {
 }
 
 // --- --createdb -------------------------------------------------------------
-// postgresql/create_new.sql has no psql meta-commands, no COPY, and no explicit
-// BEGIN/COMMIT, so PostgreSQL runs the whole file as one implicit transaction: it
-// lands complete or rolls back to an empty database. Shelling out to psql would
-// need an external binary and a separately built connection string, and would leave
-// a half-built schema on failure.
+// The DDL is postgresql/NN-*.sql (01-dictionaries, 02-core, 03-taxa), applied in
+// sorted name order; the prefix is the load order (openspec/specs/ddl-layout). The
+// files have no psql meta-commands, no COPY, and no explicit BEGIN/COMMIT, so
+// concatenated into one query PostgreSQL runs them as one implicit transaction:
+// the schema lands complete or rolls back to an empty database. Shelling out to psql
+// would need an external binary and a separately built connection string, and would
+// leave a half-built schema on failure.
 //
-// It has no top-level DROP and begins with a bare `CREATE SCHEMA dictionaries`, so
-// applying it to a populated database fails before any row is touched. The flag
-// initializes an empty database; it does not reset a populated one.
+// They have no top-level DROP and the concatenation begins with 01-dictionaries.sql's
+// bare `CREATE SCHEMA dictionaries`, so applying it to a populated database fails
+// before any row is touched. The flag initializes an empty database; it does not
+// reset a populated one.
 async function applyCreateDb(pg) {
-  const { readFileSync } = await import('node:fs');
-  const sqlPath = join(REPO_ROOT, 'postgresql', 'create_new.sql');
-  console.log(`\nApplying ${sqlPath} as a single transaction...`);
+  const { readFileSync, readdirSync } = await import('node:fs');
+  const ddlDir = join(REPO_ROOT, 'postgresql');
   let sql;
   try {
-    sql = readFileSync(sqlPath, 'utf8');
+    const files = readdirSync(ddlDir).filter((f) => /^\d\d-.*\.sql$/.test(f)).sort();
+    if (files.length === 0) throw new Error('no NN-*.sql files');
+    console.log(`\nApplying ${files.join(', ')} from ${ddlDir} as a single transaction...`);
+    sql = files.map((f) => readFileSync(join(ddlDir, f), 'utf8')).join('\n');
   } catch (err) {
-    throw new CheckFailure(`--createdb could not read ${sqlPath}: ${err.message}`);
+    throw new CheckFailure(`--createdb could not read the DDL in ${ddlDir}: ${err.message}`);
   }
   try {
     await pg.query(sql);

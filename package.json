@@ -4,7 +4,7 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "node --test \"payloadSchemas/tests/*.test.js\" \"src/tests/*.test.js\""
+    "test": "node --test \"payloadSchemas/tests/*.test.js\" \"src/tests/*.test.js\" \"postgresql/tests/*.test.js\""
   },
   "keywords": [],
   "author": "",

@@ -94,7 +94,7 @@ If more than one row exists with the same `permid` and `succeeded_by_id IS NULL`
 The triggers SHALL be installed on: `refs`, `timescales`, `intervals`, `collections`, `schemas`, `characters`, `states`. The installer function is named `install_version_triggers` (plural) and installs both a BEFORE INSERT trigger (for lineage placement) and an AFTER INSERT trigger (for FK swinging and version chain maintenance).
 
 #### Scenario: Each versioned table has both triggers
-- **WHEN** `create_new.sql` is executed
+- **WHEN** the DDL is applied
 - **THEN** each of the seven listed tables SHALL have a BEFORE INSERT trigger that determines lineage placement AND an AFTER INSERT trigger that fires when `preceded_by_id IS NOT NULL`
 
 ### Requirement: Surrogate keys on solidified versioned tables are bigint
@@ -103,7 +103,7 @@ On the solidified versioned tables (`refs`, `collections`, `schemas`, `character
 Rationale: versioned tables consume `id` values per edit, not per entity, so `integer` (2^31) exhaustion is a realistic long-term risk that `bigint` removes.
 
 #### Scenario: Versioned table id is bigint
-- **WHEN** `create_new.sql` is executed
+- **WHEN** the DDL is applied
 - **THEN** `refs.id`, `collections.id`, `schemas.id`, `characters.id`, `states.id`, and `authorities.id` SHALL be of type `bigint`
 
 #### Scenario: References to a versioned id are bigint
@@ -118,7 +118,7 @@ Rationale: versioned tables consume `id` values per edit, not per entity, so `in
 The `swing_fks_to_new_version` function SHALL accept `bigint` for its `old_id` and `new_id` parameters, and `place_in_lineage` SHALL use a `bigint` variable for the discovered lineage head id.
 
 #### Scenario: Swing function signature is bigint
-- **WHEN** `create_new.sql` defines `swing_fks_to_new_version`
+- **WHEN** `02-core.sql` defines `swing_fks_to_new_version`
 - **THEN** its signature SHALL be `swing_fks_to_new_version(target_table text, old_id bigint, new_id bigint)`
 
 #### Scenario: Lineage placement handles bigint head ids

@@ -75,7 +75,7 @@ Tests under `payloadSchemas/tests/` that need a PostgreSQL connection SHALL obta
 Database-backed tests SHALL request the connection inside the test body. Then a missing configuration fails
 those tests individually while the file's other tests run and report. Database-backed tests SHALL NOT be
 skipped when the configuration is missing. A missing connection is a failure, because the seed-fidelity test
-is the only check on the dictionary seeds in `create_new.sql`.
+is the only check on the dictionary seeds in `postgresql/01-dictionaries.sql`.
 
 #### Scenario: Pure tests survive a missing configuration
 - **WHEN** `enums.test.js` runs with no `PG_*` variables set
@@ -87,7 +87,7 @@ is the only check on the dictionary seeds in `create_new.sql`.
 - **THEN** each of its tests fails with the error naming the missing variables, and none is reported as skipped
 
 #### Scenario: Configured database
-- **WHEN** the `PG_*` variables in `.env` point at a database built from `create_new.sql`
+- **WHEN** the `PG_*` variables in `.env` point at a database built from the DDL
 - **THEN** `enums.test.js` and `dictionary-seeds.test.js` pass exactly as they did when they imported
   `src/lib/pg-pool.js`
 

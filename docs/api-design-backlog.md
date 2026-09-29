@@ -189,7 +189,7 @@ dictionary table to equal `payloadSchemas/tests/fixtures/legacy-enums.json` exac
 `payloadSchemas/tests/dictionary-seeds.test.js` asserts it. That freezes the seeds at their
 conversion-time values. Once the API lets curators add, rename or retire dictionary values, the
 requirement must loosen, for example to "the seeds include every value present in migrated data".
-Open: the new wording, whether the test checks `create_new.sql` or the live table, and whether
+Open: the new wording, whether the test checks `01-dictionaries.sql` or the live table, and whether
 retired values stay in the table for old rows.
 
 *Reasoning:* the `split-payload-schemas` change, which kept the test in `payloadSchemas/` because it
@@ -271,7 +271,7 @@ years out). Migrations may depend on everything, and nothing may depend on migra
 pbdb2-backend/
 ├── package.json        npm workspaces
 ├── openspec/           one root (see below)
-├── db/create_new.sql          ◀──────┐
+├── db/*.sql                   ◀──────┐
 ├── payloadSchemas/            ◀──┐   │    durable
 ├── api/  ───────────────────────┼───┤
 └── migrations/  ────────────────┴───┘    leaf: src/, mariadb/, migration_exploration/,
@@ -316,11 +316,11 @@ spec against it"). Run `openspec init` once at the root with the expanded workfl
    `backup/ddm-dev-pre-merge`, …); finish or park `clade-hierarchy-user-guide`; clear the untracked
    root files.
 3. Tell collaborators; confirm no unpushed work on the old paths.
-4. *Monorepo change:* one `git mv` commit into `migrations/`, `create_new.sql` → `db/`, then fix
+4. *Monorepo change:* one `git mv` commit into `migrations/`, the DDL files → `db/`, then fix
    relative imports. `npm test` and a full `run-migrations` must reproduce the totals.
 5. Graft the API (`filter-repo --to-subdirectory-filter api` on a fresh clone, merge unrelated
    histories). Move its specs and archive into the root `openspec/`. Point the integration harness
-   at `db/create_new.sql`.
+   at the DDL files in `db/`.
 6. Root `package.json` with workspaces and one lockfile; root `npm test` runs both.
 7. Tooling: merge the `CLAUDE.md` files and `config.yaml` contexts (the API's `CLAUDE.md` says
    "separate repos"). Fix the Purposes of `opinions-migration` and `taxa-opinions` (still "TBD").
