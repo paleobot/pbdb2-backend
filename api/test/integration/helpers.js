@@ -1,7 +1,7 @@
 import 'dotenv/config';
 
 import { randomBytes } from 'node:crypto';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -13,8 +13,9 @@ const { Client, Pool } = pg;
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 // The backend schema (with its lineage triggers) lives in the sibling
-// pbdb2-migrations repo. Overridable for non-default checkouts / CI.
-const DEFAULT_SQL_PATH = join(__dirname, '../../../pbdb2-migrations/postgresql/create_new.sql');
+// pbdb2-migrations repo as NN-*.sql files (01-dictionaries, 02-core, 03-taxa),
+// applied in sorted name order. Overridable for non-default checkouts / CI.
+const DEFAULT_DDL_DIR = join(__dirname, '../../../pbdb2-migrations/postgresql');
 
 function sslFrom(config) {
   return config.caCertPath ? { ca: readFileSync(config.caCertPath) } : false;
@@ -22,11 +23,11 @@ function sslFrom(config) {
 
 /**
  * Provision an ephemeral test database against the PostgreSQL identified by
- * `PG_*`, load `create_new.sql` into it (triggers and all), and return a pool
+ * `PG_*`, load the backend DDL into it (triggers and all), and return a pool
  * plus a `teardown` that drops it.
  *
  * Returns `{ available: false, reason }` — never throws — when there is no
- * connection or the schema file is missing, so integration tests SKIP cleanly
+ * connection or the schema files are missing, so integration tests SKIP cleanly
  * rather than failing on machines without a database.
  */
 export async function setupTestDb() {
@@ -38,9 +39,12 @@ export async function setupTestDb() {
     };
   }
 
-  const sqlPath = process.env.CREATE_SQL_PATH || DEFAULT_SQL_PATH;
-  if (!existsSync(sqlPath)) {
-    return { available: false, reason: `create_new.sql not found at ${sqlPath}; set CREATE_SQL_PATH` };
+  const ddlDir = process.env.DDL_DIR || DEFAULT_DDL_DIR;
+  const ddlFiles = existsSync(ddlDir)
+    ? readdirSync(ddlDir).filter((f) => /^\d\d-.*\.sql$/.test(f)).sort()
+    : [];
+  if (ddlFiles.length === 0) {
+    return { available: false, reason: `no NN-*.sql DDL files in ${ddlDir}; set DDL_DIR` };
   }
 
   const ssl = sslFrom(config);
@@ -78,14 +82,14 @@ export async function setupTestDb() {
   }
 
   // From here on the database exists, so any failure must drop it rather than
-  // leak an orphan (e.g. a broken create_new.sql failing to load).
+  // leak an orphan (e.g. a broken DDL file failing to load).
   const pool = new Pool({ ...adminCfg, database: dbName });
   try {
-    await pool.query(readFileSync(sqlPath, 'utf8'));
+    await pool.query(ddlFiles.map((f) => readFileSync(join(ddlDir, f), 'utf8')).join('\n'));
   } catch (err) {
     await pool.end().catch(() => {});
     await dropDatabase().catch(() => {});
-    return { available: false, reason: `failed to load ${sqlPath}: ${err.message}; skipping` };
+    return { available: false, reason: `failed to load the DDL in ${ddlDir}: ${err.message}; skipping` };
   }
 
   async function teardown() {
@@ -110,7 +114,7 @@ const MAX_SEQ = 0xfff;
  * the high nibble of byte 6 is the UUID version, so the column accepts v7 and
  * nothing else. `crypto.randomUUID()` emits v4 and is rejected, and there is no
  * `uuidv7()` to call in the database either: it arrives in PostgreSQL 18 and
- * `create_new.sql` defines no helper of its own. The schema's own comment on the
+ * the backend DDL defines no helper of its own. The schema's own comment on the
  * taxa/opinions tables settles the question — permids are "APP-MINTED uuidv7" —
  * so minting is the application's job, and the fixtures do it here.
  *
@@ -172,11 +176,12 @@ export function newPermid() {
  */
 export async function seedPerson(pool) {
   const { rows } = await pool.query(
-    `INSERT INTO persons (id, role_id, person, authorizer_person_id)
-     VALUES (1, (SELECT id FROM dictionaries.roles WHERE role = 'Superadmin'),
+    `INSERT INTO persons (id, permid, role_id, person, authorizer_person_id)
+     VALUES (1, $1, (SELECT id FROM dictionaries.roles WHERE name = 'Superadmin'),
              '{"name":"Seed Admin"}'::jsonb, 1)
      ON CONFLICT (id) DO NOTHING
      RETURNING id`,
+    [newPermid()],
   );
   return rows.length ? rows[0].id : 1;
 }

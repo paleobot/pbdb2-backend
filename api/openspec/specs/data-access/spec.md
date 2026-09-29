@@ -91,7 +91,8 @@ The system SHALL provide an integration test suite, runnable via a dedicated
 `test:integration` script separate from the default test run, that provisions an
 ephemeral database (named `pbdb2_test_<random>`) on the PostgreSQL instance
 identified by the `PG_*` environment variables, loads the backend schema
-(`create_new.sql`, including its lineage triggers), seeds fixtures, exercises the
+(the `NN-*.sql` DDL files in `pbdb2-migrations/postgresql/`, in sorted name order,
+including its lineage triggers), seeds fixtures, exercises the
 read repository and schema tree against that database, and drops the ephemeral
 database when the run completes. The default `npm test` run SHALL NOT require a
 database.
