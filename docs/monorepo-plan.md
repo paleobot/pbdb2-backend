@@ -21,8 +21,8 @@ today they live in two repos:
 ```
  pbdb2-migrations                          pbdb2-api
  ┌──────────────────────────┐              ┌──────────────────────────┐
- │ postgresql/create_new.sql│◀─ ─ ─ ─ ─ ─ ─│ integration tests load it│  from a sibling
- │                          │              │ from ../pbdb2-migrations │  checkout on disk
+ │ postgresql/create_new.sql│◀─ ─ ─ ─ ─ ─ ─│ integration tests query  │  a database built
+ │                          │              │ a DB built from it       │  elsewhere, by hand
  │ payloadSchemas/          │              │                          │
  │ play/server.js           │─ ─ ─ ─ ─ ─ ─▶│ schema-tree.js           │  copied, and now
  │ pg-pool.js               │─ ─ ─ ─ ─ ─ ─▶│ config.js                │  drifting
@@ -138,14 +138,16 @@ We'll agree on a time together.
 **4. The move (second change).**
 - One commit moves everything into the new layout, with `create_new.sql` going to `db/`. The same
   change fixes every import and file path that pointed at the old locations, including
-  `run-migrations.js` and the scripts in `migration_exploration/testing/` that read
-  `create_new.sql`.
+  `run-migrations.js`. `migration_exploration/` moves as-is and is not fixed up: nothing depends
+  on it, so its scripts may break and it retires with the rest of `migrations/`.
 - The API's history is brought in under `api/`. Its 15 commits are the only history that gets
   rewritten, to move them into the subdirectory.
 - The root `package.json` sets up npm workspaces. The migrations and the API keep their own
   `package.json`.
 - Check: `npm test` passes, the full migration run reproduces its totals, and the API's
-  integration tests build their database from `db/create_new.sql` in the same repo.
+  integration tests pass. They run against an existing database (the one named in `.env`), as they
+  do today. Having them build a fresh test database from `db/create_new.sql` is possible once both
+  live in one repo, but it isn't part of the move.
 
 **5. Rename and archive.** `pbdb2-migrations` becomes `pbdb2-backend` on GitHub. `pbdb2-api` is
 archived (read-only) with a pointer to its new home.
@@ -183,10 +185,11 @@ a merge or rebase. Landing work first is still simpler.
 
 ## Still open, and questions for you
 
-- **`migration_exploration/testing/`.** Many of the `derive_taxa()` benchmark and diagnostic
-  scripts are really tools for the database functions, not for migrations. They sit under
-  `migrations/` in the plan above. If you still use them, they may belong next to `db/` instead.
-  What do you think?
+- **`migration_exploration/`.** This folder is superseded: nothing in the repo uses it, and the
+  plan carries it into `migrations/` unchanged, without fixing its paths. Some of your recent work
+  there (for example the `derive_taxa()` benchmark and diagnostic scripts in `testing/`) may still
+  be useful to you. If you still run any of them, tell me which, and we can decide what to do with
+  them. Otherwise they'll stop working after the move and go when `migrations/` retires.
 - **Your branches.** Which to keep (step 2).
 - **Timing.** When a pause in DDL work would suit you.
 - **The frontend** is expected to stay in its own repo, not yet confirmed, and to get the payload
