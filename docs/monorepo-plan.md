@@ -126,10 +126,9 @@ each migration's directory, with their names unchanged. `tests/enums.test.js` an
 (`src/lib/pg-pool.js`) and get their own. A guard test in `npm test` now enforces the rule above for
 `payloadSchemas/`, so the move itself only relocates files.
 
-**2. Housekeeping.** Before the move, in-flight work should be merged or parked, and branches that
-are fully merged can go. *No branch is deleted without its owner agreeing.* Some remote branches
-are yours (`clade-rework`, `graph-visuals`, `patch-derive-taxa`, `taxa-opinions-revise`), and I'd
-like to go through them with you. The open `clade-hierarchy-user-guide` change (16 of 17 tasks) will
+**2. Housekeeping.** Before the move, in-flight work should be merged or parked. Besides `main`
+and `ddm-dev`, the only branch on GitHub is your `graph-visuals` (one commit, the graph tool), and
+it stays or goes as you decide. The open `clade-hierarchy-user-guide` change (16 of 17 tasks) will
 also be finished or parked.
 
 **3. Agree a moment.** The move is quick (an afternoon), but it works best with nothing in flight.
@@ -156,7 +155,7 @@ archived (read-only) with a pointer to its new home.
 
 Before the move:
 - Push or merge what you're working on, or tell me what's in flight so we can time it.
-- Let me know which of your branches to keep.
+- Let me know whether to keep `graph-visuals`.
 
 After the move:
 - `git pull`. The move comes through as a normal commit.
@@ -190,7 +189,7 @@ a merge or rebase. Landing work first is still simpler.
   there (for example the `derive_taxa()` benchmark and diagnostic scripts in `testing/`) may still
   be useful to you. If you still run any of them, tell me which, and we can decide what to do with
   them. Otherwise they'll stop working after the move and go when `migrations/` retires.
-- **Your branches.** Which to keep (step 2).
+- **`graph-visuals`.** Keep or drop (step 2).
 - **Timing.** When a pause in DDL work would suit you.
 - **The frontend** is expected to stay in its own repo, not yet confirmed, and to get the payload
   schemas from the API over HTTP. Either way, it doesn't affect day-to-day backend work.
