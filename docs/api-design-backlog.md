@@ -83,6 +83,49 @@ should not be revived as a state rule.
 
 *Reasoning:* the character/state design (Context, D5).
 
+## A schema as a form: domain tree or JSON Schema
+
+**Open.** A client building a description form from a schema could get the domain tree that
+`schema-tree.js` returns today, or a JSON Schema generated from it: characters as `properties`,
+states as `enum` values, quantitative states as `type: "number"`.
+
+- For JSON Schema: form libraries render it directly, the same document validates the submitted
+  description, and any client can read it without knowing the domain model.
+- Against: it loses what JSON Schema has no word for (order, legacy IDs, `definition` as distinct
+  from `description`) unless carried in `x-` fields. Nested sub-states don't map cleanly onto
+  `enum`. Other consumers (export, diffing versions) still want the tree. It ties the API to one
+  JSON Schema version and to form-library assumptions.
+- Middle path: serve the tree, and generate JSON Schema in the client, or offer both through content
+  negotiation (`Accept: application/schema+json`).
+
+This is not [Serving the schemas to clients](#serving-the-schemas-to-clients), which is about each
+entity's payload schema. It depends on the description payload (see the entry above) and on
+[Schema constraints](#schema-constraints-issue-21).
+
+*Reasoning:* `schema-query-json-object-vs-json-schema.md` (e51b649, 2026-04-01), folded in here and
+removed 2026-09-30. It predates the payload conversions and still describes `pbotID` and `order`.
+
+## Schema constraints (issue #21)
+
+**Explored, not decided.** [paleobot/pbdb2-dev#21](https://github.com/paleobot/pbdb2-dev/issues/21)
+asks for constraints on which states a description may assign. Exploration in April 2026 found three
+independent kinds:
+- Cross-character rules ("if height is short, size is not big"), belonging to the schema. Leaning:
+  rules in their own tables (`schema_rules`, `schema_rule_refs`) with real FKs to characters and
+  states, so the version triggers keep them current; rule logic as JSON Logic in an envelope (id,
+  message, severity `error` or `warn`); a rule whose condition is unknown stays dormant.
+- Typed values on a state (number, range, unit), as a `valueSpec` in the state's jsonb.
+- A third, ambiguous scenario, set aside.
+
+Open: the rule language (JSON Logic or AJV `if`/`then`), the description payload (shared with
+[Descriptions and quantitative values](#descriptions-and-quantitative-values)), what deleting a
+character that a rule uses does, and numeric comparisons in rules.
+
+Since then, `states.quantitative` covers "this state needs a value", but not its type, range or unit.
+The notes' line references are to `create_new.sql`, now split into `postgresql/01`–`03`.
+
+*Reasoning:* `docs/schema-constraints-exploration.md`.
+
 ## Which variant validates a merged PATCH document
 
 **Open.** The edit pattern is settled: guard the body with `patch-guard`, merge the stored row with

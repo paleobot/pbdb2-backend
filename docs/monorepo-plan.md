@@ -145,6 +145,8 @@ We'll agree on a time together.
   change fixes every import and file path that pointed at the old locations, including
   `run-migrations.js`. `migration_exploration/` moves as-is and is not fixed up: nothing depends
   on it, so its scripts may break and it retires with the rest of `migrations/`.
+- The change decides where each `.env` lives and where `global-bundle.pem` (the AWS RDS certificate
+  bundle) goes. Both are found today by paths relative to the repo root, where every command runs.
 - The API's history is brought in under `api/`. Its 15 commits are the only history that gets
   rewritten, to move them into the subdirectory.
 - The root `package.json` sets up npm workspaces. The migrations and the API keep their own
@@ -161,6 +163,9 @@ archived (read-only) with a pointer to its new home.
 
 Before the move:
 - Push or merge what you're working on, or tell me what's in flight so we can time it.
+- If any `*_CA_CERT` variable in your `.env` is a relative path such as `global-bundle.pem`, make it
+  absolute. Relative paths are resolved from the directory a command starts in, and after the move
+  the migrations and the API start in their own subdirectories.
 
 After the move:
 - `git pull`. The move comes through as a normal commit.
