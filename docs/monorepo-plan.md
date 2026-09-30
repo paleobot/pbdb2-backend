@@ -132,13 +132,13 @@ each migration's directory, with their names unchanged. `tests/enums.test.js` an
 (`src/lib/pg-pool.js`) and get their own. A guard test in `npm test` now enforces the rule above for
 `payloadSchemas/`, so the move itself only relocates files.
 
-**2. Housekeeping.** Before the move, in-flight work should be merged or parked. Besides `main`
-and `ddm-dev`, the only branch on GitHub is your `graph-visuals` (one commit, the graph tool). You've
-confirmed it's dead and won't be merged, so it's deleted before the move. The open `clade-hierarchy-user-guide` change (16 of 17 tasks) will
-also be finished or parked.
+**2. Housekeeping (done).** In-flight work was merged or parked before the move. Your
+`graph-visuals` branch was dead, so it was deleted; `main` and `ddm-dev` are the only branches on
+GitHub. The `clade-hierarchy-user-guide` change stays open: its guide is written, and only its
+archive waits on a maintainer's confirmation. Stray files at the root went into `docs/`.
 
-**3. Agree a moment.** The move is quick (an afternoon), but it works best with nothing in flight.
-We'll agree on a time together.
+**3. Pick a moment (done).** The move is quick (an afternoon), but it works best with nothing in
+flight. It happens while you're on other work: neither repo has anything in flight.
 
 **4. The move (second change).**
 - One commit moves everything into the new layout, with the three DDL files going to `db/`. The same
@@ -147,7 +147,7 @@ We'll agree on a time together.
   on it, so its scripts may break and it retires with the rest of `migrations/`.
 - The change decides where each `.env` lives and where `global-bundle.pem` (the AWS RDS certificate
   bundle) goes. Both are found today by paths relative to the repo root, where every command runs.
-- The API's history is brought in under `api/`. Its 15 commits are the only history that gets
+- The API's history is brought in under `api/`. Its 16 commits are the only history that gets
   rewritten, to move them into the subdirectory.
 - The root `package.json` sets up npm workspaces. The migrations and the API keep their own
   `package.json`.
@@ -200,7 +200,6 @@ a merge or rebase. Landing work first is still simpler.
   there (for example the `derive_taxa()` benchmark and diagnostic scripts in `testing/`) may still
   be useful to you. If you still run any of them, tell me which, and we can decide what to do with
   them. Otherwise they'll stop working after the move and go when `migrations/` retires.
-- **Timing.** When a pause in DDL work would suit you.
 - **The frontend** is expected to stay in its own repo, not yet confirmed, and to get the payload
   schemas from the API over HTTP. Either way, it doesn't affect day-to-day backend work.
 
