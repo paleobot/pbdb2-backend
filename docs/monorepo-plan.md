@@ -32,6 +32,13 @@ Nothing makes the two repos move together, so they drift. A recent example: conv
 character and state payload schemas changed what the API returns for a schema GET, and nothing in
 either repo noticed. The API had no way to see the change.
 
+Another: converting the person payload schema (694ff6c, 2026-09-22) renamed `dictionaries.roles.role`
+to `name` and made `persons.permid` required. The API's integration tests seed a person using the old
+column and without a permid, so from that commit on, all 27 of them failed. Nobody noticed for a week,
+because nothing in this repo runs the API's tests. The failures came to light on 2026-09-29, when
+splitting the DDL files meant running the API tests again. Had the split simply removed
+`create_new.sql`, the harness would have skipped those tests without any warning.
+
 The API is about to rely much more heavily on the backend's work. The plan is for it to validate
 POST and PATCH bodies against the same annotated payload schemas the migrations use, and to build
 its responses with the same `merge()`/`split()` code. Once that happens, a change to a payload
