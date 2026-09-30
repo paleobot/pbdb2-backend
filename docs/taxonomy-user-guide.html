@@ -285,7 +285,6 @@
   .case-body { padding: 20px 22px 24px; }
   .case-body h3 { font-size: 1.18rem; margin-bottom: 4px; }
   .case-body .cite { font-size: 0.86rem; color: var(--ink-faint); font-style: italic; margin-bottom: 14px; }
-  .case-body .cite.hypo::before { content: "hypothetical — "; font-style: normal; color: var(--accent-warm); }
   .case-body p { margin: 0 0 14px; max-width: 60ch; }
   .case-body p:last-child { margin-bottom: 0; }
   .takeaway {
@@ -384,7 +383,6 @@
     <h1>The Taxonomy Ledger</h1>
     <p class="dek">How the next Paleobiology Database keeps track of fossil names — and decides, on its own, what everyone currently believes.</p>
     <p class="lede">In the old system, a curator typed in a paper's opinion about a name, and once a day a slow background job re-read every opinion ever entered and rebuilt its best guess at "the" classification. The new system does the same job — but the bookkeeping is simpler, the answer is always current, and nothing is ever silently overwritten.</p>
-    <p class="lede">This page walks through the idea from scratch. No screenshots, no click-by-click steps — the data-entry screens for this system haven't been built yet. What follows is the model those screens will eventually sit on top of.</p>
   </header>
 
   <!-- ============ THE BIG IDEA ============ -->
@@ -394,8 +392,8 @@
     <p class="standfirst">Everything in this system rests on keeping two things strictly separate: what a published paper <em>said</em>, and what the database currently <em>believes</em>.</p>
     <div class="prose">
       <p>Think of every published taxonomic claim — "this species belongs in that genus," "these two names are the same animal," "this name was misspelled" — as a small note clipped to an index card. Nobody ever deletes a note, even a note from a hundred years ago that everyone now disagrees with. It's part of the historical record: someone, somewhere, published that claim.</p>
-      <p>A separate, unwritten-on ledger holds the current answer for every name: is it accepted, what does it belong to, is it a synonym of something else. Nobody fills the ledger in by hand. It's entirely <strong>recomputed</strong> from the notes — the same way a librarian re-derives "the current consensus" by reading through a card's whole file rather than trusting whatever's scrawled on the outside of the folder.</p>
-      <p>That's the whole trick. If the ledger and the notes ever disagree, the notes win, and the ledger gets rebuilt. There is no "correct" version living only in someone's head or in a value nobody wrote down where it came from.</p>
+      <p>A separate, invisible ledger holds the current answer for every name: is it accepted, what does it belong to, is it a synonym of something else. It's entirely <strong>recomputed</strong> from the notes — the same way a librarian re-derives "the current consensus" by reading through a card's whole file rather than trusting something scrawled on the outside of the folder.</p>
+      <p>That's the whole trick. If the ledger and the notes ever disagree, the notes win, and the ledger gets rebuilt. The idea of what is "correct" is not static.</p>
     </div>
 
     <figure class="diagram">
@@ -422,19 +420,18 @@
         </g>
 
         <!-- converging lines to recompute -->
-        <path d="M166,38 L 250,95" fill="none" stroke="currentColor" stroke-width="1"></path>
-        <path d="M166,105 L 250,105" fill="none" stroke="currentColor" stroke-width="1" marker-end="url(#arrow)"></path>
-        <path d="M166,172 L 250,115" fill="none" stroke="currentColor" stroke-width="1" marker-end="url(#arrow)"></path>
-        <path d="M166,38 L 240,90" fill="none" stroke="currentColor" stroke-width="1" marker-end="url(#arrow)"></path>
+        <path d="M166,38 L 228,90" fill="none" stroke="currentColor" stroke-width="1" marker-end="url(#arrow)"></path>
+        <path d="M166,105 L 228,105" fill="none" stroke="currentColor" stroke-width="1" marker-end="url(#arrow)"></path>
+        <path d="M166,172 L 228,115" fill="none" stroke="currentColor" stroke-width="1" marker-end="url(#arrow)"></path>
 
         <!-- recompute box -->
-        <rect x="252" y="72" width="140" height="66" rx="2" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="1.4"></rect>
-        <text x="322" y="99" text-anchor="middle" font-size="12.5" font-weight="600" fill="var(--accent)">RECOMPUTE</text>
-        <text x="322" y="118" text-anchor="middle" font-size="10.5" fill="var(--accent)">evidence → year → order</text>
+        <rect x="230" y="72" width="170" height="66" rx="2" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="1.4"></rect>
+        <text x="315" y="99" text-anchor="middle" font-size="12.5" font-weight="600" fill="var(--accent)">RECOMPUTE</text>
+        <text x="315" y="118" text-anchor="middle" font-size="9.5" fill="var(--accent)">evidence → year → order</text>
 
         <!-- arrow to ledger -->
-        <path d="M392,105 L 466,105" fill="none" stroke="var(--accent)" stroke-width="1.6" marker-end="url(#arrow-accent)"></path>
-        <text x="429" y="96" text-anchor="middle" font-size="10.5" fill="var(--accent)">writes</text>
+        <path d="M400,105 L 466,105" fill="none" stroke="var(--accent)" stroke-width="1.6" marker-end="url(#arrow-accent)"></path>
+        <text x="433" y="96" text-anchor="middle" font-size="10.5" fill="var(--accent)">writes</text>
 
         <!-- ledger box -->
         <rect x="468" y="60" width="156" height="90" rx="2" fill="var(--surface-raised)" stroke="currentColor" stroke-width="1.4"></rect>
@@ -535,7 +532,7 @@
   <section class="block">
     <span class="eyebrow">Worked examples</span>
     <h2>Case files</h2>
-    <p class="standfirst">Four examples, each adding one more piece of the mechanism. The first two are drawn from real published names; the last two use a well-known genus-confusion case to walk through what a reversal looks like.</p>
+    <p class="standfirst">Five examples, each adding one more piece of the mechanism — all drawn from real published names, checked directly against the live system rather than invented for the page.</p>
 
     <div class="case">
       <div class="case-tab"><span class="num">Case 1</span><span class="kind">spelling · correction</span></div>
@@ -551,10 +548,14 @@
     <div class="case">
       <div class="case-tab"><span class="num">Case 2</span><span class="kind">spelling · misspelling</span></div>
       <div class="case-body">
-        <h3><span class="latin">Myliobatus</span> vs. <span class="latin">Myliobatis</span></h3>
-        <div class="cite hypo">Illustrative — a classic textbook case of a one-letter genus confusion in eagle rays.</div>
-        <p>Suppose a paper introduces the spelling <span class="latin">Myliobatus</span>. A later paper points out this is simply a misspelling of the already-established genus <span class="latin">Myliobatis</span> — not a new name, not a correction of a typo in the Latin grammar, just an error.</p>
-        <p>That note links the two cards, exactly like Case 1's correction note does. But it's flagged differently: a misspelling is marked so that it can <span class="never">never</span> win the "current spelling" ranking, no matter how much evidence or how many years pass in its favor. A correction is a fair competitor; a misspelling is disqualified from the race entirely.</p>
+        <h3><span class="latin">Sinraptor dongii</span> vs. <span class="latin">Sinraptor dongi</span></h3>
+        <div class="cite">A 2007 paper flagged the double-<em>i</em> spelling of this well-known Jurassic theropod as an error, not a new name.</div>
+        <p>This genus's real history has three cards, not two. It was first named <span class="latin">Yangchuanosaurus dongi</span> in 1993; a 1999 paper reassigned it to a different genus, linking it forward as a legitimate recombination — <span class="latin">Sinraptor dongi</span>, the name still in use. Separately, a 2007 paper noted that <span class="latin">Sinraptor dongii</span> — the same name with an extra <em>i</em>, the usual Latin-declension slip — had been showing up in the literature, and flagged it as a plain misspelling, not a new name or a rival spelling.</p>
+        <p>That note links the two cards, exactly like Case 1's correction note does. But it's flagged differently: a misspelling is marked so that it can <span class="never">never</span> win the "current spelling" ranking, no matter how much evidence or how many years pass in its favor. The recombination is a fair competitor; the misspelling is disqualified from the race entirely — and, checked directly against the live ledger, that's exactly the current state: <span class="latin">Sinraptor dongi</span> is the accepted spelling, with both the older genus assignment and the double-<em>i</em> error linked into the same lineage underneath it.</p>
+        <div class="classic-note">
+          <span class="tag">Checked against Classic</span>
+          Classic's own <span class="mono">opinions</span> table reaches the identical conclusion independently: <span class="mono">taxon_no</span> 138973 ("<span class="latin">Sinraptor dongii</span>") carries <span class="mono">spelling_reason = 'misspelling'</span>, pointing at the same <span class="latin">Sinraptor dongi</span> that pbdb2's own ledger currently names as accepted.
+        </div>
         <div class="takeaway"><strong>The point:</strong> not every linking note makes its card eligible to become the accepted name. Misspellings are linked into the lineage — so searches and downloads still find them — but they can't win it.</div>
       </div>
     </div>
@@ -606,14 +607,24 @@
     </div>
 
     <div class="case">
-      <div class="case-tab"><span class="num">Case 4</span><span class="kind">sameness · reversal</span></div>
+      <div class="case-tab"><span class="num">Case 4</span><span class="kind">status · recency</span></div>
       <div class="case-body">
-        <h3>Un-merging <span class="latin">Myliobatus</span> and <span class="latin">Myliobatis</span></h3>
-        <div class="cite hypo">Continuing Case 2 — a specialist re-examines the type material and disagrees with the misspelling claim.</div>
-        <p>Say a later, more thorough study argues Case 2 had it backwards: <span class="latin">Myliobatus</span> isn't a misspelling at all, but a distinct, valid genus. In the old system, undoing a merge like this meant walking back through the ledger's history to find the last state before the bad claim took hold — a genuinely difficult piece of code, prone to breaking on edge cases.</p>
-        <p>Here, undoing is just <em>doing</em> — but it takes a specific kind of note, not just any new one. The specialist's paper is entered as a direct rejection of the earlier claim — "<span class="latin">Myliobatus</span> is <em>not</em> a misspelling of <span class="latin">Myliobatis</span>," with its own evidence and year — rather than a free-floating comment that the two are unrelated. That note competes in the exact same evidence-then-recency-then-entry-order contest as every other note about <span class="latin">Myliobatus</span>'s spelling. If it wins, the 1990 misspelling note simply loses that round's contest: since "not a misspelling of" asserts no relationship at all, <span class="latin">Myliobatus</span>'s card contributes nothing to the grouping step this time, and the two lineages come back apart on their own the next time anything recomputes.</p>
-        <p>Nothing walks backward and nothing is un-written — the 1990 note stays on the record exactly as published. It's simply no longer the top-ranked note about what <span class="latin">Myliobatus</span> is.</p>
-        <div class="takeaway"><strong>The point:</strong> because the ledger is never anything but a recomputation, there's no separate "undo" mechanism to write or to get wrong. Reversing a claim is just adding one more note — as long as that note directly rejects the specific relationship being undone, rather than merely asserting something unrelated.</div>
+        <h3><span class="latin">Stagodon tumidus</span> — a 1929 doubt, outlasted</h3>
+        <div class="cite">Marsh named it in 1889. A 1929 monograph called it a <em>nomen dubium</em>; a 1966 paper's own status note about it didn't repeat that doubt.</div>
+        <p>Two papers, decades apart, each filed an ordinary status note about this one name — neither one framed as a response to the other. In 1929, <em>American Mesozoic Mammalia</em> called it a <em>nomen dubium</em>: too poorly known to use with confidence, no evidence stated. In 1966, a paper on the Lance Formation's marsupials filed its own status note — <em>nomen oblitum</em>, a name that's simply fallen out of use — also with no evidence stated.</p>
+        <p>Neither note mentions the other. Both are just ordinary testimony about this name's standing, competing the same way every other note on this page competes: evidence tied, so recency decides. The 1966 note is newer, and <em>nomen oblitum</em> doesn't invalidate a name the way <em>nomen dubium</em> does — so, checked directly against the live ledger, <span class="latin">Stagodon tumidus</span> stands today with no disqualifying status attached. The 1929 doubt is still on record. It's simply no longer the top-ranked word on what this name's standing is.</p>
+        <div class="takeaway"><strong>The point:</strong> because the ledger is never anything but a recomputation, there's no separate "undo" mechanism to write or to get wrong. A later opinion doesn't have to reject an earlier one to outrank it — ordinary competing testimony, entered independently, is all reversal ever takes. If a future paper revives the 1929 doubt with real evidence behind it, the ledger updates the moment that's entered, the same as every other case here.</div>
+      </div>
+    </div>
+
+    <div class="case">
+      <div class="case-tab"><span class="num">Case 5</span><span class="kind">status · nomen dubium</span></div>
+      <div class="case-body">
+        <h3><span class="latin">Testudo pertenuis</span> — doubted out of the ledger</h3>
+        <div class="cite">Cope named it in 1892; a 2018 review of North American fossil turtles (Pan-Testudinoidea) called it a <em>nomen dubium</em>, with no evidence cited.</div>
+        <p><span class="latin">Testudo pertenuis</span> has a real paper trail: four separate papers, 1893 through 2018, tie it to a companion spelling, <span class="latin">Testudo pertenius</span>, and a 1982 paper — this one with stated evidence — placed it as a junior synonym of <span class="latin">Gopherus canyonensis</span>. None of that made the name disappear on its own. But the same 2018 review that last touched its spelling also filed a status note on it: <em>nomen dubium</em>, no evidence given.</p>
+        <p>Checked directly against the ledger today, neither spelling of this name has a current, accepted row. The lineage is currently absent — not deleted, not hidden, just not eligible to be anyone's answer to "what is this name currently." Every opinion listed above is still on record exactly as published; nothing about this outcome required deleting or overriding any of it.</p>
+        <div class="takeaway"><strong>The point:</strong> the rule described above isn't theoretical — it has already decided a real name's current status. And because the ledger is only ever a recomputation, this isn't final: the next time someone enters a paper defending <span class="latin">pertenuis</span> with real evidence, the name is back the moment that opinion is entered, the same as every other case on this page.</div>
       </div>
     </div>
   </section>
@@ -652,7 +663,7 @@
       </div>
       <div class="compare-row">
         <div class="old"><p><em>nomen dubium</em>, <em>nomen nudum</em>, and similar status calls all competed in the same reliability-ranked pool as ordinary placement and synonymy opinions — the system couldn't tell doubt about a name apart from an act that actually invalidates it.</p></div>
-        <div class="new"><p><em>Nomen dubium</em>, <em>nomen vanum</em>, and <em>nomen nudum</em> are all treated the same way, and all three can disqualify a card — but only as a reversible veto, never an automatic one. A card is ranked into the ordinary contest first, ignoring status entirely; only if the status note's own evidence and year actually outrank the card's best competing claim does the card get evicted, with the ranking rerun among whoever's left. (The Code doesn't distinguish <em>nomen vanum</em> from <em>nomen dubium</em> at all, and old curatorial tagging of <em>nomen nudum</em> can't be trusted to have always applied its stricter test correctly — so none of the three gets to be an absolute, unappealable bar the way a misspelling is.) If every card in a lineage ends up disqualified this way — or all are misspellings — with nothing left standing, that lineage produces no "current name" at all, rather than crowning an unavailable one by default. The same rule cascades one level up: a synonym group with no eligible member anywhere simply doesn't appear in the ledger either. Nothing is deleted — the notes are still all there — there's just nothing available to call current belief.</p></div>
+        <div class="new"><p><em>Nomen dubium</em>, <em>nomen vanum</em>, and <em>nomen nudum</em> are all treated the same way, and all three can disqualify a card — but only as a reversible veto, never an automatic one (see Case 5, a real name this has already happened to). A card is ranked into the ordinary contest first, ignoring status entirely; only if the status note's own evidence and year actually outrank the card's best competing claim does the card get evicted, with the ranking rerun among whoever's left. (The Code doesn't distinguish <em>nomen vanum</em> from <em>nomen dubium</em> at all, and old curatorial tagging of <em>nomen nudum</em> can't be trusted to have always applied its stricter test correctly — so none of the three gets to be an absolute, unappealable bar the way a misspelling is.) If every card in a lineage ends up disqualified this way — or all are misspellings — with nothing left standing, that lineage produces no "current name" at all, rather than crowning an unavailable one by default. The same rule cascades one level up: a synonym group with no eligible member anywhere simply doesn't appear in the ledger either. Nothing is deleted — the notes are still all there — there's just nothing available to call current belief.</p></div>
       </div>
     </div>
 
@@ -676,7 +687,7 @@
       <span class="tag">Where this stands today</span>
       This describes the target design for the taxonomic system — the database structure and the rules for deciding "current belief" are settled. The data-entry screens curators will eventually type into don't exist yet. Everything above is how the system will think, not a tour of a tool you can open right now.
     </div>
-    <p class="colophon">Grounded in <span class="mono">docs/classic-taxa-opinions.md</span>, the <span class="mono">postgresql/</span> DDL (<span class="mono">01-dictionaries.sql</span>, <span class="mono">02-core.sql</span>, <span class="mono">03-taxa.sql</span>), and the Classic PBDB User Guide (Uhen et al., PaleoBios 2023) — real citations (Cases 1 &amp; 3) drawn from that guide's own worked examples, Case 3 re-verified against current <span class="mono">pg_play</span> data.</p>
+    <p class="colophon">Grounded in <span class="mono">docs/classic-taxa-opinions.md</span>, the <span class="mono">postgresql/</span> DDL (<span class="mono">01-dictionaries.sql</span>, <span class="mono">02-core.sql</span>, <span class="mono">03-taxa.sql</span>), and the Classic PBDB User Guide (Uhen et al., PaleoBios 2023) — Cases 1 and 3 cite that guide's own worked examples; all five case files are checked directly against live <span class="mono">pg_play</span> data, with Case 2 also independently checked against Classic's own <span class="mono">pbdb_archive</span>.</p>
   </footer>
 
 </div>
