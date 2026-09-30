@@ -21,8 +21,8 @@ today they live in two repos:
 ```
  pbdb2-migrations                          pbdb2-api
  ┌──────────────────────────┐              ┌──────────────────────────┐
- │ postgresql/0*.sql (DDL)  │◀─ ─ ─ ─ ─ ─ ─│ integration tests query  │  a database built
- │                          │              │ a DB built from it       │  elsewhere, by hand
+ │ postgresql/0*.sql (DDL)  │◀─ ─ ─ ─ ─ ─ ─│ integration tests load   │  through a relative path
+ │                          │              │ it into a throwaway DB   │  to a sibling checkout
  │ payloadSchemas/          │              │                          │
  │ src/lib/pg-pool.js       │─ ─ ─ ─ ─ ─ ─▶│ config.js                │  copied, and now drifting
  └──────────────────────────┘              └──────────────────────────┘
@@ -143,9 +143,9 @@ We'll agree on a time together.
 - The root `package.json` sets up npm workspaces. The migrations and the API keep their own
   `package.json`.
 - Check: `npm test` passes, the full migration run reproduces its totals, and the API's
-  integration tests pass. They run against an existing database (the one named in `.env`), as they
-  do today. Having them build a fresh test database from the DDL files in `db/` is possible once both
-  live in one repo, but it isn't part of the move.
+  integration tests pass. They already build a throwaway database from the DDL on every run, using
+  the PostgreSQL server named in `.env`. Today they find the DDL through a relative path to a sibling
+  `pbdb2-migrations` checkout. The move points that path at `db/` inside the same repo instead.
 
 **5. Rename and archive.** `pbdb2-migrations` becomes `pbdb2-backend` on GitHub. `pbdb2-api` is
 archived (read-only) with a pointer to its new home.
