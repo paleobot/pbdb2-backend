@@ -161,25 +161,32 @@ archived (read-only) with a pointer to its new home.
 
 ## What you'll need to do
 
-Before the move:
-- Push or merge what you're working on, or tell me what's in flight so we can time it.
+Do these in order before starting any new work:
 
-After the move:
-- `git pull`. The move comes through as a normal commit.
-- Run `npm install` once at the repo root.
-- Update anything local that uses the old paths, such as a shell alias or a
-  `psql -f postgresql/01-dictionaries.sql` and the other two, which become `db/01-dictionaries.sql`
-  and so on.
-- Keep one `.env`, at the repo root, with every variable in the root `.env.example`. Delete any old
-  `api/.env` from a `pbdb2-api` checkout instead of copying it, and don't create `api/.env` or
-  `migrations/.env`: every area reads the root file whatever directory you start in, and
-  `PG_CA_CERT=global-bundle.pem` finds the committed certificate at the root.
-- Optionally: `git remote set-url origin git@github.com:paleobot/pbdb2-backend.git`
-- Optionally, rename your local folder to `pbdb2-backend`. If you use Claude Code, copy its memory
-  folder first. Claude Code keys each project by its absolute path, with every `/` turned into `-`
-  (`/home/you/repos/pbdb2-migrations` becomes `~/.claude/projects/-home-you-repos-pbdb2-migrations/`).
-  Copy that folder to the key for the new path, or the memory is left behind. Expect a folder-trust
-  prompt on the first launch in the renamed folder; that's normal for a path Claude Code hasn't seen.
+1. **Pull.** Run `git pull`. The move comes through as a normal commit.
+2. **Install.** Run `npm install` once, at the repo root.
+3. **Set up the one `.env`.**
+   - Put it at the repo root, with every variable listed in the root `.env.example`.
+   - If you have an `api/.env` from a `pbdb2-api` checkout, delete it rather than copying it in.
+   - Don't create `api/.env` or `migrations/.env`. Every area reads the root file, whatever
+     directory you start in.
+   - `PG_CA_CERT=global-bundle.pem` works as written: it finds the committed certificate at the root.
+4. **Update local references to old paths**, such as shell aliases or scripts. For example,
+   `psql -f postgresql/01-dictionaries.sql` becomes `psql -f db/01-dictionaries.sql`, and likewise
+   for `02-core.sql` and `03-taxa.sql`.
+
+Optional:
+
+5. **Point your remote at the new name:**
+   `git remote set-url origin git@github.com:paleobot/pbdb2-backend.git`
+6. **Rename your local folder** to `pbdb2-backend`. If you use Claude Code:
+   1. Before renaming, copy its memory folder. Claude Code keys each project by its absolute path,
+      with every `/` turned into `-`, so `/home/you/repos/pbdb2-migrations` keeps its memory in
+      `~/.claude/projects/-home-you-repos-pbdb2-migrations/`. Copy that folder to the key for the
+      new path (`...-pbdb2-backend/`), or the memory is left behind.
+   2. Rename the folder.
+   3. On the first launch in the renamed folder, expect a folder-trust prompt. That's normal for a
+      path Claude Code hasn't seen.
 
 If a branch does cross the move, git's rename detection usually carries edits to moved files across
 a merge or rebase. Landing work first is still simpler.
