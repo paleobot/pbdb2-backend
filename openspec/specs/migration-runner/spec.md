@@ -266,10 +266,12 @@ prerequisite was never exposed to an earlier step at all.
 - **THEN** the runner records those orphan counts in the run log and does not fail the step, because an orphan is a recorded outcome rather than an unresolved prerequisite
 
 ### Requirement: `--createdb` initializes an empty database and cannot reset a populated one
-When `--createdb` is passed, the runner SHALL apply the DDL: the files `postgresql/[0-9][0-9]-*.sql`
-(`01-dictionaries.sql`, `02-core.sql`, `03-taxa.sql`, see `ddl-layout`), read in sorted name order and
-concatenated, executed as a single `pg` query through the existing pool, before preflight's dictionary
-and emptiness checks and before the first step.
+When `--createdb` is passed, the runner SHALL apply the DDL: the files `db/[0-9][0-9]-*.sql` in `db/` at
+the repository root, outside `migrations/` (`01-dictionaries.sql`, `02-core.sql`, `03-taxa.sql`, see
+`ddl-layout`), read in sorted name order and concatenated, executed as a single `pg` query through the
+existing pool, before preflight's dictionary and emptiness checks and before the first step. The runner
+SHALL locate `db/` from its own file's location, not from the working directory. Reading `db/` from
+`migrations/` is the permitted direction of `repository-layout`'s dependency rule.
 
 The files contain no `psql` meta-commands, no `COPY`, and no explicit `BEGIN`/`COMMIT`, so PostgreSQL
 executes the concatenation as one implicit transaction: it either applies completely or rolls back
@@ -288,6 +290,10 @@ a way to reset a populated one. Creating the database itself is outside the runn
 #### Scenario: Files are applied in load order
 - **WHEN** `--createdb` is passed against an empty database
 - **THEN** `01-dictionaries.sql`, `02-core.sql` and `03-taxa.sql` are applied in that order, and the resulting schema and dictionary seeds are the complete target DDL
+
+#### Scenario: The DDL is found from any working directory
+- **WHEN** the runner is started with `--createdb` from `migrations/` or from the repository root
+- **THEN** it applies the files in `db/` at the repository root in both cases
 
 #### Scenario: Populated database is protected
 - **WHEN** `--createdb` is passed against a database that already contains the `dictionaries` schema

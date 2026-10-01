@@ -9,26 +9,39 @@ enforces the boundary. The rule is one-way: migrations may import from `payloadS
 ### Requirement: `payloadSchemas/` depends on nothing outside itself
 Every JavaScript file under `payloadSchemas/`, including its tests, SHALL import and read only:
 - files under `payloadSchemas/`;
-- npm packages (bare specifiers such as `ajv/dist/2019.js`, `pg`, `dotenv/config`);
-- Node built-ins (`node:` specifiers).
+- npm packages (bare specifiers such as `ajv/dist/2019.js`, `pg`, `dotenv`);
+- Node built-ins (`node:` specifiers);
+- the repository root's `.env`, and only from the tests-local database helper, as
+  `repository-layout` requires. `.env` is local configuration, not code, so reading it does not make
+  `payloadSchemas/` depend on another area.
 
 A relative import specifier (static `import … from`, side-effect `import '…'`, or dynamic `import('…')`) and a
-file read through `new URL('…', import.meta.url)` SHALL resolve to a path inside `payloadSchemas/`. In
-particular, nothing under `payloadSchemas/` SHALL import from `src/` or `migration_exploration/`.
+file read through `new URL('…', import.meta.url)` SHALL resolve to a path inside `payloadSchemas/`, apart
+from that one `.env` read. In particular, nothing under `payloadSchemas/` SHALL import from `migrations/`
+or `api/`.
 
 The rule is one-way. Code outside `payloadSchemas/` MAY import from it, including its test fixtures:
-`src/collections-migration/tests/test-collections-transforms.js` reading
+`migrations/src/collections-migration/tests/test-collections-transforms.js` reading
 `payloadSchemas/tests/fixtures/legacy-enums.json` is allowed.
 
 Comments are not imports. A comment that cites a migration script as the origin of a stored shape (for
-example, "the jsonb keys are the ones `src/authorities-migration` writes") does not violate the rule.
+example, "the jsonb keys are the ones `migrations/src/authorities-migration` writes") does not violate the
+rule.
 
 #### Scenario: A test imports the migrations' pool
-- **WHEN** a file under `payloadSchemas/tests/` contains `import { pg } from '../../src/lib/pg-pool.js'`
+- **WHEN** a file under `payloadSchemas/tests/` contains `import { pg } from '../../migrations/src/lib/pg-pool.js'`
 - **THEN** the boundary guard test fails, naming that file and the specifier
 
 #### Scenario: A fixture read that escapes the directory
-- **WHEN** a file under `payloadSchemas/` reads `new URL('../../src/opinions-migration/inputs/x.csv', import.meta.url)`
+- **WHEN** a file under `payloadSchemas/` reads `new URL('../../migrations/src/opinions-migration/inputs/x.csv', import.meta.url)`
+- **THEN** the boundary guard test fails, naming that file and the path
+
+#### Scenario: The database helper reads the root `.env`
+- **WHEN** `payloadSchemas/tests/pg.js` loads `new URL('../../.env', import.meta.url)`
+- **THEN** the boundary guard test passes
+
+#### Scenario: Any other file reading the root `.env`
+- **WHEN** a file under `payloadSchemas/lib/` reads `new URL('../../.env', import.meta.url)`
 - **THEN** the boundary guard test fails, naming that file and the path
 
 #### Scenario: Package and built-in imports pass
@@ -36,26 +49,27 @@ example, "the jsonb keys are the ones `src/authorities-migration` writes") does 
 - **THEN** the guard test passes those specifiers
 
 #### Scenario: Migrations importing payloadSchemas is allowed
-- **WHEN** `src/audit-payloads.js` imports `../payloadSchemas/collection.schema.js`
+- **WHEN** `migrations/src/audit-payloads.js` imports `../../payloadSchemas/collection.schema.js`
 - **THEN** no rule is broken, and the guard test does not inspect files outside `payloadSchemas/`
 
 #### Scenario: A comment naming a migration path
-- **WHEN** a `*.schema.js` header comment mentions `src/authorities-migration`
+- **WHEN** a `*.schema.js` header comment mentions `migrations/src/authorities-migration`
 - **THEN** the guard test passes, because it inspects import specifiers and `import.meta.url` reads, not comment text
 
 ### Requirement: A guard test enforces the boundary in `npm test`
-A guard test SHALL live in `payloadSchemas/tests/`, matched by the existing `npm test` glob
-`payloadSchemas/tests/*.test.js`. It SHALL scan every `.js` file under `payloadSchemas/` and fail when any relative import specifier or
-`new URL(…, import.meta.url)` read resolves outside `payloadSchemas/`. The failure message SHALL list each
-offending file and specifier. The guard SHALL need no database connection.
+A guard test SHALL live in `payloadSchemas/tests/`, run by the root `npm test`. It SHALL scan every `.js`
+file under `payloadSchemas/` and fail when any relative import specifier or `new URL(…, import.meta.url)`
+read resolves outside `payloadSchemas/`, except the tests-local database helper's read of the root `.env`.
+The failure message SHALL list each offending file and specifier. The guard SHALL need no database
+connection.
 
 #### Scenario: Clean tree
-- **WHEN** `npm test` runs after this change
+- **WHEN** the root `npm test` runs
 - **THEN** the guard test passes
 
 #### Scenario: New violation caught
-- **WHEN** a contributor adds a `payloadSchemas/lib/` module that imports `../../src/lib/uuidv7.js`
-- **THEN** `npm test` fails at the guard test, naming that module and specifier
+- **WHEN** a contributor adds a `payloadSchemas/lib/` module that imports `../../migrations/src/lib/uuidv7.js`
+- **THEN** the root `npm test` fails at the guard test, naming that module and specifier
 
 #### Scenario: Runs without a database
 - **WHEN** no `PG_*` variable is set
@@ -65,8 +79,8 @@ offending file and specifier. The guard SHALL need no database connection.
 Tests under `payloadSchemas/tests/` that need a PostgreSQL connection SHALL obtain it from a helper module in
 `payloadSchemas/tests/`. The helper SHALL:
 - read `PG_HOST`, `PG_PORT` (default `5432`), `PG_USER`, `PG_PASSWORD`, `PG_DATABASE` and optional
-  `PG_CA_CERT` from the environment, loading `.env` the same way the migrations do, so that one `.env`
-  serves both;
+  `PG_CA_CERT` from the environment, loading the root `.env` and resolving a relative `PG_CA_CERT` as
+  `repository-layout` requires, so that one `.env` serves every area;
 - create the pool lazily, on first request, never when the helper is imported;
 - when any required variable is missing, throw an error that names the missing variables, at the point a test
   requests the connection, and SHALL NOT call `process.exit`;
@@ -75,7 +89,7 @@ Tests under `payloadSchemas/tests/` that need a PostgreSQL connection SHALL obta
 Database-backed tests SHALL request the connection inside the test body. Then a missing configuration fails
 those tests individually while the file's other tests run and report. Database-backed tests SHALL NOT be
 skipped when the configuration is missing. A missing connection is a failure, because the seed-fidelity test
-is the only check on the dictionary seeds in `postgresql/01-dictionaries.sql`.
+is the only check on the dictionary seeds in `db/01-dictionaries.sql`.
 
 #### Scenario: Pure tests survive a missing configuration
 - **WHEN** `enums.test.js` runs with no `PG_*` variables set
@@ -87,9 +101,8 @@ is the only check on the dictionary seeds in `postgresql/01-dictionaries.sql`.
 - **THEN** each of its tests fails with the error naming the missing variables, and none is reported as skipped
 
 #### Scenario: Configured database
-- **WHEN** the `PG_*` variables in `.env` point at a database built from the DDL
-- **THEN** `enums.test.js` and `dictionary-seeds.test.js` pass exactly as they did when they imported
-  `src/lib/pg-pool.js`
+- **WHEN** the `PG_*` variables in the root `.env` point at a database built from the DDL
+- **THEN** `enums.test.js` and `dictionary-seeds.test.js` pass, whichever directory `node --test` is started from
 
 #### Scenario: Closing an unused pool
 - **WHEN** a test file's `after` hook closes the pool and no test requested a connection

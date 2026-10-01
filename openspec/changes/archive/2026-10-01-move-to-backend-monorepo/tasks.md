@@ -53,7 +53,7 @@
 - [x] 8.2 Rewrite `openspec/config.yaml`'s project context for the whole backend (DDL, payload schemas, API, migrations, the dependency rule and the spec-path convention); remove the migration-only per-artifact rules that don't apply to the other areas
 - [x] 8.3 Delete `api/.claude/` and `api/.github/` OpenSpec skill and command copies; run `openspec update` at the root; commit the regenerated files
 - [x] 8.4 Update `api/CLAUDE.md` ("separate repos" wording, layout, commands run from the root), the root `README.md`, and the "After the move" section of `docs/monorepo-plan.md` (one root `.env` from `.env.example`; delete any old `api/.env`); set the plan's status line to "moved"
-- [x] 8.5 `openspec validate --all --strict` passes, except `clade-hierarchy-user-guide`: a documentation-only change with no deltas (`skip_specs: true`), which strict validation in openspec 1.5.0 fails until the change is archived. All 35 specs and this change pass.
+- [x] 8.5 `openspec validate --all --strict` passes, except `clade-hierarchy-user-guide`: a documentation-only change with no deltas (`skip_specs: true`), which strict validation in openspec 1.5.0 fails until the change is archived. All 34 specs and this change pass.
 
 ## 9. Checks
 
