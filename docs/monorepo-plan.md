@@ -1,6 +1,6 @@
 # Moving to a backend monorepo
 
-*Status: direction decided 2026-09-25; nothing moved yet. Feedback welcome before any of it happens.*
+*Status: moved 2026-10-01 (OpenSpec change `move-to-backend-monorepo`). The GitHub rename to `pbdb2-backend` and the archiving of `pbdb2-api` follow the push.*
 
 This note explains a planned change to how the PBDB2 backend code is organized. It is written for
 people who work in `pbdb2-migrations` on the DDL, payload schemas and database functions and weren't
@@ -173,8 +173,10 @@ After the move:
 - Update anything local that uses the old paths, such as a shell alias or a
   `psql -f postgresql/01-dictionaries.sql` and the other two, which become `db/01-dictionaries.sql`
   and so on.
-- Your `.env` may need copying into `migrations/`. The move change will say exactly where each
-  `.env` goes.
+- Keep one `.env`, at the repo root, with every variable in the root `.env.example`. Delete any old
+  `api/.env` from a `pbdb2-api` checkout instead of copying it, and don't create `api/.env` or
+  `migrations/.env`: every area reads the root file whatever directory you start in, and
+  `PG_CA_CERT=global-bundle.pem` finds the committed certificate at the root.
 - Optionally: `git remote set-url origin git@github.com:paleobot/pbdb2-backend.git`
 
 If a branch does cross the move, git's rename detection usually carries edits to moved files across

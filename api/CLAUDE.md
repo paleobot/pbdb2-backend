@@ -4,12 +4,14 @@ Guidance for Claude Code working in this repository.
 
 ## Project
 
-`pbdb2-api` — the REST API for PBDB2, a ground-up redevelopment of the
-Paleobiology Database. Owned by the `paleobot` org
-(https://github.com/paleobot/pbdb2-api).
+The REST API for PBDB2, a ground-up redevelopment of the Paleobiology
+Database. It lives in `api/` of the `pbdb2-backend` monorepo
+(https://github.com/paleobot/pbdb2-backend), next to the DDL (`db/`), the
+payload schemas (`payloadSchemas/`) and the migrations (`migrations/`); it was
+the separate `pbdb2-api` repo until 2026-10-01. Nothing in `api/` may import
+or read from `migrations/` (`tests/repository-layout.test.js` enforces it).
 
-The backend (separate repos: `pbdb2-dev`, `pbdb2-migrations`) is PostgreSQL,
-JSONB-heavy: each resource row stores its domain content as a JSONB payload
+The backend database is PostgreSQL, JSONB-heavy: each resource row stores its domain content as a JSONB payload
 alongside relational metadata, a stable `permid`, and an immutable version chain
 (`preceded_by_id` / `succeeded_by_id`) with soft deletion (`removed`). This API
 does not yet talk to that database — handlers currently return stubbed data.
@@ -22,16 +24,28 @@ does not yet talk to that database — handlers currently return stubbed data.
 - **Identity:** `permid` is the public identifier for every resource. Internal
   serial database ids are never exposed.
 - **License:** ISC.
-- `.env*` files are git-ignored; `.env.example` is the exception and should be
-  committed when environment variables are introduced.
+- One `.env` for the whole backend, at the repository root (copy the root
+  `.env.example`); never `api/.env`. `src/server.js` and the integration
+  harness load it by path, so any working directory works. A relative
+  `PG_CA_CERT` resolves against the repository root. New variables go in the
+  root `.env.example`.
 
 ## Commands
 
-- `npm start` — run the server (`src/server.js`). Honors `HOST`, `PORT`,
+Run from the repository root (`npm install` there installs every workspace;
+there is no `api/package-lock.json`):
+
+- `npm start -w api` — run the server (`src/server.js`). Honors `HOST`, `PORT`,
   `NODE_ENV` (defaults: `0.0.0.0`, `3000`, `development`).
-- `npm test` — run the test suite with the built-in Node runner (`node --test`).
+- `npm test -w api` — the API's unit tests (`node --test`, no database).
+  The root `npm test` runs them along with every other area's tests.
+- `npm run test:integration` — the API's integration suite against an
+  ephemeral database built from the DDL in `db/` (`DDL_DIR` overrides).
 
 ## Layout
+
+Paths below are relative to `api/` (as are paths in the API's specs; see
+`openspec/specs/repository-layout`).
 
 ```
 src/
@@ -87,29 +101,32 @@ docs/                   design notes (e.g. response-envelope rationale)
 
 ## Deferred (not yet built)
 
-Request-body validation and Swagger generation from the `pbdb2-dev` JSON
-Schemas, real JWT auth + login, the write path (for taxonomy that means the
+Request-body validation and Swagger generation from the payload schemas in
+`payloadSchemas/`, real JWT auth + login, the write path (for taxonomy that means the
 *opinion* tables — `taxa` itself is never written), the per-entity `/versions`
 history sub-resource (`taxa` will never have one — it is not version-chained),
 and name-ordered taxa lists (viable but needs a `(name, permid)` index in
-`pbdb2-migrations`; the opaque cursor keeps it open).
+`db/`; the opaque cursor keeps it open).
 
 PostgreSQL integration and pagination have LANDED — `add-reads-pg-layer` and
 `add-pagination` respectively — despite previously being listed here.
 
 ## OpenSpec workflow
 
-This project is spec-driven via OpenSpec (`openspec/config.yaml`,
-`schema: spec-driven`). Established capability specs live in `openspec/specs/`
-(`api-foundation`, `auth-stub`, `resource-routes`); completed changes are in
+The backend is spec-driven via one OpenSpec root at the repository root
+(`openspec/config.yaml`, `schema: spec-driven`), shared with the DDL, payload
+schemas and migrations. The API's capability specs (`api-discovery`,
+`api-foundation`, `auth-stub`, `data-access`, `list-pagination`,
+`reference-enrichment`, `resource-routes`, `taxa-reads`) live in
+`openspec/specs/` with the others; completed changes are in
 `openspec/changes/archive/`. The workflow is exposed as skills/slash commands:
 
 - `/opsx:explore` — think through an idea before committing to a change.
-- `/opsx:propose` — create a change with its design, specs, and tasks.
+- `/opsx:new` or `/opsx:ff` — create a change (step by step, or all artifacts at once).
 - `/opsx:apply` — implement the tasks from a proposed change.
 - `/opsx:sync` — sync delta specs into the main specs.
 - `/opsx:archive` — finalize and archive a completed change.
 
-Prefer this flow for non-trivial work: propose → apply → sync/archive. New work
+Prefer this flow for non-trivial work: new/ff → apply → sync/archive. New work
 modifies the specs in `openspec/specs/` via change deltas rather than editing
 them directly.
