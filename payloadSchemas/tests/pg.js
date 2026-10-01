@@ -10,7 +10,7 @@ import { Pool } from 'pg';
 // The one .env and a relative PG_CA_CERT are both at the backend root, found from
 // this file rather than the working directory. The boundary test allows this one read.
 const ENV_FILE = fileURLToPath(new URL('../../.env', import.meta.url));
-dotenv.config({ path: ENV_FILE });
+dotenv.config({ path: ENV_FILE, quiet: true });
 
 const REQUIRED_VARS = ['PG_HOST', 'PG_USER', 'PG_PASSWORD', 'PG_DATABASE'];
 

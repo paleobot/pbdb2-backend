@@ -694,7 +694,7 @@ async function main() {
 
   // dotenv before any env inspection, and before pg-pool.js runs its own check.
   const { default: dotenv } = await import('dotenv');
-  dotenv.config({ path: join(BACKEND_ROOT, '.env') });
+  dotenv.config({ path: join(BACKEND_ROOT, '.env'), quiet: true });
 
   const groups = preflightEnv(selected);
   await preflightInputs(selected);

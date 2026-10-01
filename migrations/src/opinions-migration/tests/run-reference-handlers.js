@@ -26,7 +26,7 @@ import { dirname, join } from 'node:path';
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 // The backend root, above migrations/: home of the one .env.
 const BACKEND_ROOT = join(REPO_ROOT, '..');
-dotenv.config({ path: join(BACKEND_ROOT, '.env') });
+dotenv.config({ path: join(BACKEND_ROOT, '.env'), quiet: true });
 const OPINIONS_DIR = join(REPO_ROOT, 'migration_exploration', 'opinions');
 const PRIMARY_DB = process.env.PG_DATABASE;
 const REF_DB = process.env.PG_REF_DATABASE || 'pbdb_ref';

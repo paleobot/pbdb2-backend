@@ -10,7 +10,7 @@ import { loadConfig } from './config.js';
 // time. Found from this file, not the working directory, so `npm start -w api`
 // and `node src/server.js` from api/ read the same file. Variables already set
 // in the environment win, and a missing file is fine (a deployed API).
-dotenv.config({ path: fileURLToPath(new URL('../../.env', import.meta.url)) });
+dotenv.config({ path: fileURLToPath(new URL('../../.env', import.meta.url)), quiet: true });
 
 const config = loadConfig();
 

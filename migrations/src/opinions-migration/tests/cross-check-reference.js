@@ -21,7 +21,7 @@ import { dirname, join } from 'node:path';
 
 const REPORT = join(dirname(fileURLToPath(import.meta.url)), 'cross-check-reference-report.txt');
 // The one .env is at the backend root, above migrations/.
-dotenv.config({ path: join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', '..', '.env') });
+dotenv.config({ path: join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', '..', '.env'), quiet: true });
 const REF_DB = process.env.PG_REF_DATABASE || 'pbdb_ref';
 
 function pool(database) {

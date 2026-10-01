@@ -7,7 +7,7 @@ import { Pool } from 'pg';
 // The one .env and a relative PG_CA_CERT are both at the backend root, found from
 // this file rather than the working directory.
 const BACKEND_ROOT = fileURLToPath(new URL('../../../', import.meta.url));
-dotenv.config({ path: resolve(BACKEND_ROOT, '.env') });
+dotenv.config({ path: resolve(BACKEND_ROOT, '.env'), quiet: true });
 
 const REQUIRED_VARS = ['PG_HOST', 'PG_USER', 'PG_PASSWORD', 'PG_DATABASE'];
 const missing = REQUIRED_VARS.filter((v) => !process.env[v]);

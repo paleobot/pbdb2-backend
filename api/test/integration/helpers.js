@@ -12,7 +12,7 @@ const { Client, Pool } = pg;
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 // The backend root's `.env`, found from this file, not the working directory.
-dotenv.config({ path: join(__dirname, '../../../.env') });
+dotenv.config({ path: join(__dirname, '../../../.env'), quiet: true });
 
 // The backend schema (with its lineage triggers) lives in db/ at the backend
 // repository root as NN-*.sql files (01-dictionaries, 02-core, 03-taxa),
