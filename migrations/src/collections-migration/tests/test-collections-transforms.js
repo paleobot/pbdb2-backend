@@ -1,8 +1,8 @@
 import { readFileSync } from 'node:fs';
-import { collectionSource } from '../../../payloadSchemas/collection.schema.js';
-import { applyEnums } from '../../../payloadSchemas/lib/enums.js';
-import { deriveVariant } from '../../../payloadSchemas/lib/variants.js';
-import { createAjv } from '../../../payloadSchemas/lib/ajv.js';
+import { collectionSource } from '../../../../payloadSchemas/collection.schema.js';
+import { applyEnums } from '../../../../payloadSchemas/lib/enums.js';
+import { deriveVariant } from '../../../../payloadSchemas/lib/variants.js';
+import { createAjv } from '../../../../payloadSchemas/lib/ajv.js';
 import { normalizeName } from '../../lib/country.js';
 import {
   buildContext,
@@ -164,7 +164,7 @@ console.log('\nvalidation smoke test');
 // fixtures: the legacy-enum snapshot for the payload vocabularies, plus minimal
 // geography values.
 const enums = new Map(Object.entries(JSON.parse(readFileSync(
-  new URL('../../../payloadSchemas/tests/fixtures/legacy-enums.json', import.meta.url), 'utf8'))));
+  new URL('../../../../payloadSchemas/tests/fixtures/legacy-enums.json', import.meta.url), 'utf8'))));
 enums.set('admin0.iso', ['US', 'CA']);
 enums.set('admin1.iso', ['US-CA', 'CA-AB']);
 enums.set('maritime.iho_name', ['Indian Ocean', 'Southern Ocean', 'North Pacific Ocean']);

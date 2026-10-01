@@ -15,6 +15,8 @@ import { REGISTRY as AUDIT_REGISTRY } from './audit-payloads.js';
 
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = join(SCRIPT_DIR, '..');
+// The backend root, above migrations/: home of the DDL (db/) and the one .env.
+const BACKEND_ROOT = join(REPO_ROOT, '..');
 
 // --- Environment groups -----------------------------------------------------
 
@@ -215,7 +217,7 @@ const STEPS = [
 
 const STEP_NAMES = STEPS.map((s) => s.name);
 
-// Seeded by postgresql/01-dictionaries.sql. Every migration reads at least one of these,
+// Seeded by db/01-dictionaries.sql. Every migration reads at least one of these,
 // so an unseeded target fails partway through the pipeline rather than at the start.
 // The last nine are payload vocabularies (x-enumFrom sources) that the
 // collections, specimens and refs steps resolve into their validation schemas.
@@ -591,7 +593,7 @@ async function runAudit(selected) {
 }
 
 // --- --createdb -------------------------------------------------------------
-// The DDL is postgresql/NN-*.sql (01-dictionaries, 02-core, 03-taxa), applied in
+// The DDL is db/NN-*.sql at the backend root (01-dictionaries, 02-core, 03-taxa), applied in
 // sorted name order; the prefix is the load order (openspec/specs/ddl-layout). The
 // files have no psql meta-commands, no COPY, and no explicit BEGIN/COMMIT, so
 // concatenated into one query PostgreSQL runs them as one implicit transaction:
@@ -605,7 +607,7 @@ async function runAudit(selected) {
 // reset a populated one.
 async function applyCreateDb(pg) {
   const { readFileSync, readdirSync } = await import('node:fs');
-  const ddlDir = join(REPO_ROOT, 'postgresql');
+  const ddlDir = join(BACKEND_ROOT, 'db');
   let sql;
   try {
     const files = readdirSync(ddlDir).filter((f) => /^\d\d-.*\.sql$/.test(f)).sort();
@@ -691,7 +693,8 @@ async function main() {
   console.log('Preflight:');
 
   // dotenv before any env inspection, and before pg-pool.js runs its own check.
-  await import('dotenv/config');
+  const { default: dotenv } = await import('dotenv');
+  dotenv.config({ path: join(BACKEND_ROOT, '.env') });
 
   const groups = preflightEnv(selected);
   await preflightInputs(selected);

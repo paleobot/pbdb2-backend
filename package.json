@@ -1,0 +1,18 @@
+{
+  "name": "pbdb2-backend",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "migrations",
+    "api"
+  ],
+  "scripts": {
+    "test": "node --test \"payloadSchemas/tests/*.test.js\" \"db/tests/*.test.js\" \"tests/*.test.js\" && npm test -w migrations && npm test -w api",
+    "test:integration": "npm run test:integration -w api"
+  },
+  "dependencies": {
+    "ajv": "^8.20.0",
+    "dotenv": "^17.4.2",
+    "pg": "^8.18.0"
+  }
+}

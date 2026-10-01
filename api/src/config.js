@@ -1,3 +1,9 @@
+import { resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+// The backend repository root, where a relative PG_CA_CERT is resolved.
+const BACKEND_ROOT = fileURLToPath(new URL('../../', import.meta.url));
+
 /**
  * Configuration for the PBDB2 API.
  *
@@ -15,9 +21,10 @@ export function loadConfig(env = process.env) {
 }
 
 /**
- * PostgreSQL connection config, mirroring pbdb2-migrations/pg-pool.js:
- * PG_HOST / PG_PORT / PG_USER / PG_PASSWORD / PG_DATABASE, with PG_CA_CERT
- * presence enabling SSL.
+ * PostgreSQL connection config, from the same PG_* variables the migrations
+ * read: PG_HOST / PG_PORT / PG_USER / PG_PASSWORD / PG_DATABASE, with PG_CA_CERT
+ * presence enabling SSL. A relative PG_CA_CERT resolves against the backend
+ * repository root; an absolute one is used as given.
  *
  * Unlike the migrations script (which `process.exit(1)`s on missing vars), this
  * returns `{ configured: false }` when the required vars are absent rather than
@@ -41,6 +48,6 @@ export function loadPgConfig(env = process.env) {
     user: env.PG_USER,
     password: env.PG_PASSWORD,
     database: env.PG_DATABASE,
-    caCertPath: env.PG_CA_CERT ?? null,
+    caCertPath: env.PG_CA_CERT ? resolve(BACKEND_ROOT, env.PG_CA_CERT) : null,
   };
 }

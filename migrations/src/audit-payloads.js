@@ -13,20 +13,20 @@ import { writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
-import { collectionSource } from '../payloadSchemas/collection.schema.js';
-import { specimenSource } from '../payloadSchemas/specimen.schema.js';
-import { personSource } from '../payloadSchemas/person.schema.js';
-import { referenceSource } from '../payloadSchemas/reference.schema.js';
-import { authoritySource } from '../payloadSchemas/authority.schema.js';
-import { schemaSource } from '../payloadSchemas/schema.schema.js';
-import { characterSource } from '../payloadSchemas/character.schema.js';
-import { stateSource } from '../payloadSchemas/state.schema.js';
-import { resolveEnums } from '../payloadSchemas/lib/enums.js';
-import { deriveVariant } from '../payloadSchemas/lib/variants.js';
-import { createAjv } from '../payloadSchemas/lib/ajv.js';
+import { collectionSource } from '../../payloadSchemas/collection.schema.js';
+import { specimenSource } from '../../payloadSchemas/specimen.schema.js';
+import { personSource } from '../../payloadSchemas/person.schema.js';
+import { referenceSource } from '../../payloadSchemas/reference.schema.js';
+import { authoritySource } from '../../payloadSchemas/authority.schema.js';
+import { schemaSource } from '../../payloadSchemas/schema.schema.js';
+import { characterSource } from '../../payloadSchemas/character.schema.js';
+import { stateSource } from '../../payloadSchemas/state.schema.js';
+import { resolveEnums } from '../../payloadSchemas/lib/enums.js';
+import { deriveVariant } from '../../payloadSchemas/lib/variants.js';
+import { createAjv } from '../../payloadSchemas/lib/ajv.js';
 import {
   split, merge, collectCodecSources, loadCodecContext, codecKeyColumns, isDictionarySource,
-} from '../payloadSchemas/lib/storage.js';
+} from '../../payloadSchemas/lib/storage.js';
 
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 const REPORT_PATH = join(SCRIPT_DIR, 'audit-payloads.log');

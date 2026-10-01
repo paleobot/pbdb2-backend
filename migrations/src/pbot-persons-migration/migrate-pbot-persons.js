@@ -1,9 +1,9 @@
 import { pg, closePg } from '../lib/pg-pool.js';
 import { uuidv7 } from '../lib/uuidv7.js';
-import { personSource } from '../../payloadSchemas/person.schema.js';
-import { resolveEnums } from '../../payloadSchemas/lib/enums.js';
-import { deriveVariant } from '../../payloadSchemas/lib/variants.js';
-import { createAjv } from '../../payloadSchemas/lib/ajv.js';
+import { personSource } from '../../../payloadSchemas/person.schema.js';
+import { resolveEnums } from '../../../payloadSchemas/lib/enums.js';
+import { deriveVariant } from '../../../payloadSchemas/lib/variants.js';
+import { createAjv } from '../../../payloadSchemas/lib/ajv.js';
 
 if (!process.env.PBOT_TOKEN) {
   console.error('Missing required .env variable: PBOT_TOKEN');

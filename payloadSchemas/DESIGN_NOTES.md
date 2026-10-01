@@ -142,5 +142,5 @@ an observation of a state, not to the state.
   `partsPreserved` and `notableFeatures`.
 - **Dictionary values are append-only in practice**: stored jsonb holds the
   string, with no FK protecting it. Renaming or deleting a dictionary value
-  needs a data migration of the rows using it; `node src/audit-payloads.js`
+  needs a data migration of the rows using it; `node migrations/src/audit-payloads.js`
   reports any that are orphaned.

@@ -23,10 +23,10 @@ import { mariadb, pg, closeAll } from '../lib/db.js';
 import { uuidv7 } from '../lib/uuidv7.js';
 import { resolvePersons, loadReferenceIdMap, loadNamePermidMap } from '../lib/identity.js';
 import { createAnomalyLog } from '../lib/anomaly-log.js';
-import { specimenSource } from '../../payloadSchemas/specimen.schema.js';
-import { resolveEnums } from '../../payloadSchemas/lib/enums.js';
-import { deriveVariant } from '../../payloadSchemas/lib/variants.js';
-import { createAjv } from '../../payloadSchemas/lib/ajv.js';
+import { specimenSource } from '../../../payloadSchemas/specimen.schema.js';
+import { resolveEnums } from '../../../payloadSchemas/lib/enums.js';
+import { deriveVariant } from '../../../payloadSchemas/lib/variants.js';
+import { createAjv } from '../../../payloadSchemas/lib/ajv.js';
 
 const INSERT_BATCH_SIZE = 1000;
 const LOG_SAMPLE_LIMIT = 20;

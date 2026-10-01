@@ -1,10 +1,16 @@
-// Load `.env` into process.env before anything reads config — the postgres
-// plugin and loadConfig() rely on PG_* being present at build() time. Must be
-// the first import so the env is populated before config is evaluated.
-import 'dotenv/config';
+import { fileURLToPath } from 'node:url';
+
+import dotenv from 'dotenv';
 
 import { build } from './app.js';
 import { loadConfig } from './config.js';
+
+// Load the backend root's `.env` into process.env before anything reads config —
+// the postgres plugin and loadConfig() rely on PG_* being present at build()
+// time. Found from this file, not the working directory, so `npm start -w api`
+// and `node src/server.js` from api/ read the same file. Variables already set
+// in the environment win, and a missing file is fine (a deployed API).
+dotenv.config({ path: fileURLToPath(new URL('../../.env', import.meta.url)) });
 
 const config = loadConfig();
 

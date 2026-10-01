@@ -1,9 +1,9 @@
 import { pg, closePg } from '../lib/pg-pool.js';
 import { uuidv7 } from '../lib/uuidv7.js';
-import { referenceSource, PUBLICATION_TYPES, SHARED_FIELDS } from '../../payloadSchemas/reference.schema.js';
-import { resolveEnums } from '../../payloadSchemas/lib/enums.js';
-import { deriveVariant } from '../../payloadSchemas/lib/variants.js';
-import { createAjv } from '../../payloadSchemas/lib/ajv.js';
+import { referenceSource, PUBLICATION_TYPES, SHARED_FIELDS } from '../../../payloadSchemas/reference.schema.js';
+import { resolveEnums } from '../../../payloadSchemas/lib/enums.js';
+import { deriveVariant } from '../../../payloadSchemas/lib/variants.js';
+import { createAjv } from '../../../payloadSchemas/lib/ajv.js';
 
 // --- Constants ---
 

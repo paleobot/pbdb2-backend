@@ -16,7 +16,7 @@
 //
 // The reference DB is a ~1x clone of the primary DB; drop it when the cross-check
 // is done (space). This script is the single place that creates and drops it.
-import 'dotenv/config';
+import dotenv from 'dotenv';
 import { Pool } from 'pg';
 import { spawn } from 'node:child_process';
 import { readdirSync } from 'node:fs';
@@ -24,6 +24,9 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
+// The backend root, above migrations/: home of the one .env.
+const BACKEND_ROOT = join(REPO_ROOT, '..');
+dotenv.config({ path: join(BACKEND_ROOT, '.env') });
 const OPINIONS_DIR = join(REPO_ROOT, 'migration_exploration', 'opinions');
 const PRIMARY_DB = process.env.PG_DATABASE;
 const REF_DB = process.env.PG_REF_DATABASE || 'pbdb_ref';

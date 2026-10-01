@@ -1,10 +1,9 @@
-import 'dotenv/config';
-
 import { randomBytes } from 'node:crypto';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import dotenv from 'dotenv';
 import pg from 'pg';
 
 import { loadPgConfig } from '../../src/config.js';
@@ -12,10 +11,13 @@ import { loadPgConfig } from '../../src/config.js';
 const { Client, Pool } = pg;
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
-// The backend schema (with its lineage triggers) lives in the sibling
-// pbdb2-migrations repo as NN-*.sql files (01-dictionaries, 02-core, 03-taxa),
-// applied in sorted name order. Overridable for non-default checkouts / CI.
-const DEFAULT_DDL_DIR = join(__dirname, '../../../pbdb2-migrations/postgresql');
+// The backend root's `.env`, found from this file, not the working directory.
+dotenv.config({ path: join(__dirname, '../../../.env') });
+
+// The backend schema (with its lineage triggers) lives in db/ at the backend
+// repository root as NN-*.sql files (01-dictionaries, 02-core, 03-taxa),
+// applied in sorted name order. DDL_DIR overrides it.
+const DEFAULT_DDL_DIR = join(__dirname, '../../../db');
 
 function sslFrom(config) {
   return config.caCertPath ? { ca: readFileSync(config.caCertPath) } : false;

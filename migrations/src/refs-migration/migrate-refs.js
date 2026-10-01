@@ -1,9 +1,9 @@
 import { mariadb, pg, closeAll } from '../lib/db.js';
 import { uuidv7 } from '../lib/uuidv7.js';
-import { referenceSource } from '../../payloadSchemas/reference.schema.js';
-import { resolveEnums } from '../../payloadSchemas/lib/enums.js';
-import { deriveVariant } from '../../payloadSchemas/lib/variants.js';
-import { createAjv } from '../../payloadSchemas/lib/ajv.js';
+import { referenceSource } from '../../../payloadSchemas/reference.schema.js';
+import { resolveEnums } from '../../../payloadSchemas/lib/enums.js';
+import { deriveVariant } from '../../../payloadSchemas/lib/variants.js';
+import { createAjv } from '../../../payloadSchemas/lib/ajv.js';
 
 // --- Publication type mapping ---
 // Legacy value → { referenceType (jsonb publicationType), bookType (jsonb field or null) }.

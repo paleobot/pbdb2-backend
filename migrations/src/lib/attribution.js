@@ -2,7 +2,7 @@
 // migrate-assignment-opinions.js / migrate-synonymy-opinions.js; reuses the
 // authorities migration's citation/descriptor builders rather than re-deriving them.
 import Ajv from 'ajv/dist/2019.js';
-import { opinionAttributionSchema } from '../../payloadSchemas/opinionAttribution.schema.js';
+import { opinionAttributionSchema } from '../../../payloadSchemas/opinionAttribution.schema.js';
 import { buildCitationFromFields, buildDescriptorsFromFields } from './authorities-builders.js';
 
 const ajv = new Ajv({ allErrors: true, strict: false });

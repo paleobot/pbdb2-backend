@@ -1,7 +1,7 @@
 -- reset-opinions.sql
 -- Drops and recreates the opinions output tables + the three dictionaries the
 -- opinions migration reads, from the DDL (the schema authority): the dictionaries
--- from postgresql/01-dictionaries.sql, the tables from postgresql/02-core.sql. DDL
+-- from db/01-dictionaries.sql, the tables from db/02-core.sql (repository root). DDL
 -- blocks are copied verbatim from those files so they cannot drift from the
 -- authority. Originally emitted by scratch-build-reset.mjs, which is no longer in
 -- the repository -- maintain the DDL below by copying from those files by hand.

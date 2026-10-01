@@ -13,13 +13,15 @@
 //       and the symmetric difference reported.
 //
 // Writes cross-check-reference-report.txt into this directory.
-import 'dotenv/config';
+import dotenv from 'dotenv';
 import { Pool } from 'pg';
 import { writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
 const REPORT = join(dirname(fileURLToPath(import.meta.url)), 'cross-check-reference-report.txt');
+// The one .env is at the backend root, above migrations/.
+dotenv.config({ path: join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', '..', '.env') });
 const REF_DB = process.env.PG_REF_DATABASE || 'pbdb_ref';
 
 function pool(database) {

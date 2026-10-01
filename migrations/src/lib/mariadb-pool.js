@@ -1,6 +1,10 @@
-import 'dotenv/config';
-
+import dotenv from 'dotenv';
+import { resolve } from 'path';
+import { fileURLToPath } from 'url';
 import mysql from 'mysql2/promise';
+
+// The one .env is at the backend root, found from this file rather than the working directory.
+dotenv.config({ path: resolve(fileURLToPath(new URL('../../../', import.meta.url)), '.env') });
 
 const REQUIRED_VARS = ['MARIADB_HOST', 'MARIADB_USER', 'MARIADB_PASSWORD', 'MARIADB_DATABASE'];
 const missing = REQUIRED_VARS.filter((v) => !process.env[v]);

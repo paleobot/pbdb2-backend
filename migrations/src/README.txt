@@ -1,15 +1,16 @@
 To run full migration on clean db:
-    cd ~/repos/pbdb2-migrations
+    cd ~/repos/pbdb2-migrations/migrations
     dropdb   -h localhost -U postgres pbdb
     createdb -h localhost -U postgres pbdb
     node src/run-migrations.js --createdb
 
---createdb initializes an EMPTY database from the DDL (postgresql/0*.sql); it
+--createdb initializes an EMPTY database from the DDL (db/0*.sql at the repository root); it
 cannot reset a populated one, hence the drop and create. A full run takes about
 3 minutes.
 
-.env must hold PG_HOST/PG_USER/PG_PASSWORD/PG_DATABASE, MARIADB_HOST/
-MARIADB_USER/MARIADB_PASSWORD/MARIADB_DATABASE and PBOT_TOKEN. The runner checks
+.env (one file at the repository root, from .env.example) must hold
+PG_HOST/PG_USER/PG_PASSWORD/PG_DATABASE, MARIADB_HOST/MARIADB_USER/
+MARIADB_PASSWORD/MARIADB_DATABASE and PBOT_TOKEN. The runner checks
 the variables the selected steps need before running any of them. The pbot-*
 steps fetch live from the PBot GraphQL API, so their counts can grow between
 runs.

@@ -1,10 +1,10 @@
 import { mariadb, pg, closeAll } from '../lib/db.js';
 import { uuidv7 } from '../lib/uuidv7.js';
 import { normalizeName, loadAdmin0, resolveCountry } from '../lib/country.js';
-import { collectionSource } from '../../payloadSchemas/collection.schema.js';
-import { resolveEnums } from '../../payloadSchemas/lib/enums.js';
-import { deriveVariant } from '../../payloadSchemas/lib/variants.js';
-import { createAjv } from '../../payloadSchemas/lib/ajv.js';
+import { collectionSource } from '../../../payloadSchemas/collection.schema.js';
+import { resolveEnums } from '../../../payloadSchemas/lib/enums.js';
+import { deriveVariant } from '../../../payloadSchemas/lib/variants.js';
+import { createAjv } from '../../../payloadSchemas/lib/ajv.js';
 
 const INSERT_BATCH_SIZE = 1000;
 const LOG_SAMPLE_LIMIT = 20;
