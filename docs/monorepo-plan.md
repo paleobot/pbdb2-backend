@@ -1,6 +1,6 @@
 # Moving to a backend monorepo
 
-*Status: moved 2026-10-01 (OpenSpec change `move-to-backend-monorepo`). The GitHub rename to `pbdb2-backend` and the archiving of `pbdb2-api` follow the push.*
+*Status: moved 2026-10-01 (OpenSpec change `move-to-backend-monorepo`, archived the same day). The GitHub repo is renamed `pbdb2-backend`, and `pbdb2-api` is archived.*
 
 This note explains a planned change to how the PBDB2 backend code is organized. It is written for
 people who work in `pbdb2-migrations` on the DDL, payload schemas and database functions and weren't
@@ -124,9 +124,9 @@ first-class and can be changed in the same proposal as a migration or an API rou
 
 Two OpenSpec changes, with some housekeeping between them. Each is reviewed like any other change.
 
-**1. Split `payloadSchemas/` from the migrations (`split-payload-schemas`).** This happens first,
-inside the current layout, and it is small: the payload-schema code already imports nothing from
-the migrations. The legacy mapping docs move out of `payloadSchemas/` to a `docs/` folder in
+**1. Split `payloadSchemas/` from the migrations (`split-payload-schemas`, done).** This happens
+first, inside the current layout, and it is small: the payload-schema code already imports nothing
+from the migrations. The legacy mapping docs move out of `payloadSchemas/` to a `docs/` folder in
 each migration's directory, with their names unchanged. `tests/enums.test.js` and
 `tests/dictionary-seeds.test.js` stop borrowing the migrations' database connection
 (`src/lib/pg-pool.js`) and get their own. A guard test in `npm test` now enforces the rule above for
@@ -140,7 +140,7 @@ archive waits on a maintainer's confirmation. Stray files at the root went into 
 **3. Pick a moment (done).** The move is quick (an afternoon), but it works best with nothing in
 flight. It happens while you're on other work: neither repo has anything in flight.
 
-**4. The move (second change).**
+**4. The move (second change, done).**
 - One commit moves everything into the new layout, with the three DDL files going to `db/`. The same
   change fixes every import and file path that pointed at the old locations, including
   `run-migrations.js`. `migration_exploration/` moves as-is and is not fixed up: nothing depends
@@ -156,16 +156,13 @@ flight. It happens while you're on other work: neither repo has anything in flig
   the PostgreSQL server named in `.env`. Today they find the DDL through a relative path to a sibling
   `pbdb2-migrations` checkout. The move points that path at `db/` inside the same repo instead.
 
-**5. Rename and archive.** `pbdb2-migrations` becomes `pbdb2-backend` on GitHub. `pbdb2-api` is
+**5. Rename and archive (done).** `pbdb2-migrations` becomes `pbdb2-backend` on GitHub. `pbdb2-api` is
 archived (read-only) with a pointer to its new home.
 
 ## What you'll need to do
 
 Before the move:
 - Push or merge what you're working on, or tell me what's in flight so we can time it.
-- If any `*_CA_CERT` variable in your `.env` is a relative path such as `global-bundle.pem`, make it
-  absolute. Relative paths are resolved from the directory a command starts in, and after the move
-  the migrations and the API start in their own subdirectories.
 
 After the move:
 - `git pull`. The move comes through as a normal commit.
@@ -178,6 +175,11 @@ After the move:
   `migrations/.env`: every area reads the root file whatever directory you start in, and
   `PG_CA_CERT=global-bundle.pem` finds the committed certificate at the root.
 - Optionally: `git remote set-url origin git@github.com:paleobot/pbdb2-backend.git`
+- Optionally, rename your local folder to `pbdb2-backend`. If you use Claude Code, copy its memory
+  folder first. Claude Code keys each project by its absolute path, with every `/` turned into `-`
+  (`/home/you/repos/pbdb2-migrations` becomes `~/.claude/projects/-home-you-repos-pbdb2-migrations/`).
+  Copy that folder to the key for the new path, or the memory is left behind. Expect a folder-trust
+  prompt on the first launch in the renamed folder; that's normal for a path Claude Code hasn't seen.
 
 If a branch does cross the move, git's rename detection usually carries edits to moved files across
 a merge or rebase. Landing work first is still simpler.
