@@ -2,13 +2,14 @@
   "name": "pbdb2-api",
   "version": "0.0.1",
   "description": "API for PBDB2",
-  "homepage": "https://github.com/paleobot/pbdb2-api#readme",
+  "homepage": "https://github.com/paleobot/pbdb2-backend/tree/main/api#readme",
   "bugs": {
-    "url": "https://github.com/paleobot/pbdb2-api/issues"
+    "url": "https://github.com/paleobot/pbdb2-backend/issues"
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/paleobot/pbdb2-api.git"
+    "url": "git+https://github.com/paleobot/pbdb2-backend.git",
+    "directory": "api"
   },
   "license": "ISC",
   "author": "Douglas Meredith",
