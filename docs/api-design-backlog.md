@@ -264,6 +264,10 @@ enrichment relates to `out`:
 
 Whichever is chosen, a create body has to be consistent with what GET returns.
 
+The 2026-10-01 discussion narrowed this to two designs (links declared in the source, or a related
+block in the envelope) and found that GET currently drops column-stored fields; see
+`api/docs/response-contracts.md`.
+
 The API is about 2,000 lines. Its transport layer (envelope, pagination, discovery, filters,
 405 handling; about 950 lines, specified and tested) doesn't depend on payload shape. About
 580 lines of data layer (`repository.js`, `resource-tables.js` links, `link-hydration.js`, parts of
