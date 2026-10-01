@@ -169,7 +169,38 @@ says what is being referenced.
 
 ---
 
-## 5. Open questions
+## 5. JSON Hyper-Schema, for the `href` question
+
+An alternative to the API writing `href` values into responses. It doesn't decide A vs B; it works
+with either.
+
+- **What it is:** a companion vocabulary to JSON Schema. Its `links` keyword holds Link
+  Description Objects:
+  - `rel`: the relation, such as `"author"` or `"collection"`.
+  - `href`: an RFC 6570 URI template filled from the instance, e.g. `"references/{referenceID}"`.
+  - `templatePointers`: where the template's variables come from in the document.
+  - `targetSchema`: the schema of what is found at the link.
+  - `submissionSchema`: the schema of what is sent to it, which could be `in-create` or
+    `patch-guard`.
+- **Version:** the latest is draft 2019-09 (draft-handrews-json-schema-hyperschema-02), the draft
+  the payload schemas already use.
+- **Why it fits:**
+  - The schema says "this value links to `references/{referenceID}`" and the client builds the URL.
+    The storage layer never knows a path, and `href` values need not be in the payload at all.
+  - It gives a standard place to point from a response schema to its create and patch contracts.
+- **Against it:**
+  - It stalled: there is no 2020-12 hyper-schema, and work on it hasn't continued. It is stable
+    but unmaintained.
+  - Tooling is thin. ajv doesn't implement it; `links` would be registered as an annotation-only
+    keyword, like the `x-*` annotations. Generic link-following clients are rare, so the frontend
+    would expand the templates itself.
+  - The name `links` is overloaded: a schema keyword in JSON Hyper-Schema, an operation-based
+    feature in OpenAPI 3, and response navigation in our envelope. No technical conflict, but
+    confusing in documentation.
+
+---
+
+## 6. Open questions
 
 1. **A or B.** In-payload links declared in the source, or a related block in the envelope.
 2. **Under A:** is any `x-out` field needed beyond nested `readOnly` and `x-link`?
@@ -178,7 +209,7 @@ says what is being referenced.
 4. **Pilot:** all JSONB resources at once, or one first. Collections shows the most (coordinates and
    references); authorities is the smallest with a shape decision.
 5. **`href`:** plain values added by the API (as today), or URL templates à la JSON Hyper-Schema
-   (`"href": "references/{permid}"`) so clients build them.
+   (`"href": "references/{permid}"`) so clients build them (§5).
 6. **Change layout:** one OpenSpec change (contract design plus reads), or two (annotations first,
    API reads second).
 
