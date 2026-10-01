@@ -1,85 +1,97 @@
 schema: spec-driven
 
 context: |
-  Domain: Paleontology database migration (PBDB - Paleobiology Database)
-  Purpose: Migration scripts for moving data from a legacy MariaDB database to a new PostgreSQL database.
+  Domain: PBDB2, the successor to the Paleobiology Database (PBDB Classic) and PBot.
+  This repository is the PBDB2 backend: the target PostgreSQL DDL, the payload schemas,
+  the REST API, and the one-time migrations from the legacy systems.
 
-  Source: MariaDB — `pbdb_archive` database (99 tables, ~22.4M rows, InnoDB)
-  Target: PostgreSQL with schemas (e.g. dictionaries, plus domain schemas)
+  Areas (top-level directories; see specs/repository-layout):
+    - db/ — the target DDL, applied in order: 01-dictionaries.sql (dictionary tables +
+      seeds), 02-core.sql (tables the application writes), 03-taxa.sql (derived taxa
+      tables + derive/rebuild functions); db/tests/ holds the layout guard
+    - payloadSchemas/ — annotated JSON Schemas for the jsonb payloads (ajv), lib/ and tests;
+      depends on nothing outside itself (specs/payload-schemas-boundary)
+    - api/ — the REST API (Fastify, reads-only so far), formerly the pbdb2-api repo
+    - migrations/ — migration scripts (src/), legacy analysis (mariadb/) and the superseded
+      migration_exploration/; retires when PBDB Classic and PBot shut down
+    - tests/ — repository-wide guard tests; docs/ — backend-wide documents
 
-  Key files:
-    - postgresql/01-dictionaries.sql, 02-core.sql, 03-taxa.sql — the target DDL, applied in that order:
-      dictionary tables + seeds; tables the application writes; derived taxa tables + derive/rebuild functions
-    - payloadSchemas/reference.schema.js — JSON Schema validation (ajv/fastify) for API payloads
-    - mariadb/PBDBLegacy-DeepAnalysis/ — Deep analysis of the legacy database:
-      - analysis-summary.md — Executive summary of findings
-      - schema-catalog.md — Complete schema reference with all tables, columns, discovered FKs
-      - er-diagrams.md — 9 Mermaid ER diagrams organized by domain
-      - anomaly-report.md — 17 anomaly categories with severity ratings
-      - diagrams/ — SVG versions of the ER diagrams
+  The dependency rule: nothing outside migrations/ imports or reads from it
+  (tests/repository-layout.test.js), so it can be deleted in one change. Code under
+  migrations/ may use db/, payloadSchemas/ and the root .env.
 
-  Source database structure:
-    Six core entities in a star-like schema:
-      - authorities (517K) — Taxonomic names (taxon registry)
-      - collections (276K) — Fossil collection localities
-      - occurrences (2M) — Fossil occurrences linking taxa to collections
-      - refs (94K) — Bibliographic references
-      - opinions (999K) — Taxonomic classification opinions
-      - person (1.3K) — Database contributors
-    Surrounded by:
-      - Cache/matrix tables (~15) — Denormalized for query performance (div_matrix, occ_matrix, etc.)
-      - Taxonomy tree tables (~17) — Hierarchical classification (taxon_trees, taxa_tree_cache, etc.)
-      - Geography/paleocoord tables (~12) — Spatial data and plate reconstructions
-      - Auxiliary tables (~50) — Intervals, specimens, media, admin
+  Spec paths: in migration specs (*-migration, migration-runner, migration-script-layout,
+  permid-uuidv7, payload-audit, db-connection-config) paths are relative to migrations/;
+  in API specs (api-discovery, api-foundation, auth-stub, data-access, list-pagination,
+  reference-enrichment, resource-routes, taxa-reads) relative to api/; in every other spec
+  relative to the repository root. A new migration or API spec joins those lists in
+  specs/repository-layout.
 
-  Legacy database characteristics:
-    - No formal FK constraints, but 58 validated FK relationships with 99.996% referential integrity
-    - 799 total orphan records (0.004% rate) — most from deleted opinions rippling through taxonomy tables
-    - Universal audit pattern: every data-entry table has authorizer_no, enterer_no, modifier_no → person
-    - Denormalized text fields (authorizer, enterer, modifier) duplicate person names
-    - orig_no concept links across the entire taxonomy subsystem
-    - 21 tables lack primary keys (notable: coll_ints 1.5M, pvl_matrix 1.7M)
-    - 0 as sentinel for NULL in FK columns (e.g. modifier_no=0 means "never edited")
-
-  Known anomalies to handle during migration:
-    CRITICAL:
-      - 53% of occurrences (1.05M) have modified < created (inverted timestamps from bulk imports)
-      - ~11K records have created dates before PBDB existed (pre-1998, from predecessor systems)
-    HIGH:
-      - 32.8% of collections (90K) have DMS/decimal coordinate mismatch >0.1 degrees (~11km)
-      - Taxonomy nested set uses non-standard encoding (lft=rgt for 70% of leaf nodes)
-      - Data type inconsistencies: signed/unsigned int mismatches, float vs decimal coords, timestamp vs datetime
-      - 93 FK-like columns lack indexes
-    MEDIUM:
-      - 8 legacy _old columns still contain significant data (opinions.status_old: 125K, authorities.extant_old: 108K)
-      - NULL vs empty string vs 0 used inconsistently for "no value"
-      - Denormalized person name fields have ~7K mismatches with person table
-
-  Tech stack:
-    - Node.js for migration scripts
-    - MariaDB/MySQL client for source database reads
-    - PostgreSQL client for target database writes
+  Tech stack: Node.js (ESM) everywhere; npm workspaces root with migrations and api as
+  workspaces; one package-lock.json and one .env, both at the root. Root `npm test` runs
+  everything that needs no database; `npm run test:integration` runs the API's DB suite.
+  PostgreSQL 18 with PostGIS (dev/prod on Aurora); MariaDB client for legacy reads.
 
   Conventions:
-    - Migration scripts should be idempotent where possible
     - PostgreSQL uses `GENERATED BY DEFAULT AS IDENTITY` for auto-increment columns
     - Target DB uses PostgreSQL schemas for logical grouping (e.g. dictionaries.*)
-    - Data integrity and referential consistency are critical — paleontology records must not be lost or corrupted
-    - Decimal coordinates are authoritative over DMS coordinates
-    - MariaDB 0-as-NULL FK values should be converted to proper NULLs in PostgreSQL
-    - Inverted timestamps should be documented but preserved as-is (historical record)
-    - Legacy _old columns should be verified against replacement columns before being dropped
+    - Data integrity and referential consistency are critical — paleontology records
+      must not be lost or corrupted
+
+  Migrations (migrations/): moving data from the legacy MariaDB `pbdb_archive` (99 tables,
+  ~22.4M rows, InnoDB) and PBot into the target PostgreSQL database.
+    Legacy analysis in migrations/mariadb/PBDBLegacy-DeepAnalysis/: analysis-summary.md,
+    schema-catalog.md, er-diagrams.md, anomaly-report.md, diagrams/.
+
+    Source database structure:
+      Six core entities in a star-like schema:
+        - authorities (517K) — Taxonomic names (taxon registry)
+        - collections (276K) — Fossil collection localities
+        - occurrences (2M) — Fossil occurrences linking taxa to collections
+        - refs (94K) — Bibliographic references
+        - opinions (999K) — Taxonomic classification opinions
+        - person (1.3K) — Database contributors
+      Surrounded by:
+        - Cache/matrix tables (~15) — Denormalized for query performance (div_matrix, occ_matrix, etc.)
+        - Taxonomy tree tables (~17) — Hierarchical classification (taxon_trees, taxa_tree_cache, etc.)
+        - Geography/paleocoord tables (~12) — Spatial data and plate reconstructions
+        - Auxiliary tables (~50) — Intervals, specimens, media, admin
+
+    Legacy database characteristics:
+      - No formal FK constraints, but 58 validated FK relationships with 99.996% referential integrity
+      - 799 total orphan records (0.004% rate) — most from deleted opinions rippling through taxonomy tables
+      - Universal audit pattern: every data-entry table has authorizer_no, enterer_no, modifier_no → person
+      - Denormalized text fields (authorizer, enterer, modifier) duplicate person names
+      - orig_no concept links across the entire taxonomy subsystem
+      - 21 tables lack primary keys (notable: coll_ints 1.5M, pvl_matrix 1.7M)
+      - 0 as sentinel for NULL in FK columns (e.g. modifier_no=0 means "never edited")
+
+    Known anomalies to handle during migration:
+      CRITICAL:
+        - 53% of occurrences (1.05M) have modified < created (inverted timestamps from bulk imports)
+        - ~11K records have created dates before PBDB existed (pre-1998, from predecessor systems)
+      HIGH:
+        - 32.8% of collections (90K) have DMS/decimal coordinate mismatch >0.1 degrees (~11km)
+        - Taxonomy nested set uses non-standard encoding (lft=rgt for 70% of leaf nodes)
+        - Data type inconsistencies: signed/unsigned int mismatches, float vs decimal coords, timestamp vs datetime
+        - 93 FK-like columns lack indexes
+      MEDIUM:
+        - 8 legacy _old columns still contain significant data (opinions.status_old: 125K, authorities.extant_old: 108K)
+        - NULL vs empty string vs 0 used inconsistently for "no value"
+        - Denormalized person name fields have ~7K mismatches with person table
+
+    Migration conventions:
+      - Migration scripts should be idempotent where possible
+      - Decimal coordinates are authoritative over DMS coordinates
+      - MariaDB 0-as-NULL FK values should be converted to proper NULLs in PostgreSQL
+      - Inverted timestamps should be documented but preserved as-is (historical record)
+      - Legacy _old columns should be verified against replacement columns before being dropped
 
 rules:
   proposal:
-    - Always identify which source (MariaDB) tables and target (PostgreSQL) tables/schemas are involved
-    - Note any data transformations or type mappings needed (signed→unsigned, float→decimal, datetime→timestamptz, enum→varchar/check, 0→NULL)
     - Call out risks to data integrity explicitly
-    - Reference relevant anomalies from anomaly-report.md that affect the tables in scope
-    - Consult schema-catalog.md and er-diagrams.md for source schema details and relationships
+    - For a migration change, identify the source (MariaDB/PBot) and target (PostgreSQL)
+      tables involved, the type mappings needed, and the relevant anomalies from
+      migrations/mariadb/PBDBLegacy-DeepAnalysis/anomaly-report.md
   tasks:
-    - Each task should target a specific table or logical group of related tables
     - Include rollback/verification steps where appropriate
-    - Order tasks to respect the discovered FK dependency chain (person → refs → authorities → collections → occurrences → opinions → taxonomy trees)
-    - Include row count verification against known source counts from the analysis
-    - Handle the 0-as-NULL FK pattern explicitly in each migration task
