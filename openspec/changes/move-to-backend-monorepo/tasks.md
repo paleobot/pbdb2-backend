@@ -69,7 +69,7 @@
 
 ## 11. Publish (only after the go-ahead)
 
-- [ ] 11.1 Push `ddm-dev`, fast-forward `main`, push `main`
-- [ ] 11.2 Rename `pbdb2-migrations` to `pbdb2-backend` on GitHub; `git remote set-url origin git@github.com:paleobot/pbdb2-backend.git`
-- [ ] 11.3 Add a README pointer in `pbdb2-api` to `pbdb2-backend/api/`, push it, then archive `pbdb2-api` on GitHub
+- [x] 11.1 Push `ddm-dev`, fast-forward `main`, push `main`
+- [x] 11.2 Rename `pbdb2-migrations` to `pbdb2-backend` on GitHub; `git remote set-url origin git@github.com:paleobot/pbdb2-backend.git`
+- [x] 11.3 Add a README pointer in `pbdb2-api` to `pbdb2-backend/api/`, push it, then archive `pbdb2-api` on GitHub
 - [ ] 11.4 If the local folder is renamed to `pbdb2-backend`, copy Claude Code's project memory folder to the new path's key
