@@ -1,6 +1,6 @@
 ## 1. Prepare and record baselines
 
-- [ ] 1.1 Install `git-filter-repo` (Ubuntu package) and confirm `git filter-repo --version` works
+- [x] 1.1 Install `git-filter-repo` (Ubuntu package) and confirm `git filter-repo --version` works
 - [x] 1.2 Commit this change's artifacts and the pending `docs/monorepo-plan.md` edits on `ddm-dev`; fast-forward `main`, push both; confirm both repos have clean working trees and `pbdb2-api` has only `main`, pushed
 - [x] 1.3 Tag the resulting commit `pre-monorepo` (local tag; the rollback target)
 - [x] 1.4 Record baselines on `pre-monorepo`: root `npm test` pass/fail counts; `pbdb2-api` `npm test` (89) and `npm run test:integration` (27) counts
@@ -65,7 +65,7 @@
 
 ## 10. Stop for the user's review
 
-- [ ] 10.1 STOP. Everything is committed locally and nothing is pushed. Summarize the commits, the check results and anything unexpected, and wait for the user's explicit go-ahead before group 11
+- [x] 10.1 STOP. Everything is committed locally and nothing is pushed. Summarize the commits, the check results and anything unexpected, and wait for the user's explicit go-ahead before group 11
 
 ## 11. Publish (only after the go-ahead)
 
