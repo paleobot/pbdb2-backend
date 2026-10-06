@@ -100,8 +100,8 @@ server-supplied:
 ```
 source:   reference: { ..., "x-link": { target: "references", label: "title" } }
 
-merge():  reference: { referenceID, title }              ← knows the target's name, not URLs
-API:      reference: { referenceID, title, href }        ← boundary adds href
+merge():  reference: { permid, title }                   ← knows the target's name, not URLs
+API:      reference: { permid, title, href }             ← boundary adds href
 out:      title, href: { ..., readOnly: true }           ← href: { type: string, format: uri-reference }
 ```
 
@@ -122,7 +122,7 @@ out:      title, href: { ..., readOnly: true }           ← href: { type: strin
 
 ```
 {
-  data:  { ..., references: [ { referenceID, order }, … ] },     ← $ref collection.out.json
+  data:  { ..., references: [ { permid, order }, … ] },          ← $ref collection.out.json
   meta:  { … },
   links: { self, next, prev,                                      ← navigation, as today
            <related>: { <permid>: { title, href }, … } }          ← new, API-owned schema
@@ -154,19 +154,24 @@ out:      title, href: { ..., readOnly: true }           ← href: { type: strin
 ## 4. Field shapes
 
 In the sources, the collection and schema `references[]` items are already objects
-(`{ referenceID, order }`). Under A, `title` and `href` go beside them and the create body is
+(`{ permid, order }`, after the rename below). Under A, `title` and `href` go beside them and the create body is
 unchanged. The exceptions are scalar links:
 
 | Field | Source today | Under A |
 |---|---|---|
-| authority `reference` | permid string (`referencePermid`) | `{ referenceID, title, href }`; create sends `{ referenceID }` |
+| authority `reference` | permid string (`referencePermid`) | `{ permid, title, href }`; create sends `{ permid }` |
 | person `authorizer` | permid string (`personPermid`) | same rule, once persons have a route |
 
 Under B the scalar fields can stay strings: the title is found in the related block.
 
-Naming: the sources call the link value `referenceID`, while the API's link objects call it
-`permid`. The contract should use one. `referenceID` is already in the sources and codecs, and it
-says what is being referenced.
+Naming (decided 2026-10-06): a link object names the target's id **`permid`**. The sources had
+called it `referenceID` (in `references[]` items, since the hand-written `collections.schema.js`),
+while the API's link objects and every resource's own id use `permid`. The inconsistency would
+only spread, and `permid` is the target's own field name, so stub rule 1 below needs no exception.
+The rename is cheap: `references[]` is stored in columns and join tables, so no jsonb at rest
+holds `referenceID` (0 collections, 0 schemas on localhost), and only `payloadSchemas/` (sources,
+`referenceList`, tests) and the `payload-schema-variants` spec use the name. The field name says
+nothing about what is referenced; the enclosing field (`reference`, `references`) does.
 
 ### Keeping a later include additive
 
@@ -175,15 +180,15 @@ A general include parameter (Classic's `show`, JSON:API's `include`) is deferred
 resource means filling in the stub that is already there:
 
 ```
-stub today:          { referenceID, title, href }
-with an include:     { referenceID, title, href, authors, publicationYear, doi, … }
+stub today:          { permid, title, href }
+with an include:     { permid, title, href, authors, publicationYear, doi, … }
 ```
 
 Two rules on stubs keep that change additive, so clients that ignore includes are unaffected:
 
 1. **A stub's fields use the target's own names and meanings.** The labels already do:
-   `reference.title`, `authority.citation`. The link key (`referenceID`) stands for the target's
-   `permid`; the target's other fields keep their names when included.
+   `reference.title`, `authority.citation`, and the id is the target's `permid`. Included fields
+   keep their names too.
 2. **Stub fields are always present but optional; included fields are optional `readOnly` fields
    on top.** `title` cannot be required: 541 migrated references have none. One schema then
    describes the response with or without an include. `deriveVariant` could later generate the
@@ -202,7 +207,7 @@ with either.
 - **What it is:** a companion vocabulary to JSON Schema. Its `links` keyword holds Link
   Description Objects:
   - `rel`: the relation, such as `"author"` or `"collection"`.
-  - `href`: an RFC 6570 URI template filled from the instance, e.g. `"references/{referenceID}"`.
+  - `href`: an RFC 6570 URI template filled from the instance, e.g. `"references/{permid}"`.
   - `templatePointers`: where the template's variables come from in the document.
   - `targetSchema`: the schema of what is found at the link.
   - `submissionSchema`: the schema of what is sent to it, which could be `in-create` or
@@ -210,7 +215,7 @@ with either.
 - **Version:** the latest is draft 2019-09 (draft-handrews-json-schema-hyperschema-02), the draft
   the payload schemas already use.
 - **Why it fits:**
-  - The schema says "this value links to `references/{referenceID}`" and the client builds the URL.
+  - The schema says "this value links to `references/{permid}`" and the client builds the URL.
     The storage layer never knows a path, and `href` values need not be in the payload at all.
   - It gives a standard place to point from a response schema to its create and patch contracts.
 - **Against it:**

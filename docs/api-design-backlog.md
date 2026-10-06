@@ -284,7 +284,7 @@ for more in one call. Three different things go by that name:
 
 | Kind | Example | In the payload today |
 |---|---|---|
-| Forward link, filled in | an authority's whole `reference` | a stub, `{ referenceID, title, href }` (design A) |
+| Forward link, filled in | an authority's whole `reference` | a stub, `{ permid, title, href }` (design A) |
 | Reverse relation | a collection's specimens | nothing |
 | Optional blocks of the record's own fields | Classic `show=coords`; JSON:API `fields[]` | everything, always |
 
