@@ -27,7 +27,7 @@ const source = {
     },
     references: {
       type: 'array',
-      items: { type: 'object', properties: { referenceID: { type: 'string' }, order: { type: 'string' } } },
+      items: { type: 'object', properties: { permid: { type: 'string' }, order: { type: 'string' } } },
       'x-storage': { table: 'additional_collection_refs', codec: 'referenceList' },
     },
   },
@@ -62,7 +62,7 @@ test('half a coordinate pair throws', () => {
 test('primary reference goes to the column, the rest to child rows', () => {
   const { columns, children, jsonb } = split(source, {
     name: 'n',
-    references: [{ referenceID: 'r-12', order: '2' }, { referenceID: 'r-7', order: '1' }],
+    references: [{ permid: 'r-12', order: '2' }, { permid: 'r-7', order: '1' }],
   }, refs);
   assert.equal(columns.reference_id, '7');
   assert.deepEqual(children.additional_collection_refs, [{ reference_id: '12' }]);
@@ -70,9 +70,9 @@ test('primary reference goes to the column, the rest to child rows', () => {
 });
 
 test('reference order normalized on round trip', () => {
-  const parts = split(source, { name: 'n', references: [{ referenceID: 'r-3', order: '1' }, { referenceID: 'r-9', order: '5' }] }, refs);
+  const parts = split(source, { name: 'n', references: [{ permid: 'r-3', order: '1' }, { permid: 'r-9', order: '5' }] }, refs);
   parts.children.additional_collection_refs = parts.children.additional_collection_refs.map((r, i) => ({ id: String(100 + i), ...r }));
-  assert.deepEqual(merge(source, parts, refs).references, [{ referenceID: 'r-3', order: '1' }, { referenceID: 'r-9', order: '2' }]);
+  assert.deepEqual(merge(source, parts, refs).references, [{ permid: 'r-3', order: '1' }, { permid: 'r-9', order: '2' }]);
 });
 
 test('merge rebuilds coordinates from GeoJSON, creating missing objects', () => {
@@ -85,7 +85,7 @@ test('merge rebuilds coordinates from GeoJSON, creating missing objects', () => 
     name: 'n',
     permid: 'p',
     location: { coordinates: { latitude: 45.5, longitude: -110.25 } },
-    references: [{ referenceID: 'r-7', order: '1' }],
+    references: [{ permid: 'r-7', order: '1' }],
   });
 });
 
@@ -104,8 +104,8 @@ test('split of an in-create-valid payload yields db-valid jsonb', () => {
   const inCreate = ajv.compile(deriveVariant(source, 'in-create'));
   const db = ajv.compile(deriveVariant(source, 'db'));
   const payloads = [
-    { name: 'a', references: [{ referenceID: 'r-1', order: '1' }] },
-    { name: 'b', location: { coordinates: { latitude: 1, longitude: 2 } }, references: [{ referenceID: 'r-1', order: '1' }, { referenceID: 'r-2', order: '2' }] },
+    { name: 'a', references: [{ permid: 'r-1', order: '1' }] },
+    { name: 'b', location: { coordinates: { latitude: 1, longitude: 2 } }, references: [{ permid: 'r-1', order: '1' }, { permid: 'r-2', order: '2' }] },
     { name: 'c', location: { coordinates: { latitude: 1, longitude: 2, basis: 'x' }, scale: 's' }, references: [] },
   ];
   for (const p of payloads) {
@@ -120,19 +120,19 @@ test('referenceList merges stored ids to permids, and no refs.id reaches the pay
     columns: { reference_id: '7' },
     children: { additional_collection_refs: [{ id: '501', reference_id: '12' }] },
   }, refs);
-  assert.deepEqual(merged.references, [{ referenceID: 'r-7', order: '1' }, { referenceID: 'r-12', order: '2' }]);
+  assert.deepEqual(merged.references, [{ permid: 'r-7', order: '1' }, { permid: 'r-12', order: '2' }]);
 });
 
 test('referenceList throws naming itself on an unknown permid or id', () => {
   assert.throws(
-    () => split(source, { name: 'n', references: [{ referenceID: 'r-nobody', order: '1' }] }, refs),
+    () => split(source, { name: 'n', references: [{ permid: 'r-nobody', order: '1' }] }, refs),
     /referenceList: refs.permid has no entry for "r-nobody"/,
   );
   assert.throws(
     () => merge(source, { jsonb: {}, columns: { reference_id: '7' }, children: { additional_collection_refs: [{ id: '1', reference_id: '404' }] } }, refs),
     /referenceList: refs.id has no entry for "404"/,
   );
-  assert.throws(() => split(source, { name: 'n', references: [{ referenceID: 'r-7', order: '1' }] }), /referenceList: no codec context loaded for refs/);
+  assert.throws(() => split(source, { name: 'n', references: [{ permid: 'r-7', order: '1' }] }), /referenceList: no codec context loaded for refs/);
 });
 
 test('referenceList writes child rows to the table its annotation names', () => {
@@ -141,12 +141,12 @@ test('referenceList writes child rows to the table its annotation names', () => 
     properties: {
       references: {
         type: 'array',
-        items: { type: 'object', properties: { referenceID: { type: 'string' }, order: { type: 'string' } } },
+        items: { type: 'object', properties: { permid: { type: 'string' }, order: { type: 'string' } } },
         'x-storage': { table: 'additional_schema_refs', codec: 'referenceList' },
       },
     },
   };
-  const { columns, children } = split(schemaLike, { references: [{ referenceID: 'r-9', order: '2' }, { referenceID: 'r-3', order: '1' }] }, refs);
+  const { columns, children } = split(schemaLike, { references: [{ permid: 'r-9', order: '2' }, { permid: 'r-3', order: '1' }] }, refs);
   assert.equal(columns.reference_id, '3');
   assert.deepEqual(children, { additional_schema_refs: [{ reference_id: '9' }] });
 });
@@ -176,7 +176,7 @@ test('a superseded reference is never cited: its permid resolves to the head', a
   assert.equal(ctx.get('refs').byKey.has('7'), false, 'the superseded row is in neither map');
 
   const { columns, children } = split(source, {
-    name: 'n', references: [{ referenceID: 'r-7', order: '1' }, { referenceID: 'r-12', order: '2' }],
+    name: 'n', references: [{ permid: 'r-7', order: '1' }, { permid: 'r-12', order: '2' }],
   }, ctx);
   assert.equal(columns.reference_id, '20');
   assert.deepEqual(children.additional_collection_refs, [{ reference_id: '12' }]);

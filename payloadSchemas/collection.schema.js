@@ -438,9 +438,9 @@ collectionProperties.references = {
     type: "array",
     items: {
         type: "object",
-        required: ["referenceID", "order"],
+        required: ["permid", "order"],
         properties: {
-            referenceID: {
+            permid: {
                 type: "string",
                 description: "permid of the cited reference"
             },

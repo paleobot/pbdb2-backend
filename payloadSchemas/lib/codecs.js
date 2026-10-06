@@ -55,7 +55,7 @@ const wgs84Point = {
 // merge emits the primary as order "1" and child rows by ascending id as "2"...
 // The child rows' key back to their parent is the caller's business, not the codec's.
 //
-// referenceID is the reference's permid; the columns hold refs.id. refs is
+// Each item names its reference by permid; the columns hold refs.id. refs is
 // versioned and every version shares one permid, so the source is read from
 // lineage heads only, which is what makes permid -> id a function. refs.id is a
 // bigint, which node-postgres returns as a string, so ids are keyed as strings.
@@ -65,7 +65,7 @@ const referenceList = {
   split({ references }, storage, ctx) {
     if (references === undefined || references === null) return {};
     const sorted = [...references].sort((a, b) => Number(a.order) - Number(b.order));
-    const toId = (r) => String(lookup('referenceList', REFS_SOURCE, ctx, 'byValue', r.referenceID));
+    const toId = (r) => String(lookup('referenceList', REFS_SOURCE, ctx, 'byValue', r.permid));
     const [primary, ...rest] = sorted;
     return {
       columns: { reference_id: primary ? toId(primary) : null },
@@ -77,8 +77,8 @@ const referenceList = {
     if (primary === null || primary === undefined) return {};
     const toPermid = (id) => lookup('referenceList', REFS_SOURCE, ctx, 'byKey', String(id));
     const rows = [...(children?.[storage.table] ?? [])].sort((a, b) => Number(a.id) - Number(b.id));
-    const references = [{ referenceID: toPermid(primary), order: '1' }];
-    rows.forEach((r, i) => references.push({ referenceID: toPermid(r.reference_id), order: String(i + 2) }));
+    const references = [{ permid: toPermid(primary), order: '1' }];
+    rows.forEach((r, i) => references.push({ permid: toPermid(r.reference_id), order: String(i + 2) }));
     return { references };
   },
 };

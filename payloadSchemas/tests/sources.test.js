@@ -58,7 +58,7 @@ test('every variant of every entity compiles in strict mode', () => {
 const createCollection = (administrativeArea) => ({
   name: 'c',
   context: {},
-  references: [{ referenceID: '1', order: '1' }],
+  references: [{ permid: '1', order: '1' }],
   location: {
     toponym: { administrativeArea },
     coordinates: { latitude: 1, longitude: 2 },
@@ -381,7 +381,7 @@ const storedSchema = () => ({
   partsPreserved: ['leaf'],
   notableFeatures: ['trace fossils (e.g., insect damage)'],
 });
-const createSchema = () => ({ ...storedSchema(), legacyIDs: undefined, references: [{ referenceID: 'r-1', order: '1' }] });
+const createSchema = () => ({ ...storedSchema(), legacyIDs: undefined, references: [{ permid: 'r-1', order: '1' }] });
 const withoutUndefined = (o) => JSON.parse(JSON.stringify(o));
 
 test('schema db declares neither permid nor references and requires only title and year', () => {
@@ -409,7 +409,7 @@ test('schema db: a stored payload passes; legacy rules still hold', () => {
   assert.equal(validate({ ...storedSchema(), authors: [] }), false);
   assert.equal(validate({ ...storedSchema(), authors: [{ order: 0, givenName: 'a', familyName: 'b' }] }), false);
   assert.equal(validate({ ...storedSchema(), characters: [] }), false);
-  assert.equal(validate({ ...storedSchema(), references: [{ referenceID: 'r-1', order: '1' }] }), false, 'references live in a column and child rows');
+  assert.equal(validate({ ...storedSchema(), references: [{ permid: 'r-1', order: '1' }] }), false, 'references live in a column and child rows');
 });
 
 test('schema db: dictionary values are enforced', () => {
@@ -427,12 +427,25 @@ test('schema in-create requires references with permids and a four-digit year', 
   assert.ok(validate.errors.some((e) => e.params?.missingProperty === 'references'));
   assert.equal(validate({ ...body, references: [] }), false);
   assert.equal(validate({ ...body, references: [{ order: '1' }] }), false);
-  assert.ok(validate.errors.some((e) => e.params?.missingProperty === 'referenceID'));
+  assert.ok(validate.errors.some((e) => e.params?.missingProperty === 'permid'));
   assert.equal(validate({ ...body, year: '0' }), false);
   assert.equal(validate({ ...body, year: 'abc' }), false);
   assert.equal(validate({ ...body, year: '2023' }), true);
   assert.equal(validate({ ...body, permid: 'x' }), false);
   assert.equal(validate({ ...body, legacyIDs: { pbotID: 'p' } }), false);
+});
+
+test('in-create: a reference item keyed by the old name referenceID is rejected for its missing permid', () => {
+  const bodies = {
+    collection: createCollection({ admin0: 'FR' }),
+    schema: withoutUndefined(createSchema()),
+  };
+  for (const [entity, body] of Object.entries(bodies)) {
+    const validate = compile(entity, 'in-create');
+    assert.equal(validate(body), true, `${entity}: ${JSON.stringify(validate.errors)}`);
+    assert.equal(validate({ ...body, references: [{ referenceID: 'r-1', order: '1' }] }), false, entity);
+    assert.ok(validate.errors.some((e) => e.params?.missingProperty === 'permid'), entity);
+  }
 });
 
 test('schema patch-guard blocks exactly permid and legacyIDs', () => {
@@ -442,7 +455,7 @@ test('schema patch-guard blocks exactly permid and legacyIDs', () => {
 
 test('schema out requires references', () => {
   const validate = compile('schema', 'out');
-  const references = [{ referenceID: 'r-1', order: '1' }];
+  const references = [{ permid: 'r-1', order: '1' }];
   assert.equal(validate({ ...storedSchema(), permid: 's-1', references }), true, JSON.stringify(validate.errors));
   assert.equal(validate({ ...storedSchema(), permid: 's-1' }), false);
 });
