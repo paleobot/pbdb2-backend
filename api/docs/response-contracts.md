@@ -1,13 +1,14 @@
 # PBDB2 API — Response Contracts and Shared Payload Code
 
-**Status:** Exploration (2026-10-01). Nothing decided is implemented yet; no OpenSpec change exists.
+**Status:** Exploration (2026-10-01; leaning A, 2026-10-06, §6). Nothing decided is implemented
+yet; no OpenSpec change exists.
 **Audience:** PBDB2 backend contributors
 **Subject:** How the API starts using `payloadSchemas/`, and where linked-resource conveniences
 (`title`, `href`) belong in a GET response
 
 This picks up the backlog entry "API responses vs. the `out` variants"
 (`docs/api-design-backlog.md`). It records one discussion: what was found, what was agreed, and
-the two designs still in the running.
+the two designs still in the running, and why A is favoured (§6).
 
 ---
 
@@ -167,6 +168,30 @@ Naming: the sources call the link value `referenceID`, while the API's link obje
 `permid`. The contract should use one. `referenceID` is already in the sources and codecs, and it
 says what is being referenced.
 
+### Keeping a later include additive
+
+A general include parameter (Classic's `show`, JSON:API's `include`) is deferred
+(`docs/api-design-backlog.md`, "Including related resources"). Under A, including a linked
+resource means filling in the stub that is already there:
+
+```
+stub today:          { referenceID, title, href }
+with an include:     { referenceID, title, href, authors, publicationYear, doi, … }
+```
+
+Two rules on stubs keep that change additive, so clients that ignore includes are unaffected:
+
+1. **A stub's fields use the target's own names and meanings.** The labels already do:
+   `reference.title`, `authority.citation`. The link key (`referenceID`) stands for the target's
+   `permid`; the target's other fields keep their names when included.
+2. **Stub fields are always present but optional; included fields are optional `readOnly` fields
+   on top.** `title` cannot be required: 541 migrated references have none. One schema then
+   describes the response with or without an include. `deriveVariant` could later generate the
+   included fields from `x-link.target` and the target's `out`.
+
+Reverse relations (a collection's specimens) have no field in the payload, so these rules don't
+reach them; see the backlog entry.
+
 ---
 
 ## 5. JSON Hyper-Schema, for the `href` question
@@ -200,9 +225,75 @@ with either.
 
 ---
 
-## 6. Open questions
+## 6. Which design helps clients display data
 
-1. **A or B.** In-payload links declared in the source, or a related block in the envelope.
+Discoverability through the API is a goal: responses carry links, not bare permids. Both designs
+do that. They differ in where a client finds the link, and that decides how much display code a
+client writes.
+
+Today's API already embeds links inline: authority `reference` comes back as
+`{ title, permid, href }`. A gives that shape a schema; B changes what clients see now.
+
+### By client
+
+| Client | A (inline) | B (envelope) |
+|---|---|---|
+| Person reading JSON in a browser | follows `href` where the value is | finds the permid, then looks for it in another member |
+| Web app, detail view | `<a href={c.reference.href}>{c.reference.title}</a>` | looks up `links.<related>.references[c.reference]` for every link, and must know which fields are links |
+| Web app, tables (AG Grid, TanStack Table, DataTables) | a column accessor `"reference.title"` works | each link column needs a custom cell renderer |
+| R / pandas (`jsonlite::fromJSON(..., flatten = TRUE)`, `json_normalize`) | `reference.title` becomes a column | a manual merge per link |
+| Generic tools (form generators, OpenAPI) | nested `readOnly` is standard | a custom vocabulary |
+| Editing UI (GET → PATCH) | must drop `readOnly` fields before sending | sends `data` back as-is |
+
+- Under A the shape of a value says it is a link: an object with `href`. A generic renderer can
+  turn any such object into a link without knowing field names.
+- Scripted clients matter. Classic PBDB's users are largely R and Python scientists, and Classic
+  gives them inline `show=ref` fields and CSV for that reason.
+- B saves repeating a reference's title across a page of rows. At our page sizes that saving is
+  negligible.
+- JSON:API is B-like (`relationships` linkage plus `included`). In practice clients use a library
+  (ember-data, Jsona, devour) to rebuild the inline graph. That fits large partial object graphs
+  and normalized caches. We embed a label and a link.
+
+### What B still has, and what answers it under A
+
+- **GET body equals PATCH body.** Under A, the read-only fields are marked in the schema, so a small
+  generic `stripReadOnly(schema, doc)` can drop them, and could be published for clients. The 400
+  that names the path (§2) covers clients that don't. Form libraries (RJSF, JSON Forms) already
+  honour `readOnly`. An edit UI needs the new target's title anyway, and its picker supplies it.
+- **Lighter server code.** True of B as built today. A moves the cost into `x-link` and nested
+  `readOnly`, but most of `LINK_TARGETS` and the `linkProjections` join SQL can go, so the total
+  does not grow much.
+- **Old versions show current titles.** Correct for a display label: a link label names the
+  target as it is now. `readOnly` and the contract say `title` is not part of the record.
+
+### A fallback, if embedding titles proves costly
+
+`href` and `title` are different kinds of value:
+
+```
+href   = f(permid)          no lookup, never stale
+title  = lookup(target)     cross-table join, changes independently
+```
+
+Inline `href` (or a Hyper-Schema template, §5) with titles in a side block is possible. It brings
+B's lookup back for the field display code uses most, so use it only if a codec context that maps
+a key to `{ permid, title }` turns out to be hard.
+
+### Conclusion
+
+A serves every reading client: browser, web-app tables, R and pandas, generic tools. B serves the
+one client that writes, and writers already need a schema-aware client and authentication; the
+schema tells them exactly what to strip. Optimise for readers: **leaning A.**
+
+Still worth checking: whether the PBDB2 web app plans a normalized cache (TanStack Query, RTK
+Query). That would weaken the case for A slightly, not reverse it.
+
+---
+
+## 7. Open questions
+
+1. **A or B.** Leaning A (§6). Confirm when the OpenSpec change starts.
 2. **Under A:** is any `x-out` field needed beyond nested `readOnly` and `x-link`?
 3. **Under B:** the name and shape of the related block, and whether it carries anything beyond
    `title` and `href`.

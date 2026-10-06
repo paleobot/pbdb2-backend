@@ -268,11 +268,40 @@ The 2026-10-01 discussion narrowed this to two designs (links declared in the so
 block in the envelope) and found that GET currently drops column-stored fields; see
 `api/docs/response-contracts.md`.
 
+As of 2026-10-06 the lean is toward links inside the payload (design A), for the sake of clients
+that display data; see `api/docs/response-contracts.md` §6.
+
 The API is about 2,000 lines. Its transport layer (envelope, pagination, discovery, filters,
 405 handling; about 950 lines, specified and tested) doesn't depend on payload shape. About
 580 lines of data layer (`repository.js`, `resource-tables.js` links, `link-hydration.js`, parts of
 `schema-tree.js`) would change. That argues for refactoring the API rather than rewriting it. The
 `taxa` reads have no payload and are unaffected.
+
+## Including related resources
+
+**Deferred; one naming rule decided.** Classic's `show` and JSON:API's `include` let a client ask
+for more in one call. Three different things go by that name:
+
+| Kind | Example | In the payload today |
+|---|---|---|
+| Forward link, filled in | an authority's whole `reference` | a stub, `{ referenceID, title, href }` (design A) |
+| Reverse relation | a collection's specimens | nothing |
+| Optional blocks of the record's own fields | Classic `show=coords`; JSON:API `fields[]` | everything, always |
+
+- Forward links: the stub rules in `api/docs/response-contracts.md` §4 ("Keeping a later include
+  additive") keep a later include additive. Nothing else needs deciding now.
+- Reverse relations: open. A collection can have thousands of specimens, so pagination, a count, and
+  whether an `href` such as `/specimens?collection=…` is enough are questions for the first caller.
+  A cheap first step is the `href` alone, which also helps discoverability.
+- Field blocks: open, and a separate axis from includes.
+
+Decided: no general mechanism until there is a second caller. When the first real need arrives,
+add it as `?include=<name>` on that one route, not a per-route boolean such as
+`includeSpecimens=true`, and reject unknown values with a 400. A later general mechanism then takes
+over the name instead of keeping a compatibility alias. Per-route booleans don't combine, are hard
+to retire, and each gives the response schema a shape that exists only when it is set.
+
+*Reasoning:* discussion of 2026-10-06, recorded in `api/docs/response-contracts.md` §4.
 
 ## Serving the schemas to clients
 
