@@ -6,7 +6,7 @@
 // Schema but trips that check. See openspec/specs/payload-schema-variants/spec.md.
 import Ajv2019 from 'ajv/dist/2019.js';
 
-export const ANNOTATION_KEYWORDS = ['x-enumFrom', 'x-storage', 'x-create', 'x-variant'];
+export const ANNOTATION_KEYWORDS = ['x-enumFrom', 'x-storage', 'x-create', 'x-link', 'x-variant'];
 
 export function createAjv() {
   const ajv = new Ajv2019({ allErrors: true, strict: true, strictRequired: false });

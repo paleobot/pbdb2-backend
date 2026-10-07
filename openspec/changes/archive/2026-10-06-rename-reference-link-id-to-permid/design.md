@@ -3,7 +3,7 @@
 `references[]` items in `collection.schema.js` and `schema.schema.js` are `{ referenceID, order }`.
 The name goes back to the hand-written collection schema (2026-03). The schema conversions and the
 `referenceList` codec (2026-09-18) kept it. Every other id in PBDB2 is `permid`, including the API's
-link objects. `api-reads-from-payload-schemas` makes the sources the response contract, so the name
+link objects. `authority-reads-from-payload-schemas` makes the sources the response contract, so the name
 is settled first (`api/docs/response-contracts.md` §4).
 
 Where the name appears today:
@@ -26,10 +26,10 @@ Not in the jsonb at rest: `references` is `x-storage`, kept in `reference_id` co
 - **Closing reference items.** The item schemas don't set `additionalProperties: false`, and the
   root `unevaluatedProperties: false` doesn't reach into array items. So an item carrying both `permid`
   and a stray `referenceID` validates today and still will after this change. Closing the items
-  belongs to `api-reads-from-payload-schemas`, which adds read-only `title`/`href` to link objects and
+  belongs to `authority-reads-from-payload-schemas`, which adds read-only `title`/`href` to link objects and
   must reject them in bodies.
 - **The authority link.** The authority `reference` field and `referencePermid` are reshaped in
-  `api-reads-from-payload-schemas`.
+  `authority-reads-from-payload-schemas`.
 - **Any alias.** Neither the sources nor the codec will accept `referenceID` alongside `permid`.
 
 ## Decisions

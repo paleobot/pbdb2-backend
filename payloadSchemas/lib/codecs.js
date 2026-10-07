@@ -59,7 +59,7 @@ const wgs84Point = {
 // versioned and every version shares one permid, so the source is read from
 // lineage heads only, which is what makes permid -> id a function. refs.id is a
 // bigint, which node-postgres returns as a string, so ids are keyed as strings.
-const REFS_SOURCE = { table: 'refs', key: 'id', value: 'permid', versioned: true };
+const REFS_SOURCE = { table: 'refs', key: 'id', value: 'permid', versioned: true, payload: 'reference' };
 const referenceList = {
   sources: [REFS_SOURCE],
   split({ references }, storage, ctx) {
@@ -83,18 +83,31 @@ const referenceList = {
   },
 };
 
-// reference permid <-> a single refs.id column (authorities.reference_id). The
-// scalar counterpart of referenceList, over the same heads-only source.
+// The reference link <-> a single refs.id column (authorities.reference_id). The
+// scalar counterpart of referenceList, over the same heads-only source. merge
+// emits { permid } plus the link's label (storage.link) when the context holds
+// one, or null when the reference has been removed. split reads permid only:
+// the label is read-only, and a removed reference may not be cited.
 const referencePermid = {
   sources: [REFS_SOURCE],
   split({ reference }, storage, ctx) {
     if (reference === undefined || reference === null) return {};
-    return { columns: { [storage.column]: String(lookup('referencePermid', REFS_SOURCE, ctx, 'byValue', reference)) } };
+    const id = String(lookup('referencePermid', REFS_SOURCE, ctx, 'byValue', reference.permid));
+    if (ctx.get(REFS_SOURCE.table).removed?.has(id)) {
+      throw new Error(`referencePermid: reference ${JSON.stringify(reference.permid)} has been removed`);
+    }
+    return { columns: { [storage.column]: id } };
   },
   merge({ columns }, storage, ctx) {
-    const id = columns?.[storage.column];
-    if (id === undefined || id === null) return {};
-    return { reference: lookup('referencePermid', REFS_SOURCE, ctx, 'byKey', String(id)) };
+    const raw = columns?.[storage.column];
+    if (raw === undefined || raw === null) return {};
+    const id = String(raw);
+    const permid = lookup('referencePermid', REFS_SOURCE, ctx, 'byKey', id);
+    const entry = ctx.get(REFS_SOURCE.table);
+    if (entry.removed?.has(id)) return { reference: null };
+    const label = storage.link?.label;
+    const found = label === undefined ? undefined : entry.labels?.get(id)?.[label];
+    return { reference: found === undefined ? { permid } : { permid, [label]: found } };
   },
 };
 

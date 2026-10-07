@@ -1,9 +1,10 @@
 // Derive the per-use variants of an annotated payload source:
 //
 //   db           the jsonb at rest: x-storage properties removed, base required only
-//   in-create    a create body: readOnly properties removed, x-create merged in
-//   out          a full response: everything kept, dictionary enums not enforced
-//   patch-guard  screens a JSON Merge Patch body (object, no readOnly keys); the
+//   in-create    a create body: readOnly properties removed at any depth, x-create merged in
+//   out          a full response: everything kept, dictionary enums not enforced,
+//                x-link properties nullable (a removed target)
+//   patch-guard  screens a JSON Merge Patch body (object, no root readOnly keys); the
 //                merged document is validated separately (payloadSchemas/DESIGN_NOTES.md)
 //
 // Resolve enums on the source first (./enums.js), then derive. Recurses through
@@ -19,24 +20,6 @@ const SUBSCHEMAS = ['if', 'then', 'else', 'not'];
 
 function isSchema(v) {
   return v && typeof v === 'object' && !Array.isArray(v);
-}
-
-// readOnly may appear only on the source's root properties (so patch-guard,
-// which checks root keys, covers every read-only field).
-function assertRootOnlyReadOnly(source) {
-  const check = (node, path) => {
-    if (Array.isArray(node)) return node.forEach((n, i) => check(n, `${path}[${i}]`));
-    if (!isSchema(node)) return;
-    if (node.readOnly) throw new Error(`readOnly is allowed only on root properties; found at ${path}`);
-    for (const [k, v] of Object.entries(node)) check(v, `${path}.${k}`);
-  };
-  for (const [name, prop] of Object.entries(source.properties ?? {})) {
-    const { readOnly, ...rest } = prop;
-    check(rest, name);
-  }
-  for (const [k, v] of Object.entries(source)) {
-    if (k !== 'properties') check(v, k);
-  }
 }
 
 // Remove `names` from required lists at this node and in the applicators that
@@ -79,6 +62,8 @@ function transform(node, variant) {
   }
 
   if (variant === 'out' && 'x-enumFrom' in out) delete out.enum;
+  // A link whose target has been removed reads as null; only a response says so.
+  if (variant === 'out' && 'x-link' in out) out.type = [out.type, 'null'];
   return out;
 }
 
@@ -93,7 +78,6 @@ export function deriveVariant(source, variant) {
   if (!VARIANTS.includes(variant)) {
     throw new Error(`Unknown variant '${variant}'; expected one of ${VARIANTS.join(', ')}`);
   }
-  assertRootOnlyReadOnly(source);
   const $id = variantId(source, variant);
 
   if (variant === 'patch-guard') {

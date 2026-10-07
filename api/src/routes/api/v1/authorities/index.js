@@ -6,12 +6,15 @@ export default async function authorities(fastify) {
   registerCrudRoutes(fastify, {
     type: 'authority',
     repository: repositoryForResource(fastify, 'authorities'),
-    links: descriptorFor('authorities').links,
+    source: descriptorFor('authorities').source,
+    // A payload in the authority source's shape, as a merged read returns it.
     stub: (permid = 'aut-00000000') => ({
       permid,
-      taxonName: 'Stub taxon',
-      rank: 'genus',
-      reference: { title: 'Stub reference', permid: 'ref-00000000' },
+      legacyIDs: { oldpbdbIDs: [] },
+      citation: 'Stub authority',
+      descriptors: [],
+      publishedInReference: false,
+      reference: { permid: 'ref-00000000', title: 'Stub reference' },
     }),
   });
 }

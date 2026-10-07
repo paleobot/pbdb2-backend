@@ -61,8 +61,15 @@ and it would miss cross-field rules the merged document catches.
 
 A bare `{ type: "object" }` guard is not quite enough: removing readOnly
 properties before validation would silently hide a patch that tries to change
-them. `patch-guard` is that bare guard plus "no readOnly keys", which is why
-readOnly is allowed on root properties only.
+them. `patch-guard` is that bare guard plus "no root readOnly keys".
+
+readOnly may also be nested: a link's label and `href` (lib/links.js) are
+read-only fields inside a writable link object. The guard doesn't name those,
+and the merged-document check can't catch them either, because the stored
+document legitimately carries them and the removal step would hide a patch that
+changes one. So the write path must screen a patch body for nested read-only
+paths itself, for example with a deeper guard. That is still open
+(authority-reads-from-payload-schemas, design D2).
 
 **Open API policy:** which variant validates the merged document. Migrated rows
 can have gaps (`scale`, age `error`/`method`, `admin1`) that `in-create`

@@ -11,8 +11,17 @@
  * One engine serves every uniform resource, parameterized by table + JSONB
  * column from the descriptor map — mirroring the route factory in
  * crud-routes.js. `schemas` is the exception (see schema-tree.js).
+ *
+ * A resource whose descriptor names a payload `source` is read through the
+ * shared payload code instead: the head query also selects the columns the
+ * source's x-storage names, and each record is `merge()`d from its row with one
+ * codec context per read (see sourceRecords). Its links come from the source's
+ * x-link properties, not from `links`.
  */
 
+import {
+  merge, collectCodecSources, loadCodecContext, codecKeyColumns, storageColumns,
+} from '../../../payloadSchemas/lib/storage.js';
 import { descriptorFor, targetFor } from './resource-tables.js';
 import { DEFAULT_LIMIT } from './list-filters.js';
 import { BACKWARD } from './cursor.js';
@@ -172,20 +181,57 @@ function toResource(row, links) {
 }
 
 /**
+ * Turn head rows into merged payloads for a resource with a payload source. One
+ * codec context serves the whole read: each codec source is restricted to the
+ * keys the rows hold (codecKeyColumns), so a single read and a page of a list
+ * each cost one lookup query per source. A source the rows hold no key column
+ * for is read in full.
+ *
+ * @param {object} pg
+ * @param {object} source  annotated payload source
+ * @returns {(rows: object[]) => Promise<object[]>}
+ */
+function sourceRecords(pg, source) {
+  const codecSources = collectCodecSources(source);
+  const keyColumns = codecKeyColumns(source);
+  return async (rows) => {
+    if (rows.length === 0) return [];
+    const selection = {};
+    for (const codecSource of codecSources) {
+      const columns = keyColumns.get(codecSource.table);
+      if (!columns) continue;
+      const values = new Set();
+      for (const row of rows) {
+        for (const column of columns) if (row[column] != null) values.add(String(row[column]));
+      }
+      selection[codecSource.table] = { column: codecSource.key, values: [...values] };
+    }
+    const ctx = await loadCodecContext(pg, codecSources, selection);
+    return rows.map((row) => merge(source, { jsonb: row.payload, columns: row }, ctx));
+  };
+}
+
+/**
  * @param {object} args
  * @param {{ query: (text: string, values?: unknown[]) => Promise<{ rows: any[] }> }} args.pg
  *   a @fastify/postgres client (or a compatible fake in tests)
  * @param {string} args.table        backing table name (from the descriptor)
  * @param {string} args.jsonbColumn  JSONB payload column (from the descriptor)
+ * @param {object} [args.source]     annotated payload source; reads go through merge()
  */
-export function makeReadRepository({ pg, table, jsonbColumn, links, filters = {} }) {
+export function makeReadRepository({ pg, table, jsonbColumn, links, filters = {}, source }) {
   const from = ident(table);
   const payload = ident(jsonbColumn);
   // Link sub-selects correlate to the citing row via the quoted table name
   // (the outer select is unaliased), keeping the head-select skeleton unchanged.
   const projections = linkProjections(links, from);
-  const projectionCols = projections.length ? `, ${projections.join(', ')}` : '';
-  const select = `SELECT permid, ${payload} AS payload${projectionCols} FROM ${from}`;
+  const extraCols = source
+    ? storageColumns(source).filter((c) => c !== 'permid').map(ident)
+    : projections;
+  const select = `SELECT permid, ${payload} AS payload${extraCols.map((c) => `, ${c}`).join('')} FROM ${from}`;
+  const toRecords = source
+    ? sourceRecords(pg, source)
+    : async (rows) => rows.map((row) => toResource(row, links));
 
   return {
     // Declared field filters, exposed so the route seam knows which query params
@@ -203,7 +249,9 @@ export function makeReadRepository({ pg, table, jsonbColumn, links, filters = {}
         `${select} WHERE permid = $1 AND ${HEAD_FILTER} LIMIT 1`,
         [permid],
       );
-      return rows.length ? toResource(rows[0], links) : null;
+      if (!rows.length) return null;
+      const [record] = await toRecords(rows);
+      return record;
     },
 
     /**
@@ -267,7 +315,7 @@ export function makeReadRepository({ pg, table, jsonbColumn, links, filters = {}
       const pageRows = hasMore ? rows.slice(0, limit) : rows;
       if (backward) pageRows.reverse();
 
-      return { records: pageRows.map((row) => toResource(row, links)), hasMore };
+      return { records: await toRecords(pageRows), hasMore };
     },
 
     /**

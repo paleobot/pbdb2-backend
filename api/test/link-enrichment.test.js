@@ -25,11 +25,10 @@ function fakePg(handler) {
 }
 
 // The exact expressions emitted before link targets were parameterized. Any
-// diff here is a behavior change, not a stale expectation.
+// diff here is a behavior change, not a stale expectation. Authorities is not
+// here: it reads through its payload source and declares no links (see
+// test/source-reads.test.js).
 const PRE_REFACTOR_SQL = {
-  authorities: [
-    `(SELECT json_build_object('title', r.reference->>'title', 'permid', r.permid) FROM refs r WHERE r.id = "authorities"."reference_id" AND NOT COALESCE(r.removed, false)) AS "reference"`,
-  ],
   collections: [
     `(SELECT json_build_object('title', r.reference->>'title', 'permid', r.permid) FROM refs r WHERE r.id = "collections"."reference_id" AND NOT COALESCE(r.removed, false)) AS "primaryReference"`,
     `(SELECT COALESCE(json_agg(json_build_object('title', r.reference->>'title', 'permid', r.permid)), '[]'::json) FROM "additional_collection_refs" j JOIN refs r ON r.id = j.reference_id WHERE j."collection_id" = "collections".id AND NOT COALESCE(r.removed, false)) AS "additionalReferences"`,
@@ -52,6 +51,11 @@ test('existing reference declarations emit byte-identical SQL after generalizati
     assert.deepEqual(linkProjections(descriptor.links, `"${descriptor.table}"`), expected, resource);
   }
   assert.deepEqual(linkProjections(descriptorFor('schemas').links, 'ts'), PRE_REFACTOR_SQL_TS);
+});
+
+test('authorities declares no descriptor links: its reference comes from the source', () => {
+  assert.equal(descriptorFor('authorities').links, undefined);
+  assert.ok(descriptorFor('authorities').source.properties.reference['x-link']);
 });
 
 // A synthetic citing resource; nothing in the served API declares these yet.

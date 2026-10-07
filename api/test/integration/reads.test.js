@@ -1,7 +1,11 @@
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 
+import { build } from '../../src/app.js';
 import { makeReadRepository } from '../../src/lib/repository.js';
+import { authoritySource } from '../../../payloadSchemas/authority.schema.js';
+import { deriveVariant } from '../../../payloadSchemas/lib/variants.js';
+import { createAjv } from '../../../payloadSchemas/lib/ajv.js';
 import { readSchemaTree } from '../../src/lib/schema-tree.js';
 import { descriptorFor } from '../../src/lib/resource-tables.js';
 import {
@@ -36,6 +40,13 @@ after(async () => {
 
 const refsRepo = () =>
   makeReadRepository({ pg: ctx.pool, table: 'refs', jsonbColumn: 'reference' });
+
+// The authority response contract (data-access): every authority read is
+// checked against it.
+const validateAuthorityOut = createAjv().compile(deriveVariant(authoritySource, 'out'));
+function assertAuthorityContract(record) {
+  assert.equal(validateAuthorityOut(record), true, JSON.stringify(validateAuthorityOut.errors));
+}
 
 // Enrichment repos use the production descriptors (table, jsonbColumn, references).
 const authoritiesRepo = () => makeReadRepository({ pg: ctx.pool, ...descriptorFor('authorities') });
@@ -155,12 +166,62 @@ test('authority read embeds its single reference', async (t) => {
   await insertAuthority(ctx.pool, {
     permid: authorityPermid,
     personId,
-    authority: { taxonName: 'Calymene' },
+    authority: { legacyIDs: { oldpbdbIDs: ['42'] }, citation: 'Barrande 1846', descriptors: ['Barrande'], year: '1846', publishedInReference: true },
     referenceId: ref.id,
   });
 
+  // Read through merge(): the whole stored payload plus the reference link,
+  // with no internal id.
   const head = await authoritiesRepo().readHead(authorityPermid);
-  assert.deepEqual(head.reference, { title: 'Cited work', permid: refPermid });
+  assertAuthorityContract(head);
+  assert.deepEqual(head, {
+    permid: authorityPermid,
+    legacyIDs: { oldpbdbIDs: ['42'] },
+    citation: 'Barrande 1846',
+    descriptors: ['Barrande'],
+    year: '1846',
+    publishedInReference: true,
+    reference: { title: 'Cited work', permid: refPermid },
+  });
+});
+
+test('authority citing an untitled reference reads without a title key', async (t) => {
+  if (!ctx.available) return t.skip(ctx.reason);
+
+  const refPermid = newPermid();
+  const authorityPermid = newPermid();
+  const ref = await insertRef(ctx.pool, { permid: refPermid, personId, reference: {} });
+  await insertAuthority(ctx.pool, { permid: authorityPermid, personId, referenceId: ref.id });
+
+  const head = await authoritiesRepo().readHead(authorityPermid);
+  assertAuthorityContract(head);
+  assert.deepEqual(head.reference, { permid: refPermid });
+});
+
+test('authority routes honour the out contract over real PostgreSQL, with hrefs', async (t) => {
+  if (!ctx.available) return t.skip(ctx.reason);
+
+  const titled = await insertRef(ctx.pool, { permid: newPermid(), personId, reference: { title: 'Route ref' } });
+  const removed = await insertRef(ctx.pool, { permid: newPermid(), personId, reference: { title: 'Gone' }, removed: true });
+  const live = newPermid();
+  const orphaned = newPermid();
+  await insertAuthority(ctx.pool, { permid: live, personId, referenceId: titled.id });
+  await insertAuthority(ctx.pool, { permid: orphaned, personId, referenceId: removed.id });
+
+  const app = build({ pg: ctx.pool });
+  t.after(() => app.close());
+
+  const single = (await app.inject({ method: 'GET', url: `/api/v1/authorities/${live}` })).json().data;
+  assertAuthorityContract(single);
+  assert.deepEqual(single.reference, { title: 'Route ref', permid: titled.permid, href: `/api/v1/references/${titled.permid}` });
+
+  const list = (await app.inject({ method: 'GET', url: `/api/v1/authorities?ids=${live},${orphaned}` })).json().data;
+  for (const item of list) assertAuthorityContract(item);
+  assert.equal(list.find((a) => a.permid === orphaned).reference, null);
+
+  const page = (await app.inject({ method: 'GET', url: '/api/v1/authorities?limit=100' })).json().data;
+  assert.ok(page.length >= 2);
+  for (const item of page) assertAuthorityContract(item);
 });
 
 test('collection read embeds primary and additional references', async (t) => {
@@ -245,6 +306,7 @@ test('edited reference is reflected on re-read; permid is stable (FK swing track
   await insertRef(ctx.pool, { permid: refPermid, personId, reference: { title: 'v2' } });
 
   const head = await authoritiesRepo().readHead(authorityPermid);
+  assertAuthorityContract(head);
   assert.deepEqual(head.reference, { title: 'v2', permid: refPermid });
 });
 
@@ -292,6 +354,7 @@ test('removed primary reference resolves to null', async (t) => {
   await insertAuthority(ctx.pool, { permid: authorityPermid, personId, referenceId: ref.id });
 
   const head = await authoritiesRepo().readHead(authorityPermid);
+  assertAuthorityContract(head);
   assert.equal(head.reference, null);
 });
 

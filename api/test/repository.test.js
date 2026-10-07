@@ -81,14 +81,14 @@ test('DB-backed list returns the mapped heads with counts', async (t) => {
 
 test('reads expose only permid + payload — no internal ids or chain columns leak', async (t) => {
   const pg = fakePg(() => ({
-    rows: [{ permid: 'aut-1', payload: { taxonName: 'Calymene', rank: 'genus' } }],
+    rows: [{ permid: 'ref-1', payload: { title: 'On Trilobites', year: '1959' } }],
   }));
   const app = build({ pg });
   t.after(() => app.close());
 
-  const res = await app.inject({ method: 'GET', url: '/api/v1/authorities/aut-1' });
+  const res = await app.inject({ method: 'GET', url: '/api/v1/references/ref-1' });
   const { data } = res.json();
-  assert.deepEqual(Object.keys(data).sort(), ['permid', 'rank', 'taxonName']);
+  assert.deepEqual(Object.keys(data).sort(), ['permid', 'title', 'year']);
   for (const forbidden of ['id', 'preceded_by_id', 'succeeded_by_id', 'removed']) {
     assert.ok(!(forbidden in data), `${forbidden} must not be exposed`);
   }

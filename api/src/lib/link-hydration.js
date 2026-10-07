@@ -55,6 +55,27 @@ export function hydrateLinkHrefs(record, links, prefix) {
   return record;
 }
 
+/**
+ * Add `href` to each link a payload source declares (root properties carrying
+ * `x-link`), for a resource read through its source. The target route group
+ * comes from the annotation. A `null` link (a removed target) is left alone.
+ * Mutates and returns the record.
+ *
+ * @template T
+ * @param {T} record
+ * @param {object} source  annotated payload source
+ * @param {string} prefix  the citing route group's `fastify.prefix`
+ * @returns {T}
+ */
+export function hydrateSourceLinks(record, source, prefix) {
+  if (!record) return record;
+  for (const [name, prop] of Object.entries(source.properties ?? {})) {
+    const link = prop['x-link'];
+    if (link) addHref(record[name], groupBase(prefix, link.target));
+  }
+  return record;
+}
+
 function addHref(link, base) {
   if (link && link.permid) link.href = `${base}/${link.permid}`;
 }

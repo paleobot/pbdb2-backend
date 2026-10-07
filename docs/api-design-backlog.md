@@ -140,6 +140,12 @@ The options, including a ratchet (always validate against `db`, and against `in-
 stored row already passed it), are compared in `payloadSchemas/DESIGN_NOTES.md`, "Edit route
 pattern".
 
+**Nested read-only fields (2026-10-06):** a link's `title` and `href` are read-only fields inside a
+writable link object. `patch-guard` checks root keys only. The merged-document check can't catch a
+patch to one either, because read-only fields are removed before it runs. So the write path needs
+its own screen, for example a guard that walks nested `readOnly` paths. See
+`authority-reads-from-payload-schemas` design D2.
+
 *Reasoning:* `openspec/specs/payload-schema-variants/spec.md` (`patch-guard` requirement).
 
 ## Fields the server supplies
@@ -268,8 +274,10 @@ The 2026-10-01 discussion narrowed this to two designs (links declared in the so
 block in the envelope) and found that GET currently drops column-stored fields; see
 `api/docs/response-contracts.md`.
 
-As of 2026-10-06 the lean is toward links inside the payload (design A), for the sake of clients
-that display data; see `api/docs/response-contracts.md` §6.
+**Update 2026-10-06:** design A (links inside the payload) was chosen; see
+`api/docs/response-contracts.md` §6. `authority-reads-from-payload-schemas` builds it for authorities:
+GET is `merge()` output, described by `out`, with `reference` as `{ permid, title, href }`. The
+other resources still read as described above.
 
 The API is about 2,000 lines. Its transport layer (envelope, pagination, discovery, filters,
 405 handling; about 950 lines, specified and tested) doesn't depend on payload shape. About
@@ -302,6 +310,21 @@ over the name instead of keeping a compatibility alias. Per-route booleans don't
 to retire, and each gives the response schema a shape that exists only when it is set.
 
 *Reasoning:* discussion of 2026-10-06, recorded in `api/docs/response-contracts.md` §4.
+
+## Full URLs in links
+
+**Deferred; recommendation recorded.** Every link the API emits is a root-relative path: `href` values
+(`/api/v1/references/{permid}`), and the envelope's `links.self`, `next` and `prev`. Full URLs
+(`https://…/api/v1/…`) would make links clickable in browser JSON viewers, let scripts fetch an `href`
+as is, and keep links working in saved responses.
+
+Recommended: a configured `PUBLIC_BASE_URL` (with a local-dev default) rather than deriving the base
+from `Host` and `X-Forwarded-*`, which needs `trustProxy` set correctly and echoes client headers.
+Do it as one API-wide change covering the envelope, the pagination links and every hydrated `href`,
+so that no response mixes paths and URLs. `groupBase()` (`api/src/lib/link-hydration.js`) is where
+hydrated `href` bases are built.
+
+*Reasoning:* discussion of 2026-10-06, during `authority-reads-from-payload-schemas` (design D6).
 
 ## Serving the schemas to clients
 

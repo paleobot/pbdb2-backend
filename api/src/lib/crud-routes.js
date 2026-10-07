@@ -1,4 +1,4 @@
-import { hydrateLinkHrefs } from './link-hydration.js';
+import { hydrateLinkHrefs, hydrateSourceLinks } from './link-hydration.js';
 import { collectListFilters, rejectUnknownQuery } from './list-filters.js';
 import { pageLinks } from './cursor.js';
 
@@ -31,6 +31,8 @@ import { pageLinks } from './cursor.js';
  *   present) declares the field-filter query params this resource accepts.
  * @param {Record<string, import('./resource-tables.js').LinkDeclaration>} [opts.links]
  *   link enrichment config; when present, resolved links get an `href`
+ * @param {object} [opts.source]  annotated payload source; when present, its
+ *   x-link properties get an `href` instead of `links`
  * @param {Record<string, { type: 'boolean' }>} [opts.expansions]
  *   declared expansion params this resource's list accepts
  * @param {boolean} [opts.readOnly]  expose GET only; write verbs answer 405
@@ -40,13 +42,15 @@ import { pageLinks } from './cursor.js';
  */
 export function registerCrudRoutes(
   fastify,
-  { type, stub, repository, links, expansions, readOnly = false, hydrate: customHydrate },
+  { type, stub, repository, links, source, expansions, readOnly = false, hydrate: customHydrate },
 ) {
   const write = { preHandler: fastify.authenticate };
   // Each link's href base is derived from this group's mounted prefix and the
   // link's own target group, not hard-coded. A group with extra hydration of its
   // own (the taxa chain) supplies `hydrate` instead.
-  const hydrate = customHydrate ?? ((record) => hydrateLinkHrefs(record, links, fastify.prefix));
+  const hydrate = customHydrate ?? (source
+    ? (record) => hydrateSourceLinks(record, source, fastify.prefix)
+    : (record) => hydrateLinkHrefs(record, links, fastify.prefix));
 
   fastify.get('/', listReadHandler(fastify, { type, stub, repository, hydrate, expansions }));
 

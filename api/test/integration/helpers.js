@@ -205,11 +205,19 @@ export async function insertRef(pool, { permid, personId, reference = {}, remove
 
 /**
  * Insert an authority row, returning its serial id. `reference_id` is the
- * single (primary) reference FK; pass `permid` to extend a lineage.
+ * single (primary) reference FK; pass `permid` to extend a lineage. The default
+ * payload is valid against the authority source, so a read of it can be checked
+ * against the `out` contract.
  */
 export async function insertAuthority(
   pool,
-  { permid, personId, authority = {}, referenceId, removed = null },
+  {
+    permid,
+    personId,
+    authority = { citation: 'Test 2001', descriptors: ['Test'], year: '2001', publishedInReference: false },
+    referenceId,
+    removed = null,
+  },
 ) {
   const { rows } = await pool.query(
     `INSERT INTO authorities (permid, authorizer_person_id, enterer_person_id, authority, reference_id, removed)

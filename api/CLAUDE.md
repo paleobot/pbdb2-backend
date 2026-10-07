@@ -91,6 +91,13 @@ docs/                   design notes (e.g. response-envelope rationale)
   that do not exist) but reuses the shared `linkProjections()`. Its decisions and
   their evidence are in `openspec/changes/add-taxa-reads/design.md`; the
   measurements are in `docs/taxa-classification-reads.md`.
+- **Reads through a payload source:** a descriptor naming a `source` (from
+  `payloadSchemas/`) is read with `merge()` and one codec-context query per
+  page. Its links come from the source's `x-link` properties, and `href` is added
+  by `hydrateSourceLinks`. Each response validates against the source's `out`
+  variant, which `test/source-reads.test.js` checks. Only `authorities` reads
+  this way so far. The others still return `{ permid, ...payload }` plus
+  descriptor `links` (see `api/docs/response-contracts.md`).
 - **Strict query params:** an unrecognized query parameter is a **400** naming it,
   on single reads as well as lists. Filter *values* stay opaque (a well-formed
   value matching nothing is an empty 200). A resource declares what it accepts

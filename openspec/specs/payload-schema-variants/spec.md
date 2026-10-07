@@ -38,7 +38,8 @@ Derive every payload schema in use (`db`, `in-create`, `patch-guard`, `out`) fro
 Sources SHALL use these annotations:
 - `x-enumFrom`: defined by the payload-schema-enums capability.
 - `x-storage` on a property: the property is not stored in the entity's jsonb. Its value is `{ column: <name> }`, `{ column: <name>, codec: <name> }`, or `{ table: <name>, codec: <name> }`.
-- `readOnly: true` (standard JSON Schema) on a property: the value is server-assigned and accepted in no input. `readOnly` SHALL appear only on properties of the entity root, so that the root-level `patch-guard` covers every read-only field. Derivation SHALL throw if it finds `readOnly` at any deeper node.
+- `readOnly: true` (standard JSON Schema) on a property: the value is supplied by the server and accepted in no input. `readOnly` MAY appear at any depth. A property is server-supplied when the server assigns it (`permid`, `legacyIDs`, person `totalHours`) or when it is resolved from another resource (a link's label and `href`).
+- `x-link: { target, label }` on a property: the value is a link to a resource of route group `target`, embedding that resource's `label` field. It SHALL be declared only through the `link` helper.
 - `x-create` on an object schema: a subschema applied at that node only in the `in-create` variant.
 
 `readOnly` and `x-storage` SHALL be independent. For the collection and specimen sources:
@@ -55,6 +56,11 @@ For the person source:
 - `authorizer` SHALL carry `x-storage: { column: "authorizer_person_id", codec: "personPermid" }` and no `readOnly`.
 - `active` SHALL carry `x-storage: { column: "active" }` and no `readOnly`.
 
+For the authority source:
+- `permid` SHALL carry both.
+- `legacyIDs` SHALL carry `readOnly` only.
+- `reference` SHALL be a link property (`x-link: { target: "references", label: "title" }`) carrying `x-storage: { column: "reference_id", codec: "referencePermid" }` and no `readOnly` of its own. Its `title` and `href` are read-only.
+
 For the schema source:
 - `permid` SHALL carry both, as on collection and specimen.
 - `legacyIDs` SHALL carry `readOnly` only.
@@ -65,7 +71,7 @@ For the character and state sources:
 - `legacyIDs` SHALL carry `readOnly` only.
 - state `quantitative` SHALL carry `x-storage: { column: "quantitative" }` and no `readOnly`.
 
-`readOnly` marks a value the server assigns, not one only a privileged caller may set. `role`, `authorizer`
+`readOnly` marks a value the server supplies, not one only a privileged caller may set. `role`, `authorizer`
 and `active` are settable by an authorized caller, and which callers those are is a route concern that JSON
 Schema cannot express; marking them `readOnly` would make them unsettable by anyone, because `in-create`
 removes them and `patch-guard` rejects them. The person source SHALL define no `password` property and no
@@ -79,9 +85,13 @@ removes them and `patch-guard` rejects them. The person source SHALL define no `
 - **WHEN** the collection source is inspected at `location.coordinates.latitude`
 - **THEN** it has `x-storage` naming the `location` column and the `wgs84Point` codec, and no `readOnly`
 
-#### Scenario: Nested read-only rejected
-- **WHEN** a source marks `location.scale` as `readOnly`
-- **THEN** `deriveVariant` throws naming the path
+#### Scenario: Nested read-only accepted
+- **WHEN** the authority source marks `reference.title` and `reference.href` as `readOnly`
+- **THEN** every variant derives without error
+
+#### Scenario: A link is writable while its label is not
+- **WHEN** the authority source is inspected at `reference`
+- **THEN** `reference` carries `x-link` and `x-storage` and no `readOnly`, and `reference.title` and `reference.href` carry `readOnly`
 
 #### Scenario: Privileged but writable
 - **WHEN** the person source is inspected at `role`, `authorizer` and `active`
@@ -128,7 +138,7 @@ The `db` variant SHALL:
 
 ### Requirement: The `in-create` variant enforces create-time completeness
 The `in-create` variant SHALL:
-- remove every `readOnly` property and remove its name from any `required` list;
+- remove every `readOnly` property, at any depth, and remove its name from the `required` list of the node that declared it;
 - keep `x-storage` properties;
 - keep base `required` lists;
 - merge each node's `x-create` into that node as an `allOf` entry.
@@ -143,6 +153,10 @@ For the collection source, `x-create` SHALL:
 - **WHEN** a create payload includes `permid` or `legacyIDs`
 - **THEN** validation fails on the unevaluated property
 
+#### Scenario: A link's label rejected on create
+- **WHEN** an authority create body carries `reference: { permid: "<p>", title: "x" }`
+- **THEN** validation fails on `/reference/title`, and `reference: { permid: "<p>" }` passes
+
 #### Scenario: admin1 required for listed countries
 - **WHEN** a create payload has `location.toponym.administrativeArea: { admin0: "CA" }`
 - **THEN** validation fails requiring `admin1`
@@ -152,7 +166,7 @@ For the collection source, `x-create` SHALL:
 - **THEN** validation passes
 
 ### Requirement: The `patch-guard` variant screens a JSON Merge Patch body
-The `patch-guard` variant SHALL be exactly `{ $id, type: "object", propertyNames: { not: { enum: [<names of the source's root readOnly properties>] } } }`. When the source has no `readOnly` properties, `propertyNames` SHALL be omitted.
+The `patch-guard` variant SHALL be exactly `{ $id, type: "object", propertyNames: { not: { enum: [<names of the source's root readOnly properties>] } } }`. When the source has no root `readOnly` properties, `propertyNames` SHALL be omitted. Nested `readOnly` properties are not named in the guard. How a PATCH that touches one is rejected is a write-path decision outside this change: the merged-document check can't catch it, because step 3 would remove the field first.
 
 PATCH follows merge-then-validate (`payloadSchemas/DESIGN_NOTES.md`):
 1. the stored parts are `merge`d into a full document;
@@ -163,7 +177,7 @@ PATCH follows merge-then-validate (`payloadSchemas/DESIGN_NOTES.md`):
 
 Which variant validates the merged document is an API policy decision outside this change. No variant validates a patch body field by field.
 
-The guard is needed because step 3 would otherwise silently hide a patch that tries to change a `readOnly` property.
+The guard is needed because step 3 would otherwise silently hide a patch that tries to change a root `readOnly` property.
 
 #### Scenario: Ordinary patch passes the guard
 - **WHEN** the patch `{ "location": { "scale": "outcrop" }, "akaName": null }` is checked against the collection `patch-guard`
@@ -181,13 +195,18 @@ The guard is needed because step 3 would otherwise silently hide a patch that tr
 - **WHEN** the patch `{ "location": { "coordinates": { "latitude": 10, "longitude": 20 } } }` is checked
 - **THEN** validation passes
 
+#### Scenario: Nested read-only is not a guard concern
+- **WHEN** the authority `patch-guard` variant is derived
+- **THEN** its `propertyNames.not.enum` is exactly `permid` and `legacyIDs`
+
 ### Requirement: The `out` variant describes a full response
 The `out` variant SHALL:
 - keep all properties, including `x-storage` and `readOnly` ones;
 - keep base `required` lists;
 - drop every `x-create`;
 - remove `enum` from every schema that carries `x-enumFrom`, keeping the `x-enumFrom` annotation;
-- keep inline enums.
+- keep inline enums;
+- allow `null` for every property carrying `x-link`, meaning the linked resource has been removed. No other variant allows it.
 
 #### Scenario: Dictionary value removed after storage
 - **WHEN** a stored collection holds a `lithology` value that is no longer in `dictionaries.lithologies`, and its merged response is validated against `out`
@@ -196,6 +215,10 @@ The `out` variant SHALL:
 #### Scenario: Column-backed fields present
 - **WHEN** the collection `out` variant is derived
 - **THEN** it defines `permid`, `references`, `latitude`, and `longitude`
+
+#### Scenario: A removed link target
+- **WHEN** an authority response has `reference: null`
+- **THEN** it is valid against `out`, and a create body with `reference: null` is invalid against `in-create`
 
 ### Requirement: Split and merge are driven by `x-storage`
 `split(source, payload, ctx)` SHALL return `{ jsonb, columns, children }`:
@@ -207,10 +230,11 @@ The `out` variant SHALL:
 and no codec SHALL map one-to-one to that column. A codec SHALL receive all sibling properties that name it
 and produce one storage value or one set of child rows, and SHALL provide the inverse for `merge`. `ctx` is
 the codec context defined below; it SHALL be optional, and a codec that declares no sources SHALL ignore it.
+A codec serving a single property that carries `x-link` SHALL receive that annotation as `storage.link`.
 
 For any payload valid against `in-create`, the `jsonb` returned by `split` SHALL be valid against `db`. For
-any stored row, `split(merge(row))` with `readOnly` properties removed SHALL equal the row after codec
-normalization.
+any stored row, `split(merge(row))` with root `readOnly` properties removed SHALL equal the row after codec
+normalization. A codec SHALL ignore the nested read-only fields it emitted on merge, such as a link's label.
 
 #### Scenario: Split yields valid jsonb
 - **WHEN** a payload valid against the collection `in-create` variant is split
@@ -224,15 +248,22 @@ normalization.
 - **WHEN** a collection payload is split and merged with no `ctx` argument
 - **THEN** `wgs84Point` and `referenceList` behave exactly as before
 
+#### Scenario: Authority round trip ignores the label
+- **WHEN** a stored authority is merged (yielding `reference: { permid, title }`), its root read-only properties are removed, and the result is split
+- **THEN** `columns.reference_id` equals the stored value
+
 ### Requirement: A codec declares the lookup sources it needs
 A codec that cannot be computed from the payload alone SHALL declare a `sources` array. Each entry SHALL be
 `{ table: <qualified name>, key: <column>, value: <column> }`, naming a table to read and the two columns
-that form the mapping, and MAY carry `versioned: true` to declare that the table holds a succession lineage.
+that form the mapping. It MAY carry `versioned: true` to declare that the table holds a succession lineage,
+and `payload: <column>` to name the table's jsonb column, from which link labels are read.
 `x-storage` SHALL NOT carry the lookup's table or columns: the annotation keeps the three forms the annotation
 vocabulary defines, and the codec is what knows its own source.
 
 `collectCodecSources(source)` SHALL walk the source's `x-storage` codecs and return the union of their
-declared sources, with duplicates removed.
+declared sources, with duplicates removed. For a property that also carries `x-link`, the returned source
+SHALL carry `labels` listing that link's `label`. Duplicates SHALL be identified by `table`, `key` and
+`value`, and their `labels` lists SHALL be merged. A source carrying `labels` SHALL declare `payload`.
 
 `codecKeyColumns(source)` SHALL return, per looked-up table, the `x-storage` columns whose values are that
 source's keys, so that a caller reading rows in batches can build its selection by following the annotations
@@ -246,6 +277,10 @@ the accepted values and the stored key would otherwise be free to drift apart.
 #### Scenario: Sources collected from the source schema
 - **WHEN** `collectCodecSources(personSource)` is called
 - **THEN** it returns the `dictionaries.roles` and `persons` entries declared by `roleName` and `personPermid`, each once
+
+#### Scenario: A link asks for its label
+- **WHEN** `collectCodecSources(authoritySource)` is called
+- **THEN** it returns one `refs` source carrying `payload: "reference"` and `labels: ["title"]`
 
 #### Scenario: Annotation carries no lookup detail
 - **WHEN** the person source is inspected at `role`
@@ -261,13 +296,18 @@ the accepted values and the stored key would otherwise be free to drift apart.
 
 ### Requirement: The codec context is loaded per selection and applied purely
 `loadCodecContext(pg, sources, selection, reuse)` SHALL return a `Map` from each source's table name to
-`{ byKey, byValue }` lookup maps, both populated from one read per source.
+`{ byKey, byValue }` lookup maps, both populated from one read per source. The same read SHALL also populate:
+- `labels`, a `Map` from key to `{ <label>: <value> }`, when the source carries `labels`. Each label is read as `"<payload>"->>'<label>'` and left out when NULL;
+- `removed`, a `Set` of the keys whose rows are soft-removed, when the source is `versioned`.
 
 A source declaring `versioned: true` SHALL be read with its superseded rows excluded, so that both `byKey` and
 `byValue` are built from lineage heads only. On such a table many rows share one permid and `value → key` is
 not a function; only the head restriction makes it one. Excluding superseded rows from `byKey` as well is
 deliberate: foreign keys into a versioned table always denote the head, so nothing is lost, and a stored id
 that does not resolve is a violated invariant that SHALL surface as a throw rather than resolve quietly.
+Soft-removed heads SHALL NOT be excluded: they stay in `byKey` and `byValue` and are listed in `removed`, so
+that a codec ignoring `removed` resolves exactly as before, and a codec that cares decides what a removed
+target means.
 
 `reuse` SHALL be an already-loaded context that seeds the result, and a source whose table it already holds
 SHALL NOT be read again. Each call SHALL return a new `Map`, so that one batch's selection never accumulates
@@ -315,6 +355,14 @@ A codec SHALL throw, naming the codec and the unresolved value, when the context
 #### Scenario: Unversioned source is not filtered
 - **WHEN** a source does not declare `versioned`
 - **THEN** no succession filter is applied, and a source such as `persons` resolves by its `UNIQUE` permid alone
+
+#### Scenario: Labels loaded with the keys
+- **WHEN** the authority sources are loaded for a page citing two refs, one with a title and one without
+- **THEN** one query reads both rows, `labels` holds `{ title }` for the first and `{}` for the second
+
+#### Scenario: A removed head is marked, not dropped
+- **WHEN** the head ref at `id = 7` is soft-removed and the `refs` source is loaded
+- **THEN** `byKey` still maps `7` to its permid, and `removed` contains `7`
 
 #### Scenario: Selection columns follow the annotations
 - **WHEN** `codecKeyColumns(personSource)` is called
@@ -399,7 +447,7 @@ every foreign key pointing at the lineage head, so a stored id always denotes th
 - **THEN** `split` throws naming `personPermid` and that permid
 
 ### Requirement: A shared ajv factory registers the annotations
-`createAjv()` SHALL return an ajv instance for draft 2019-09 with `allErrors: true` and `strict: true`, except `strictRequired: false`. `x-create` merges as an `allOf` entry whose `required` names properties defined on the parent node, which that check rejects. `x-enumFrom`, `x-storage`, `x-create`, and `x-variant` (the root marker `deriveVariant` sets) SHALL be registered as annotation keywords, so that every variant compiles in strict mode. The converted migrations and the audit SHALL obtain their validators from `createAjv()`.
+`createAjv()` SHALL return an ajv instance for draft 2019-09 with `allErrors: true` and `strict: true`, except `strictRequired: false`. `x-create` merges as an `allOf` entry whose `required` names properties defined on the parent node, which that check rejects. `x-enumFrom`, `x-storage`, `x-create`, `x-link`, and `x-variant` (the root marker `deriveVariant` sets) SHALL be registered as annotation keywords, so that every variant compiles in strict mode. The converted migrations, the audit and the API's contract tests SHALL obtain their validators from `createAjv()`.
 
 #### Scenario: Strict compile succeeds
 - **WHEN** each variant of each converted entity is resolved and compiled with `createAjv()`
@@ -489,7 +537,7 @@ The source SHALL carry no hand-written description of per-type fields; the table
 |---|---|---|
 | `permid` | string | `readOnly`, `x-storage: { column: "permid" }` |
 | `legacyIDs` | object with `oldpbdbIDs`: array of strings | `readOnly` |
-| `reference` | string: the permid of the authority's reference | `x-storage: { column: "reference_id", codec: "referencePermid" }` |
+| `reference` | `link({ target: "references", label: "title" })`: `{ permid, title, href }` | `x-storage: { column: "reference_id", codec: "referencePermid" }` |
 | `citation` | string | |
 | `descriptors` | array of strings | |
 | `year` | string, `maxLength: 4` | |
@@ -528,12 +576,16 @@ plural array, because dedup merges several `taxon_no`s into one authority.
 - **WHEN** a create body with `citation` and `publishedInReference` but no `reference` is validated against `in-create`
 - **THEN** it fails naming `reference`
 
+#### Scenario: Reference is a link object on create
+- **WHEN** create bodies otherwise valid carry `reference: "<permid>"`, `reference: {}` and `reference: { permid: "<permid>" }`
+- **THEN** `in-create` rejects the first two and accepts the third
+
 #### Scenario: Four-digit year on create
 - **WHEN** create bodies otherwise valid carry `year: "0"`, `year: "abc"` and `year: "1969"`
 - **THEN** `in-create` rejects the first two and accepts the third
 
 #### Scenario: Year optional on create
-- **WHEN** a create body `{ reference, citation: "authority unknown", descriptors: [], publishedInReference: false }` omits `year`
+- **WHEN** a create body `{ reference: { permid }, citation: "authority unknown", descriptors: [], publishedInReference: false }` omits `year`
 - **THEN** `in-create` accepts it
 
 #### Scenario: Patch guard blocks the read-only fields
@@ -542,29 +594,47 @@ plural array, because dedup merges several `taxon_no`s into one authority.
 
 ### Requirement: `referencePermid` codec
 The `referencePermid` codec SHALL declare the source
-`{ table: "refs", key: "id", value: "permid", versioned: true }`, the same source `referenceList`
-declares.
+`{ table: "refs", key: "id", value: "permid", versioned: true, payload: "reference" }`, the same source
+`referenceList` declares.
 
-On split it SHALL map the payload's `reference` permid to that reference's head `id` in the column
-`x-storage` names. On merge it SHALL map that column's id to the reference's `permid` as `reference`. An absent
-`reference` on split SHALL emit no column, and a NULL column on merge SHALL emit no property.
+On merge it SHALL map the column `x-storage` names to the `reference` link object:
+- a NULL column SHALL emit no property;
+- an id listed in the context's `removed` SHALL emit `reference: null`;
+- any other id SHALL emit `{ permid }`, plus the label `storage.link` names when the context's `labels` holds one for that id.
+
+On split it SHALL read `reference.permid`, ignore every other key of the link object, and map the permid to
+that reference's head `id` in the column `x-storage` names. An absent or `null` `reference` SHALL emit no
+column. A permid whose head is removed SHALL throw, because nothing may cite a removed reference.
 
 Ids SHALL be keyed as strings, as in `referenceList`, because `refs.id` is a bigint that node-postgres
 returns as a string.
 
 An unresolvable permid on split, or an unresolvable id on merge, SHALL throw naming `referencePermid` and the
-value.
+value. With `authorities.reference_id` a NOT NULL foreign key that the swing trigger keeps on the head, an
+unresolvable id is an integrity failure, not a data state.
 
 Because the codec is annotated with a `column`, `codecKeyColumns` SHALL map `refs` to that column for a source
 using it, so that a batched caller can select `refs` by the ids its rows hold.
 
 #### Scenario: Permid to id
-- **WHEN** an authority payload names a `reference` whose permid belongs to the head ref at `refs.id = 7`
+- **WHEN** an authority payload names `reference: { permid }` whose permid belongs to the head ref at `refs.id = 7`
 - **THEN** `columns.reference_id` is `"7"`
 
-#### Scenario: Id to permid
-- **WHEN** a stored authority has `reference_id = 7`
-- **THEN** the merged payload's `reference` is that ref's `permid`, and no `refs.id` appears in the payload
+#### Scenario: Id to link object
+- **WHEN** a stored authority has `reference_id = 7`, and that ref's title is "Fossil leaves"
+- **THEN** the merged payload's `reference` is `{ permid: <that ref's permid>, title: "Fossil leaves" }`, and no `refs.id` appears in the payload
+
+#### Scenario: Untitled reference
+- **WHEN** the ref at `id = 7` has no title
+- **THEN** the merged `reference` is `{ permid }` with no `title` key
+
+#### Scenario: Removed reference
+- **WHEN** the head ref at `id = 7` is soft-removed
+- **THEN** the merged `reference` is `null`, and splitting a payload naming its permid throws naming `referencePermid`
+
+#### Scenario: Label ignored on split
+- **WHEN** a merged `reference: { permid, title }` is split
+- **THEN** only `columns.reference_id` is emitted, and `title` reaches neither the jsonb nor any column
 
 #### Scenario: Superseded reference resolves to the head
 - **WHEN** the ref at `id = 7` is superseded by a new version sharing its permid
@@ -787,3 +857,52 @@ value belongs to an observation of the state, not to the state.
 - **WHEN** the state `patch-guard` variant is derived
 - **THEN** it rejects exactly `permid` and `legacyIDs` as keys, and accepts `{ quantitative: false }`
 
+### Requirement: Link properties are declared with the `link` helper
+`payloadSchemas/lib/links.js` SHALL export `link({ target, label })`, returning the schema of a property
+whose value is a link to another resource:
+
+| key | value |
+|---|---|
+| `type` | `"object"` |
+| `properties.permid` | `{ type: "string" }`: the linked resource's permid, the only writable key |
+| `properties[label]` | `{ type: "string", readOnly: true }`: the linked resource's `label` field |
+| `properties.href` | `{ type: "string", readOnly: true }`: the linked resource's read URL, added by the API |
+| `required` | `["permid"]` |
+| `additionalProperties` | `false` |
+| `x-link` | `{ target, label }` |
+
+`target` SHALL be the linked resource's route-group name (for example `references`), and `label` the name of
+a field of that resource (for example `title`). The label is not required: a target may lack it.
+
+A link object's fields SHALL use the target's own names: `permid` is the target's id and `label` names one of
+the target's fields. That keeps a later include of the whole target additive
+(`api/docs/response-contracts.md` §4).
+
+The storage layer SHALL NOT build or read `href`. It is declared so that `out` describes the response the
+API sends.
+
+#### Scenario: Helper output
+- **WHEN** `link({ target: "references", label: "title" })` is called
+- **THEN** it returns an object schema with `permid` (required), read-only `title` and read-only `href`, no other properties allowed, and `x-link: { target: "references", label: "title" }`
+
+#### Scenario: Unknown key in a link object
+- **WHEN** an authority response's `reference` carries `{ permid, title, href, authors }` and is validated against `out`
+- **THEN** validation fails on `authors`
+
+#### Scenario: Label may be absent
+- **WHEN** an authority's merged `reference` is `{ permid }`, because the reference has no title
+- **THEN** it is valid against `out`
+
+### Requirement: `storageColumns` lists a source's column-backed properties
+`storageColumns(source)` in `payloadSchemas/lib/storage.js` SHALL return the distinct column names that the
+source's `x-storage` annotations name with `column`, at any depth reached through nested `properties`.
+A caller reading stored rows SHALL be able to select exactly the columns that `merge` needs from it.
+Annotations naming a child `table` SHALL contribute nothing.
+
+#### Scenario: Authority columns
+- **WHEN** `storageColumns(authoritySource)` is called
+- **THEN** it returns `permid` and `reference_id`
+
+#### Scenario: Child tables are not columns
+- **WHEN** `storageColumns(collectionSource)` is called
+- **THEN** it includes `permid` and `location`, and no `additional_collection_refs`

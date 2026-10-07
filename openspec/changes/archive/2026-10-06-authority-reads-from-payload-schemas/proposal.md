@@ -13,9 +13,8 @@ authorities, the smallest resource with a link.
   drops nested read-only fields from `in-create`. `unevaluatedProperties: false` then rejects them
   in a body, and the 400 names the path. A new `x-link: { target, label }` annotation marks a field
   as a link to another resource and names the target field to embed as its label.
-- **Codecs.** A codec context can map a key to an object (`{ permid, label }`) rather than a single
-  value. Lookups skip soft-removed targets as well as superseded ones, as the API's link SQL does
-  today.
+- **Codecs.** A codec context can carry each target's label beside its permid, and it marks
+  soft-removed heads. A link to a removed target merges to `null`, as the API's link SQL does today.
 - **Authority source.** `reference` changes from a permid string to a link object:
   `{ permid, title, href }` in `out`, where `title` and `href` are `readOnly`. A create body sends
   `{ permid }`. **BREAKING** for the `in-create` contract; no route accepts a create yet. The
@@ -43,7 +42,7 @@ None. The behaviour belongs to existing specs.
 - `payload-schema-variants`:
   - the annotation vocabulary gains nested `readOnly` and `x-link`
   - `in-create` and `out` handle nested read-only fields
-  - the codec context can map a key to an object and skips removed targets
+  - the codec context carries labels and marks removed heads; `x-link` properties are nullable in `out`
   - the authority source's `reference` becomes a link object
   - `referencePermid` yields `{ permid, title }`
 - `data-access`: the head-read repository returns a merged payload for a resource with a payload

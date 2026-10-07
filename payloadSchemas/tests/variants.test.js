@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { deriveVariant } from '../lib/variants.js';
 import { applyEnums } from '../lib/enums.js';
 import { createAjv } from '../lib/ajv.js';
+import { link } from '../lib/links.js';
 
 const source = () => ({
   $schema: 'https://json-schema.org/draft/2019-09/schema',
@@ -43,10 +44,61 @@ test('unknown variant lists the valid ones', () => {
   assert.throws(() => deriveVariant(source(), 'in-update'), /db, in-create, patch-guard, out/);
 });
 
-test('nested readOnly rejected with its path', () => {
+test('nested readOnly: kept in db and out, dropped and pruned from required in in-create', () => {
   const s = source();
   s.properties.place.properties.basis.readOnly = true;
-  assert.throws(() => deriveVariant(s, 'db'), /place\.properties\.basis/);
+  const derived = (v) => deriveVariant(s, v);
+  assert.ok(derived('db').properties.place.properties.basis);
+  assert.ok(derived('out').properties.place.properties.basis);
+  const create = derived('in-create').properties.place;
+  assert.equal(create.properties.basis, undefined);
+  assert.deepEqual(create.required, ['lat']);
+});
+
+// A source with one link property, as authority.reference is declared.
+const linkSource = () => ({
+  $schema: 'https://json-schema.org/draft/2019-09/schema',
+  $id: 'https://pbdb2.example.com/schemas/cites.json',
+  type: 'object',
+  properties: {
+    reference: { ...link({ target: 'references', label: 'title' }), 'x-storage': { column: 'reference_id', codec: 'referencePermid' } },
+  },
+  required: ['reference'],
+  unevaluatedProperties: false,
+});
+const compileLink = (variant) => createAjv().compile(deriveVariant(linkSource(), variant));
+
+test('link helper: permid required, label and href read-only, nothing else allowed', () => {
+  const schema = link({ target: 'references', label: 'title' });
+  assert.deepEqual(schema.required, ['permid']);
+  assert.equal(schema.properties.title.readOnly, true);
+  assert.equal(schema.properties.href.readOnly, true);
+  assert.equal(schema.additionalProperties, false);
+  assert.deepEqual(schema['x-link'], { target: 'references', label: 'title' });
+  const out = compileLink('out');
+  assert.equal(out({ reference: { permid: 'p', title: 't', href: '/r/p' } }), true, JSON.stringify(out.errors));
+  assert.equal(out({ reference: { permid: 'p' } }), true, 'the label may be absent');
+  assert.equal(out({ reference: { permid: 'p', authors: [] } }), false);
+});
+
+test('in-create rejects a link label, at its path', () => {
+  const create = compileLink('in-create');
+  assert.equal(create({ reference: { permid: 'p' } }), true, JSON.stringify(create.errors));
+  assert.equal(create({ reference: { permid: 'p', title: 'x' } }), false);
+  assert.ok(create.errors.some((e) => e.instancePath === '/reference' && e.params?.additionalProperty === 'title'));
+  assert.equal(create({ reference: {} }), false);
+  assert.equal(create({ reference: 'p' }), false);
+});
+
+test('out alone allows a null link', () => {
+  assert.equal(compileLink('out')({ reference: null }), true);
+  assert.equal(compileLink('in-create')({ reference: null }), false);
+});
+
+test('patch-guard names root readOnly keys only', () => {
+  const s = linkSource();
+  s.properties.permid = { type: 'string', readOnly: true };
+  assert.deepEqual(deriveVariant(s, 'patch-guard').propertyNames, { not: { enum: ['permid'] } });
 });
 
 test('ids and root strictness per variant', () => {

@@ -28,6 +28,9 @@
  *   Absent for a derived table of typed columns (`taxa`), which the generic
  *   repository cannot read.
  * @property {boolean} [readOnly]    the resource has no write path; write verbs answer 405
+ * @property {object} [source]       annotated payload source (payloadSchemas/). When present,
+ *   reads are built with merge() and links come from the source's x-link properties,
+ *   so the descriptor declares no `links`.
  * @property {Record<string, LinkDeclaration>} [links]      declared link enrichment (output field → link)
  * @property {Record<string, FieldFilter>}     [filters]    declared field filters (param → match spec)
  * @property {Record<string, Expansion>}       [expansions] declared expansion params (param → spec)
@@ -35,6 +38,8 @@
  * @typedef {object} Expansion
  * @property {'boolean'} type  parameter kind — only booleans today
  */
+
+import { authoritySource } from '../../../payloadSchemas/authority.schema.js';
 
 /**
  * Link targets: what a link declaration's `target` resolves to.
@@ -113,9 +118,7 @@ export const RESOURCE_DESCRIPTORS = {
   authorities: {
     table: 'authorities',
     jsonbColumn: 'authority',
-    links: {
-      reference: { target: 'references', on: 'id', via: 'reference_id' },
-    },
+    source: authoritySource,
   },
   collections: {
     table: 'collections',

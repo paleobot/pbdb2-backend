@@ -317,7 +317,7 @@ const storedAuthority = () => ({
   year: '2022',
   publishedInReference: true,
 });
-const createAuthority = () => ({ reference: 'r-1', citation: 'Gaudry 1865', descriptors: ['Gaudry'], year: '1865', publishedInReference: false });
+const createAuthority = () => ({ reference: { permid: 'r-1' }, citation: 'Gaudry 1865', descriptors: ['Gaudry'], year: '1865', publishedInReference: false });
 
 test('authority db declares neither permid nor reference and requires only the legacy two', () => {
   const db = deriveVariant(sources.authority, 'db');
@@ -353,9 +353,18 @@ test('authority in-create requires reference and a four-digit year when one is g
   assert.equal(validate({ ...createAuthority(), year: 'abc' }), false);
   assert.equal(validate({ ...createAuthority(), year: '1969' }), true);
   // The sentinel stays enterable, without a year.
-  assert.equal(validate({ reference: 'r-1', citation: 'authority unknown', descriptors: [], publishedInReference: false }), true, JSON.stringify(validate.errors));
+  assert.equal(validate({ reference: { permid: 'r-1' }, citation: 'authority unknown', descriptors: [], publishedInReference: false }), true, JSON.stringify(validate.errors));
   assert.equal(validate({ ...createAuthority(), permid: 'x' }), false);
   assert.equal(validate({ ...createAuthority(), legacyIDs: { oldpbdbIDs: ['1'] } }), false);
+});
+
+test('authority in-create takes the reference as a link object carrying only its permid', () => {
+  const validate = compile('authority', 'in-create');
+  for (const reference of ['r-1', {}, null, { permid: 'r-1', title: 'T' }, { permid: 'r-1', href: '/x' }]) {
+    assert.equal(validate({ ...createAuthority(), reference }), false, JSON.stringify(reference));
+  }
+  assert.equal(validate({ ...createAuthority(), reference: { permid: 'r-1', title: 'T' } }), false);
+  assert.ok(validate.errors.some((e) => e.instancePath === '/reference' && e.params?.additionalProperty === 'title'));
 });
 
 test('authority patch-guard blocks exactly permid and legacyIDs', () => {
@@ -364,9 +373,14 @@ test('authority patch-guard blocks exactly permid and legacyIDs', () => {
   assert.equal(compile('authority', 'patch-guard')({ reference: 'r-2', year: '1999' }), true);
 });
 
-test('authority out requires reference', () => {
+test('authority out requires reference: a link object, or null when the reference was removed', () => {
   const validate = compile('authority', 'out');
-  assert.equal(validate({ ...storedAuthority(), permid: 'a-1', reference: 'r-1' }), true, JSON.stringify(validate.errors));
+  const read = (reference) => ({ ...storedAuthority(), permid: 'a-1', reference });
+  assert.equal(validate(read({ permid: 'r-1', title: 'T', href: '/api/v1/references/r-1' })), true, JSON.stringify(validate.errors));
+  assert.equal(validate(read({ permid: 'r-1', href: '/api/v1/references/r-1' })), true, 'an untitled reference');
+  assert.equal(validate(read(null)), true, 'a removed reference');
+  assert.equal(validate(read('r-1')), false, 'the string form is gone');
+  assert.equal(validate(read({ permid: 'r-1', authors: [] })), false);
   assert.equal(validate({ ...storedAuthority(), permid: 'a-1' }), false);
 });
 

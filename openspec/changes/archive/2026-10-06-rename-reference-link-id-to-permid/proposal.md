@@ -4,7 +4,7 @@ In the collection and schema sources, a `references[]` item names the cited refe
 `referenceID`. Everywhere else in PBDB2 a resource's id is `permid`: every resource's own id, and the
 API's link objects (`{ title, permid, href }`). Design A (`api/docs/response-contracts.md` §4) makes
 the payload sources the API's response contract, and its stub rule says a link object uses the
-target's own field names. So the name has to be `permid` before `api-reads-from-payload-schemas`
+target's own field names. So the name has to be `permid` before `authority-reads-from-payload-schemas`
 builds on it. Left alone, the inconsistency would spread to every link the sources declare.
 
 ## What Changes
@@ -18,7 +18,7 @@ builds on it. Left alone, the inconsistency would spread to every link the sourc
 - Tests in `payloadSchemas/tests/` follow the rename.
 
 Nothing else is renamed. The authority source's scalar `reference` and the `referencePermid` codec
-are reshaped by `api-reads-from-payload-schemas`, not here.
+are reshaped by `authority-reads-from-payload-schemas`, not here.
 
 ## Capabilities
 

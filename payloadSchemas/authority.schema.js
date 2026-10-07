@@ -9,10 +9,12 @@
  * legacyIDs.oldpbdbIDs is plural, unlike every other entity's: dedup merges several
  * taxon_nos into one authority.
  *
- * `reference` is the permid of authorities.reference_id, resolved by the
- * referencePermid codec against lineage heads of refs. It is required in the base,
- * which costs `db` nothing (x-storage properties are pruned from it) and lets `out`
- * guarantee it, since the column is NOT NULL.
+ * `reference` is a link to the reference in authorities.reference_id:
+ * { permid, title, href } (lib/links.js). The referencePermid codec resolves it
+ * against lineage heads of refs, with the title as its label; the API adds href.
+ * A create sends { permid }. It is required in the base, which costs `db` nothing
+ * (x-storage properties are pruned from it) and lets `out` guarantee it, since the
+ * column is NOT NULL; `out` reads null when the reference has been removed.
  *
  * `year` is loose at rest, where 1,299 migrated scenario ④ authorities carry the
  * sentinel "0" and 898 carry none, and four digits on create. The sentinel citation
@@ -23,6 +25,8 @@
  * authorizer_person_id and enterer_person_id are provenance and get no field, as on
  * collection and reference.
  */
+
+import { link } from "./lib/links.js";
 
 const authorityProperties = {
 	permid: {
@@ -43,9 +47,9 @@ const authorityProperties = {
 		}
 	},
 	reference: {
-		type: "string",
+		...link({ target: "references", label: "title" }),
 		"x-storage": { column: "reference_id", codec: "referencePermid" },
-		description: "permid of the reference this authority is recorded from"
+		description: "the reference this authority is recorded from"
 	},
 	citation: {type: "string"},
 	descriptors: {

@@ -1,7 +1,7 @@
 # PBDB2 API — Response Contracts and Shared Payload Code
 
-**Status:** Exploration (2026-10-01; leaning A, 2026-10-06, §6). Nothing decided is implemented
-yet; no OpenSpec change exists.
+**Status:** Design A chosen (2026-10-06, §6). It is built for authorities in the OpenSpec change
+`authority-reads-from-payload-schemas`; collections, schemas and the rest follow in later changes.
 **Audience:** PBDB2 backend contributors
 **Subject:** How the API starts using `payloadSchemas/`, and where linked-resource conveniences
 (`title`, `href`) belong in a GET response
@@ -298,15 +298,19 @@ Query). That would weaken the case for A slightly, not reverse it.
 
 ## 7. Open questions
 
-1. **A or B.** Leaning A (§6). Confirm when the OpenSpec change starts.
-2. **Under A:** is any `x-out` field needed beyond nested `readOnly` and `x-link`?
-3. **Under B:** the name and shape of the related block, and whether it carries anything beyond
-   `title` and `href`.
-4. **Pilot:** all JSONB resources at once, or one first. Collections shows the most (coordinates and
-   references); authorities is the smallest with a shape decision.
-5. **`href`:** plain values added by the API (as today), or URL templates à la JSON Hyper-Schema
-   (`"href": "references/{permid}"`) so clients build them (§5).
-6. **Change layout:** one OpenSpec change (contract design plus reads), or two (annotations first,
-   API reads second).
+Settled 2026-10-06, in `authority-reads-from-payload-schemas` (design.md has the reasoning):
 
-Next step: decide 1, then start the OpenSpec change so the decisions land in its `design.md`.
+1. **A or B:** A.
+2. **`x-out`:** not needed. Nested `readOnly` and `x-link` cover every response-only field found so
+   far.
+3. **Under B:** no longer applies.
+4. **Pilot:** authorities first.
+5. **`href`:** plain root-relative paths added by the API, as before. Full URLs are deferred
+   (`docs/api-design-backlog.md`, "Full URLs in links"), and so are Hyper-Schema templates.
+6. **Change layout:** one change for the annotations and the reads. The `referenceID` → `permid`
+   rename went first, as its own change.
+
+Still open: how collections and schemas treat a removed reference in `references[]` under
+`merge()`, and how the write path rejects a PATCH that touches a nested read-only field such as
+`reference.title`. The merged-document check can't catch one, because read-only fields are
+removed before it runs.

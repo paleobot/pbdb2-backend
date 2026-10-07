@@ -25,27 +25,39 @@ function storageGroups(properties) {
     const storage = prop['x-storage'];
     if (!storage) continue;
     const key = storage.codec ? `codec:${storage.codec}` : `column:${name}`;
-    if (!groups.has(key)) groups.set(key, { storage, names: [] });
+    if (!groups.has(key)) groups.set(key, { storage, names: [], link: prop['x-link'] });
     groups.get(key).names.push(name);
   }
-  return [...groups.values()];
+  // A codec serving one link property receives its x-link as storage.link.
+  return [...groups.values()].map(({ storage, names, link }) =>
+    ({ storage: names.length === 1 && link ? { ...storage, link } : storage, names }));
 }
 
 // ---------- The codec context ----------
 
 const sourceKey = ({ table, key, value }) => `${table}.${key}->${value}`;
 
+const OPTIONAL_SOURCE_KEYS = ['versioned', 'payload', 'labels'];
+
 function checkSource(codecName, source) {
   const shown = JSON.stringify(source);
   if (!isObject(source)) throw new Error(`${codecName}: a declared source must be { table, key, value }: ${shown}`);
-  const keys = Object.keys(source).filter((k) => k !== 'versioned').sort().join(',');
+  const keys = Object.keys(source).filter((k) => !OPTIONAL_SOURCE_KEYS.includes(k)).sort().join(',');
   if (keys !== 'key,table,value') {
-    throw new Error(`${codecName}: a declared source must have exactly the keys table, key and value (and optionally versioned): ${shown}`);
+    throw new Error(`${codecName}: a declared source must have exactly the keys table, key and value (and optionally ${OPTIONAL_SOURCE_KEYS.join(', ')}): ${shown}`);
   }
   if ('versioned' in source && source.versioned !== true) {
     throw new Error(`${codecName}: a source's versioned flag, when given, must be true: ${shown}`);
   }
-  for (const part of [...String(source.table).split('.'), source.key, source.value]) {
+  if ('labels' in source && !('payload' in source)) {
+    throw new Error(`${codecName}: a source with labels must name its payload column: ${shown}`);
+  }
+  if ('labels' in source && !Array.isArray(source.labels)) {
+    throw new Error(`${codecName}: a source's labels must be an array: ${shown}`);
+  }
+  const parts = [...String(source.table).split('.'), source.key, source.value];
+  if ('payload' in source) parts.push(source.payload);
+  for (const part of [...parts, ...(source.labels ?? [])]) {
     if (!IDENT.test(part)) throw new Error(`${codecName}: unsafe identifier in source ${shown}`);
   }
   return source;
@@ -67,16 +79,25 @@ function checkEnumAgreement(name, prop, sources) {
   }
 }
 
-// Every distinct { table, key, value[, versioned] } the source's codecs declare.
+// Every distinct { table, key, value } the source's codecs declare. A codec
+// property that is also a link (x-link) asks its sources for the link's label;
+// duplicates merge their label lists.
 export function collectCodecSources(schema) {
   const seen = new Map();
   const visit = (node) => {
     for (const [name, prop] of Object.entries(node.properties ?? {})) {
       const codecName = prop['x-storage']?.codec;
       if (codecName) {
-        const sources = (getCodec(codecName).sources ?? []).map((s) => checkSource(codecName, s));
+        const label = prop['x-link']?.label;
+        const sources = (getCodec(codecName).sources ?? []).map((s) =>
+          checkSource(codecName, label === undefined ? s : { ...s, labels: [label] }),
+        );
         checkEnumAgreement(name, prop, sources);
-        for (const s of sources) if (!seen.has(sourceKey(s))) seen.set(sourceKey(s), s);
+        for (const s of sources) {
+          const prior = seen.get(sourceKey(s));
+          if (!prior) seen.set(sourceKey(s), s);
+          else if (s.labels) seen.set(sourceKey(s), { ...prior, labels: [...new Set([...(prior.labels ?? []), ...s.labels])] });
+        }
       }
       if (isObject(prop.properties)) visit(prop);
     }
@@ -112,7 +133,11 @@ const quoted = (table) => table.split('.').map((p) => `"${p}"`).join('.');
 // A curated vocabulary rather than an entity table: read in full, once per run.
 export const isDictionarySource = (source) => source.table.startsWith('dictionaries.');
 
-// Map each source's table to { byKey, byValue }, both filled by one read.
+// Map each source's table to { byKey, byValue }, both filled by one read. The
+// same read fills `labels` (key -> { <label>: value }, a NULL label left out)
+// for a source asking for labels, and `removed` (the keys of soft-removed heads)
+// for a versioned one. Removed heads stay in byKey and byValue, so a codec that
+// ignores `removed` resolves exactly as before.
 //
 // A source declaring `versioned: true` is read from lineage heads only. Every
 // version of a row shares its permid, so value -> key is a function only over
@@ -135,7 +160,7 @@ export const isDictionarySource = (source) => source.table.startsWith('dictionar
 export async function loadCodecContext(pg, sources, selection = {}, reuse) {
   const ctx = new Map(reuse);
   for (const source of sources) {
-    const { table, key, value, versioned } = checkSource('loadCodecContext', source);
+    const { table, key, value, versioned, payload, labels = [] } = checkSource('loadCodecContext', source);
     if (ctx.has(table)) continue;
     const restrict = isDictionarySource(source) ? undefined : selection[table];
     const where = versioned ? ['succeeded_by_id IS NULL'] : [];
@@ -147,7 +172,10 @@ export async function loadCodecContext(pg, sources, selection = {}, reuse) {
       where.push(`"${restrict.column}" = ANY($1)`);
       params.push([...restrict.values]);
     }
-    let sql = `SELECT "${key}" AS k, "${value}" AS v FROM ${quoted(table)}`;
+    const cols = [`"${key}" AS k`, `"${value}" AS v`];
+    labels.forEach((label, i) => cols.push(`"${payload}"->>'${label}' AS l${i}`));
+    if (versioned) cols.push('COALESCE(removed, false) AS removed');
+    let sql = `SELECT ${cols.join(', ')} FROM ${quoted(table)}`;
     if (where.length) sql += ` WHERE ${where.join(' AND ')}`;
     let rows;
     try {
@@ -157,13 +185,37 @@ export async function loadCodecContext(pg, sources, selection = {}, reuse) {
     }
     const byKey = new Map();
     const byValue = new Map();
+    const entry = { byKey, byValue };
+    if (labels.length) entry.labels = new Map();
+    if (versioned) entry.removed = new Set();
     for (const r of rows) {
       byKey.set(r.k, r.v);
       byValue.set(r.v, r.k);
+      if (entry.labels) {
+        const found = {};
+        labels.forEach((label, i) => { if (r[`l${i}`] !== null && r[`l${i}`] !== undefined) found[label] = r[`l${i}`]; });
+        entry.labels.set(r.k, found);
+      }
+      if (entry.removed && r.removed) entry.removed.add(r.k);
     }
-    ctx.set(table, { byKey, byValue });
+    ctx.set(table, entry);
   }
   return ctx;
+}
+
+// Every column the source's x-storage annotations name: what a caller reading
+// stored rows selects for merge. A codec annotated with a child table names none.
+export function storageColumns(schema) {
+  const columns = new Set();
+  const visit = (node) => {
+    for (const prop of Object.values(node.properties ?? {})) {
+      const column = prop['x-storage']?.column;
+      if (column) columns.add(column);
+      if (isObject(prop.properties)) visit(prop);
+    }
+  };
+  visit(schema);
+  return [...columns];
 }
 
 // ---------- split / merge ----------
