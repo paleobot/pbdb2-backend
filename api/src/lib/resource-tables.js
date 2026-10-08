@@ -29,17 +29,25 @@
  *   repository cannot read.
  * @property {boolean} [readOnly]    the resource has no write path; write verbs answer 405
  * @property {object} [source]       annotated payload source (payloadSchemas/). When present,
- *   reads are built with merge() and links come from the source's x-link properties,
- *   so the descriptor declares no `links`.
+ *   reads are built with merge() and links come from the source's x-link properties
+ *   and items, so the descriptor declares no `links`.
+ * @property {ChildTable[]} [children] child tables merge() reads for a source-backed
+ *   resource, each keyed back to the parent row by `fk`. Which column joins a child
+ *   table to its parent is a fact about tables, so it lives here, not in the source.
  * @property {Record<string, LinkDeclaration>} [links]      declared link enrichment (output field → link)
  * @property {Record<string, FieldFilter>}     [filters]    declared field filters (param → match spec)
  * @property {Record<string, Expansion>}       [expansions] declared expansion params (param → spec)
+ *
+ * @typedef {object} ChildTable
+ * @property {string} table  child table name (e.g. 'additional_collection_refs')
+ * @property {string} fk     its column holding the parent row's id (e.g. 'collection_id')
  *
  * @typedef {object} Expansion
  * @property {'boolean'} type  parameter kind — only booleans today
  */
 
 import { authoritySource } from '../../../payloadSchemas/authority.schema.js';
+import { collectionSource } from '../../../payloadSchemas/collection.schema.js';
 
 /**
  * Link targets: what a link declaration's `target` resolves to.
@@ -123,16 +131,8 @@ export const RESOURCE_DESCRIPTORS = {
   collections: {
     table: 'collections',
     jsonbColumn: 'collection',
-    links: {
-      primaryReference: { target: 'references', on: 'id', via: 'reference_id' },
-      additionalReferences: {
-        target: 'references',
-        on: 'id',
-        via: 'reference_id',
-        joinTable: 'additional_collection_refs',
-        joinKey: 'collection_id',
-      },
-    },
+    source: collectionSource,
+    children: [{ table: 'additional_collection_refs', fk: 'collection_id' }],
   },
   schemas: {
     table: 'schemas',

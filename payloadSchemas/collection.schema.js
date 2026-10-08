@@ -7,13 +7,16 @@
  *               payloadSchemas/lib/enums.js). Open vocabularies only; closed
  *               sets that code depends on stay inline.
  *   x-storage   not stored in the collection jsonb (a column or child table).
- *   readOnly    server-assigned; root properties only.
+ *   readOnly    server-supplied: assigned by the server, or resolved from another
+ *               resource (a link's label and href). Any depth.
+ *   x-link      a link to another resource, declared through lib/links.js.
  *   x-create    extra rules applied only to a create body.
  *
  * Objects marked "placeholder" (ages.intervals, environment, paleontology) await
  * redesign in the combined intervals/environment pass; their enums stay inline
  * except preservation modes, shared with specimens.
  */
+import { link } from "./lib/links.js";
 
 const collectionProperties = {
     permid: {
@@ -432,27 +435,25 @@ const collectionProperties = {
     }
 };
 
-// references: the primary reference is collections.reference_id; the rest are
-// additional_collection_refs rows (order normalized; see payloadSchemas/lib/codecs.js).
-collectionProperties.references = {
+// References, as they are stored now: the primary in collections.reference_id,
+// and an unordered set of additional_collection_refs rows. Both are links
+// (lib/links.js); the label is the reference's title.
+//
+// The child rows are a copy of Classic's secondary_refs, which usually lists the
+// primary as well (242,310 of the 242,412 collections with rows on localhost), so
+// additionalReferences usually repeats primaryReference. It is returned as stored.
+// Whether order is real data, and whether the primary belongs in the child table,
+// is with a committee: docs/api-design-backlog.md, "Collection reference model".
+collectionProperties.primaryReference = {
+    ...link({ target: "references", label: "title" }),
+    "x-storage": { column: "reference_id", codec: "referencePermid" },
+    description: "the reference this collection is primarily recorded from"
+};
+collectionProperties.additionalReferences = {
     type: "array",
-    items: {
-        type: "object",
-        required: ["permid", "order"],
-        properties: {
-            permid: {
-                type: "string",
-                description: "permid of the cited reference"
-            },
-            order: {
-                type: "string",
-                description: "Order of the reference"
-            }
-        }
-    },
-    minItems: 1,
-    "x-storage": { table: "additional_collection_refs", codec: "referenceList" },
-    description: "List of references for this collection"
+    items: link({ target: "references", label: "title" }),
+    "x-storage": { table: "additional_collection_refs", codec: "referenceLinks" },
+    description: "every additional_collection_refs row, unordered; usually includes the primary"
 };
 
 export const collectionSource = {
@@ -463,7 +464,7 @@ export const collectionSource = {
     type: "object",
     properties: collectionProperties,
     required: ["name"],
-    "x-create": { required: ["context", "references"] },
+    "x-create": { required: ["context", "primaryReference"] },
     unevaluatedProperties: false,
 };
 

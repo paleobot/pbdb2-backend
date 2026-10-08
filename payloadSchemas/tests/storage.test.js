@@ -1,7 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { split, merge, collectCodecSources, loadCodecContext, isDictionarySource, codecKeyColumns, storageColumns } from '../lib/storage.js';
+import { split, merge, collectCodecSources, loadCodecContext, isDictionarySource, codecKeyColumns, codecKeySites, storageColumns, storageSelects } from '../lib/storage.js';
+import { getCodec } from '../lib/codecs.js';
 import { authoritySource } from '../authority.schema.js';
+import { collectionSource } from '../collection.schema.js';
 import { deriveVariant } from '../lib/variants.js';
 import { createAjv } from '../lib/ajv.js';
 
@@ -241,6 +243,98 @@ test('referencePermid: absent emits nothing; unknown permid throws naming the co
 
 test('codecKeyColumns maps refs to authorities.reference_id', () => {
   assert.deepEqual(codecKeyColumns(authoritySource), new Map([['refs', new Set(['reference_id'])]]));
+});
+
+// ---------- collection references: referencePermid + referenceLinks ----------
+
+// Collection rows: ref 7 is the primary and also a child row, as Classic's
+// secondary_refs usually has it; ref 9 is untitled; ref 12 is soft-removed.
+const storedCollection = (childRefs, primary = '7') => ({
+  jsonb: { name: 'c' },
+  columns: { permid: 'c-1', reference_id: primary },
+  children: { additional_collection_refs: childRefs.map(([id, ref]) => ({ id, reference_id: ref })) },
+});
+
+test('a single-property codec learns its property name; wgs84Point, serving two, does not', () => {
+  // referencePermid emits under each source's own property name.
+  const merged = merge(collectionSource, { ...storedCollection([]), columns: { reference_id: '7', location: { type: 'Point', coordinates: [2, 1] } } }, labelledRefs());
+  assert.deepEqual(merged.primaryReference, { permid: 'r-7', title: 'Fossil leaves' });
+  assert.equal('reference' in merged, false);
+  assert.deepEqual(merge(authoritySource, { jsonb: {}, columns: { reference_id: '7' } }, labelledRefs()).reference, { permid: 'r-7', title: 'Fossil leaves' });
+  // wgs84Point still names its own keys.
+  assert.deepEqual(merged.location.coordinates, { latitude: 1, longitude: 2 });
+});
+
+test('referenceLinks merges child rows by id to labelled links, keeping a repeated primary', () => {
+  const merged = merge(collectionSource, storedCollection([['31', '9'], ['30', '7']]), labelledRefs());
+  assert.deepEqual(merged.primaryReference, { permid: 'r-7', title: 'Fossil leaves' });
+  assert.deepEqual(merged.additionalReferences, [{ permid: 'r-7', title: 'Fossil leaves' }, { permid: 'r-9' }]);
+  assert.equal(JSON.stringify(merged).includes('"30"'), false, 'no row or refs id reaches the payload');
+});
+
+test('referenceLinks omits a removed reference, and emits [] when nothing remains', () => {
+  const ctx = labelledRefs();
+  assert.deepEqual(merge(collectionSource, storedCollection([['30', '12'], ['31', '9']]), ctx).additionalReferences, [{ permid: 'r-9' }]);
+  assert.deepEqual(merge(collectionSource, storedCollection([['30', '12']]), ctx).additionalReferences, []);
+  assert.deepEqual(merge(collectionSource, storedCollection([]), ctx).additionalReferences, []);
+  assert.deepEqual(merge(collectionSource, { jsonb: { name: 'c' }, columns: { reference_id: '7' } }, ctx).additionalReferences, [], 'no children given at all');
+  // A removed primary reads as null, as on authority.
+  assert.equal(merge(collectionSource, storedCollection([], '12'), ctx).primaryReference, null);
+});
+
+test('referenceLinks split reads permids only, in item order, and refuses a removed reference', () => {
+  const ctx = labelledRefs();
+  const { columns, children, jsonb } = split(collectionSource, {
+    name: 'c',
+    primaryReference: { permid: 'r-7', title: 'Fossil leaves' },
+    additionalReferences: [{ permid: 'r-9', href: '/x' }, { permid: 'r-7', title: 'Fossil leaves' }],
+  }, ctx);
+  assert.deepEqual(columns, { reference_id: '7' });
+  assert.deepEqual(children, { additional_collection_refs: [{ reference_id: '9' }, { reference_id: '7' }] });
+  assert.deepEqual(jsonb, { name: 'c' });
+  assert.deepEqual(split(collectionSource, { name: 'c', additionalReferences: [] }, ctx).children, { additional_collection_refs: [] });
+  assert.deepEqual(split(collectionSource, { name: 'c' }, ctx).children, {}, 'absent emits nothing');
+  assert.throws(() => split(collectionSource, { name: 'c', additionalReferences: [{ permid: 'r-12' }] }, ctx), /referenceLinks: reference "r-12" has been removed/);
+  assert.throws(() => split(collectionSource, { name: 'c', additionalReferences: [{ permid: 'r-nobody' }] }, ctx), /referenceLinks: refs.permid has no entry for "r-nobody"/);
+  assert.throws(() => merge(collectionSource, storedCollection([['30', '404']]), ctx), /referenceLinks: refs.id has no entry for "404"/);
+});
+
+test('collection round trip with a repeated primary: merge, drop root read-only keys, split', () => {
+  const stored = storedCollection([['30', '7'], ['31', '9']]);
+  const { permid, legacyIDs, ...writable } = merge(collectionSource, stored, labelledRefs());
+  const parts = split(collectionSource, writable, labelledRefs());
+  assert.equal(parts.columns.reference_id, '7');
+  assert.deepEqual(parts.children.additional_collection_refs.map((r) => r.reference_id), ['7', '9']);
+  assert.deepEqual(parts.jsonb, stored.jsonb);
+});
+
+test('collectCodecSources gives the collection one refs source, labelled, for both link fields', () => {
+  assert.deepEqual(collectCodecSources(collectionSource), [
+    { table: 'refs', key: 'id', value: 'permid', versioned: true, payload: 'reference', labels: ['title'] },
+  ]);
+});
+
+test('codecKeyColumns leaves refs out for the collection, whose child rows also hold refs ids', () => {
+  assert.equal(codecKeyColumns(collectionSource).has('refs'), false);
+  assert.equal(codecKeyColumns(source).has('refs'), false, 'referenceList, as before');
+  assert.deepEqual(codecKeyColumns(authoritySource), new Map([['refs', new Set(['reference_id'])]]));
+});
+
+test('codecKeySites lists the parent columns and child-row columns holding a source\'s keys', () => {
+  assert.deepEqual(codecKeySites(collectionSource), new Map([
+    ['refs', { columns: ['reference_id'], children: { additional_collection_refs: ['reference_id'] } }],
+  ]));
+  assert.deepEqual(codecKeySites(authoritySource), new Map([['refs', { columns: ['reference_id'], children: {} }]]));
+});
+
+test('storageSelects selects a column through its codec\'s expression', () => {
+  assert.deepEqual(storageSelects(collectionSource), [
+    { column: 'permid', expression: '"permid"' },
+    { column: 'location', expression: 'ST_AsGeoJSON("location")::json' },
+    { column: 'reference_id', expression: '"reference_id"' },
+  ]);
+  assert.deepEqual(storageSelects(authoritySource).map((s) => s.column).sort(), ['permid', 'reference_id']);
+  assert.equal(getCodec('wgs84Point').select('location'), 'ST_AsGeoJSON("location")::json');
 });
 
 // ---------- Codec context ----------

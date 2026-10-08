@@ -58,7 +58,7 @@ test('every variant of every entity compiles in strict mode', () => {
 const createCollection = (administrativeArea) => ({
   name: 'c',
   context: {},
-  references: [{ permid: '1', order: '1' }],
+  primaryReference: { permid: '1' },
   location: {
     toponym: { administrativeArea },
     coordinates: { latitude: 1, longitude: 2 },
@@ -74,13 +74,53 @@ test('in-create: admin1 required for listed countries only', () => {
   assert.equal(validate(createCollection({ admin0: 'FR' })), true, JSON.stringify(validate.errors));
 });
 
-test('in-create: coordinates, references and context required', () => {
+test('in-create: coordinates, primary reference and context required', () => {
   const validate = compile('collection', 'in-create');
   const c = createCollection({ admin0: 'FR' });
   delete c.location.coordinates.longitude;
   assert.equal(validate(c), false);
-  const { references, ...noRefs } = createCollection({ admin0: 'FR' });
-  assert.equal(validate(noRefs), false);
+  const { primaryReference, ...noPrimary } = createCollection({ admin0: 'FR' });
+  assert.equal(validate(noPrimary), false);
+  assert.ok(validate.errors.some((e) => e.params?.missingProperty === 'primaryReference'));
+  const { context, ...noContext } = createCollection({ admin0: 'FR' });
+  assert.equal(validate(noContext), false);
+});
+
+test('collection in-create: additional references are optional links carrying only a permid', () => {
+  const validate = compile('collection', 'in-create');
+  const body = createCollection({ admin0: 'FR' });
+  assert.equal('additionalReferences' in body, false);
+  assert.equal(validate(body), true, JSON.stringify(validate.errors));
+  assert.equal(validate({ ...body, additionalReferences: [] }), true, JSON.stringify(validate.errors));
+  assert.equal(validate({ ...body, additionalReferences: [{ permid: 'r-2' }, { permid: '1' }] }), true, 'the primary may repeat');
+  assert.equal(validate({ ...body, additionalReferences: [{ permid: 'r-2', title: 'x' }] }), false);
+  assert.ok(validate.errors.some((e) => e.instancePath === '/additionalReferences/0' && e.params?.additionalProperty === 'title'));
+  assert.equal(validate({ ...body, additionalReferences: [{ permid: 'r-2', order: '2' }] }), false, 'no order');
+  assert.equal(validate({ ...body, primaryReference: { permid: '1', title: 'x' } }), false);
+  assert.equal(validate({ ...body, references: [{ permid: '1', order: '1' }] }), false, 'references[] is gone');
+});
+
+test('collection db declares neither reference field', () => {
+  const db = deriveVariant(sources.collection, 'db');
+  for (const name of ['permid', 'primaryReference', 'additionalReferences', 'references']) {
+    assert.equal(name in db.properties, false, name);
+  }
+});
+
+test('collection out: a null primary, an empty or repeating set of links, and no null items', () => {
+  const validate = compile('collection', 'out');
+  const href = (p) => `/api/v1/references/${p}`;
+  const read = (primaryReference, additionalReferences) => ({
+    ...createCollection({ admin0: 'FR' }), permid: 'c-1', primaryReference, additionalReferences,
+  });
+  const r1 = { permid: 'r-1', title: 'T', href: href('r-1') };
+  const r2 = { permid: 'r-2', href: href('r-2') };
+  assert.equal(validate(read(r1, [r1, r2])), true, JSON.stringify(validate.errors));
+  assert.equal(validate(read(r1, [])), true, 'no additional references');
+  assert.equal(validate(read(null, [r2])), true, 'a removed primary');
+  assert.equal(validate(read(r1, [null])), false, 'a removed item is omitted, not null');
+  assert.equal(validate(read(r1, [{ ...r2, order: '2' }])), false, 'no order');
+  assert.equal(validate(read(r1, [{ ...r2, authors: [] }])), false);
 });
 
 test('in-create rejects read-only fields', () => {
@@ -450,14 +490,14 @@ test('schema in-create requires references with permids and a four-digit year', 
 });
 
 test('in-create: a reference item keyed by the old name referenceID is rejected for its missing permid', () => {
-  const bodies = {
-    collection: createCollection({ admin0: 'FR' }),
-    schema: withoutUndefined(createSchema()),
+  const cases = {
+    collection: [createCollection({ admin0: 'FR' }), { additionalReferences: [{ referenceID: 'r-1' }] }],
+    schema: [withoutUndefined(createSchema()), { references: [{ referenceID: 'r-1', order: '1' }] }],
   };
-  for (const [entity, body] of Object.entries(bodies)) {
+  for (const [entity, [body, oldKey]] of Object.entries(cases)) {
     const validate = compile(entity, 'in-create');
     assert.equal(validate(body), true, `${entity}: ${JSON.stringify(validate.errors)}`);
-    assert.equal(validate({ ...body, references: [{ referenceID: 'r-1', order: '1' }] }), false, entity);
+    assert.equal(validate({ ...body, ...oldKey }), false, entity);
     assert.ok(validate.errors.some((e) => e.params?.missingProperty === 'permid'), entity);
   }
 });

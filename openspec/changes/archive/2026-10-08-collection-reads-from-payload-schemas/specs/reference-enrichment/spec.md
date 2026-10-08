@@ -1,24 +1,4 @@
-# reference-enrichment
-
-## Purpose
-
-Read responses for resources that cite other resources SHALL embed those
-relationships — resolved from foreign keys — as `{ <label>, permid, href }`
-objects in `data`. Links are declared as data on each resource's descriptor and
-resolved through a link-target registry, so new link targets are added by
-declaration rather than by new query code.
-
-The registered targets are `references`, `authorities` and `taxa`. The first two
-carry JSONB payloads and take their label from a key inside one; `taxa` is a
-derived table of typed columns and takes its label from a plain column, which is
-why a target declares its label source rather than assuming a payload.
-
-On the citing side: `authorities` carry a single `reference`; `collections` and
-`schemas` carry a `primaryReference` and an `additionalReferences` array; `taxa`
-carry an `authority` and a self-referential `accepted`. `specimens` follows the
-same primary + additional pattern once it has a backing table.
-
-## Requirements
+## MODIFIED Requirements
 
 ### Requirement: Links are declared per resource against a link-target registry
 
@@ -86,52 +66,6 @@ enrichment applied.
 - **THEN** its `data` carries no enrichment fields and the read is otherwise
   unchanged
 
-### Requirement: A link target's label may be a plain column
-
-A link target SHALL declare where its label is read from: a key within its JSONB
-payload column, or a plain column on its backing table. The resolved link object
-SHALL carry the same shape either way — the label under its declared name, plus
-`permid`, plus the hydrated `href` — so a citing resource cannot tell which kind
-of target it linked to.
-
-This exists because not every linkable resource stores its content as JSONB. A
-derived table carries typed columns and has no payload column at all; its label
-is read directly from the column.
-
-#### Scenario: A target with a payload label resolves from JSONB
-
-- **WHEN** a link resolves against a target declaring a JSONB payload label
-- **THEN** the label is read from that payload column at the declared key
-
-#### Scenario: A target with a column label resolves from the column
-
-- **WHEN** a link resolves against a target declaring a plain-column label
-- **THEN** the label is read directly from that column
-- **AND** the resulting link object carries the label, `permid` and `href`, in
-  the same shape as a payload-labelled target
-
-### Requirement: Links may be keyed by serial id or by permid
-
-A link declaration SHALL state whether its foreign key column holds the target
-row's internal serial id or the target lineage's `permid`. An id-keyed link SHALL
-resolve by matching the target's internal id; a permid-keyed link SHALL resolve
-by matching the target's `permid`, requiring no id-to-permid translation. Both
-forms SHALL produce the same `{ <label>, permid, href }` object shape, and
-neither SHALL expose an internal serial identifier.
-
-#### Scenario: An id-keyed link resolves
-
-- **WHEN** a resource declares an id-keyed link and is read
-- **THEN** the target is resolved by its internal id
-- **AND** no internal serial identifier appears in the response
-
-#### Scenario: A permid-keyed link resolves
-
-- **WHEN** a resource declares a permid-keyed link whose column holds a target
-  `permid`, and is read
-- **THEN** the target is resolved by matching that `permid`
-- **AND** the resulting object has the same shape as an id-keyed link's
-
 ### Requirement: Suppression and href hydration apply to every link target
 
 The soft-removal and HTTP-agnosticism rules established for references SHALL
@@ -162,44 +96,6 @@ value) or whose `items` carry it (adding `href` to each item of the array).
 - **WHEN** a collection with two additional references is read
 - **THEN** each `additionalReferences` item carries `href` equal to
   `/api/v1/references/{permid}`
-
-### Requirement: Authority reads embed their reference
-
-A read of an `authorities` resource (single or list item) SHALL include a
-`reference` field resolved from the `authorities.reference_id` foreign key. It is
-declared in the authority payload source as
-`link({ target: "references", label: "title" })` and resolved by the
-`referencePermid` codec. The value SHALL be an object `{ title, permid, href }`:
-- `title` is the referenced `refs` row's `reference->>'title'`, and the key is left
-  out when that is NULL;
-- `permid` is that row's `permid`;
-- `href` is `/api/v1/references/{permid}`.
-
-When the referenced reference is soft-removed, `reference` SHALL be `null`.
-Authorities SHALL declare no descriptor `links`.
-
-#### Scenario: Authority single read includes its reference
-
-- **WHEN** an authority with a live referenced `refs` row is read by `permid`
-- **THEN** `data.reference` is `{ title, permid, href }`
-- **AND** `title` is the referenced row's `reference->>'title'`
-- **AND** `permid` is the referenced lineage's `permid`
-- **AND** `href` is `/api/v1/references/{permid}`
-
-#### Scenario: Authority list items include their reference
-
-- **WHEN** the authorities list is read
-- **THEN** each item in `data` carries the same `reference` object shape
-
-#### Scenario: Untitled reference
-
-- **WHEN** an authority's referenced `refs` head has no `title`
-- **THEN** `data.reference` is `{ permid, href }`, with no `title` key
-
-#### Scenario: Removed authority reference is suppressed
-
-- **WHEN** an authority's referenced `refs` head is soft-removed
-- **THEN** `data.reference` is `null`
 
 ### Requirement: Collection and schema reads embed primary and additional references
 
@@ -265,53 +161,6 @@ collection reference model (`docs/api-design-backlog.md`).
 - **THEN** the soft-removed primary resolves to `null`
 - **AND** soft-removed additional references are omitted from
   `data.additionalReferences`
-
-### Requirement: Enriched references are embedded in data with a navigable href
-
-Enriched links SHALL be embedded as domain fields within `data` (not within the
-envelope `links`), and each link object SHALL carry an `href` pointing at the
-target lineage's read URL so the same object is navigable in both single reads
-and list items. For links targeting the `references` group that URL is
-`/api/v1/references/{permid}`. The `href` SHALL be hydrated at the route/envelope
-boundary from the resolved `permid`; the persistence layer SHALL emit only the
-label and `permid` and SHALL NOT construct URLs. Hydration SHALL derive `href`
-only from link objects already filtered for soft-removal, so no `href` can point
-at a suppressed resource.
-
-#### Scenario: Reference objects carry a resolvable href
-
-- **WHEN** any enriched reference object is returned
-- **THEN** it includes `href` equal to `/api/v1/references/{permid}` for its
-  `permid`
-
-#### Scenario: Persistence layer is HTTP-agnostic
-
-- **WHEN** the read repository or schema-tree read produces a reference
-- **THEN** it yields `{ title, permid }` without an `href`
-- **AND** the `href` is added only at the route/envelope boundary
-
-### Requirement: References resolve to the current head of the referenced lineage
-
-Reference resolution SHALL read `title` and `permid` directly from the row a
-resource's `reference_id` (and its additional-references join rows) point at,
-yielding the current head's `title` and the lineage's stable `permid` without
-separate version resolution. This is sound because the backend version triggers
-swing inbound foreign keys to the new head on every re-version, so those FKs
-always point at the current head of the referenced lineage.
-
-#### Scenario: Edited reference is reflected on re-read
-
-- **WHEN** a referenced reference is edited (a new version is created) and the
-  citing resource is read again
-- **THEN** the embedded reference's `title` reflects the new head version
-- **AND** its `permid` is unchanged
-
-#### Scenario: Edited citing resource retains its additional references
-
-- **WHEN** a collection or schema is edited (a new version is created) and read
-  again
-- **THEN** its `additionalReferences` are still present, resolved via the join
-  table swung to the new head
 
 ### Requirement: Stub reads expose the enriched shape
 

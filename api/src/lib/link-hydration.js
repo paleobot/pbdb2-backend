@@ -56,10 +56,11 @@ export function hydrateLinkHrefs(record, links, prefix) {
 }
 
 /**
- * Add `href` to each link a payload source declares (root properties carrying
- * `x-link`), for a resource read through its source. The target route group
- * comes from the annotation. A `null` link (a removed target) is left alone.
- * Mutates and returns the record.
+ * Add `href` to each link a payload source declares, for a resource read
+ * through its source: a root property carrying `x-link`, or each item of a root
+ * array whose `items` carry it. The target route group comes from the
+ * annotation. A `null` link (a removed target) is left alone. Mutates and
+ * returns the record.
  *
  * @template T
  * @param {T} record
@@ -70,8 +71,13 @@ export function hydrateLinkHrefs(record, links, prefix) {
 export function hydrateSourceLinks(record, source, prefix) {
   if (!record) return record;
   for (const [name, prop] of Object.entries(source.properties ?? {})) {
-    const link = prop['x-link'];
-    if (link) addHref(record[name], groupBase(prefix, link.target));
+    const value = record[name];
+    if (prop['x-link']) {
+      addHref(value, groupBase(prefix, prop['x-link'].target));
+    } else if (prop.items?.['x-link'] && Array.isArray(value)) {
+      const base = groupBase(prefix, prop.items['x-link'].target);
+      for (const item of value) addHref(item, base);
+    }
   }
   return record;
 }

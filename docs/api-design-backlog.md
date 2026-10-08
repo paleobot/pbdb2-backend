@@ -279,6 +279,11 @@ block in the envelope) and found that GET currently drops column-stored fields; 
 GET is `merge()` output, described by `out`, with `reference` as `{ permid, title, href }`. The
 other resources still read as described above.
 
+**Update 2026-10-08:** `collection-reads-from-payload-schemas` does the same for collections. Their
+source adopted the API's shape: `primaryReference` and an unordered `additionalReferences` replace
+`references[]`, pending "Collection reference model" below. GET also returns coordinates now.
+Schemas still read through descriptor links over a `references[]` source.
+
 The API is about 2,000 lines. Its transport layer (envelope, pagination, discovery, filters,
 405 handling; about 950 lines, specified and tested) doesn't depend on payload shape. About
 580 lines of data layer (`repository.js`, `resource-tables.js` links, `link-hydration.js`, parts of
@@ -488,6 +493,29 @@ constraint and retry: option 3, only uglier.
 in each migration script, and on live writes in the API create path or a version trigger
 (`preceded_by_id IS NULL`). It's purely additive, so it can be backfilled for every existing entity
 in one pass whenever an API or UI needs it. Nothing needs it yet.
+
+## Collection reference model
+
+**With the committee (2026-10-08).** Two questions are open: is reference order real data, and
+where does the primary live? Nothing stores order today. `additional_collection_refs` is a copy of
+Classic's `secondary_refs`, an unordered set. Classic also lists the primary there for 242,311 of
+the 242,423 collections that have rows. For 187,540 collections the primary is the only row.
+
+Until there's an answer, `collection-reads-from-payload-schemas` returns what is stored:
+`primaryReference` from `collections.reference_id`, and an unordered `additionalReferences` with the
+primary usually repeated. The answer decides what comes next:
+- **Order wanted:** keep only the child table, with a position column, and drop
+  `collections.reference_id`. The primary is the first item, and the source goes back to one
+  ordered array.
+- **Order not wanted:** keep `reference_id` as the primary, and change the migration to stop
+  copying it into `additional_collection_refs` (about 242k fewer rows). The two fields stay.
+
+Schemas (`additional_schema_refs`, still `references[]` with derived orders) should follow the same
+answer.
+
+**Write path, either way:**
+- Does a PATCH that rewrites the references keep a removed reference that GET omitted?
+- May a write cite the primary again among the additional references?
 
 ## Known data issues that affect the API
 

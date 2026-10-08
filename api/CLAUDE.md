@@ -93,11 +93,14 @@ docs/                   design notes (e.g. response-envelope rationale)
   measurements are in `docs/taxa-classification-reads.md`.
 - **Reads through a payload source:** a descriptor naming a `source` (from
   `payloadSchemas/`) is read with `merge()` and one codec-context query per
-  page. Its links come from the source's `x-link` properties, and `href` is added
+  page, plus one query per child table the descriptor lists in `children`
+  (collections: `additional_collection_refs`). A column whose codec declares a
+  `select` expression is read through it (`location` as GeoJSON). Links come
+  from the source's `x-link` properties and array `items`, and `href` is added
   by `hydrateSourceLinks`. Each response validates against the source's `out`
-  variant, which `test/source-reads.test.js` checks. Only `authorities` reads
-  this way so far. The others still return `{ permid, ...payload }` plus
-  descriptor `links` (see `api/docs/response-contracts.md`).
+  variant, which `test/source-reads.test.js` checks. `authorities` and
+  `collections` read this way. The others still return `{ permid, ...payload }`
+  plus descriptor `links` (see `api/docs/response-contracts.md`).
 - **Strict query params:** an unrecognized query parameter is a **400** naming it,
   on single reads as well as lists. Filter *values* stay opaque (a well-formed
   value matching nothing is an empty 200). A resource declares what it accepts

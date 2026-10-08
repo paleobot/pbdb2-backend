@@ -3,7 +3,8 @@
 //   db           the jsonb at rest: x-storage properties removed, base required only
 //   in-create    a create body: readOnly properties removed at any depth, x-create merged in
 //   out          a full response: everything kept, dictionary enums not enforced,
-//                x-link properties nullable (a removed target)
+//                x-link properties nullable (a removed target); link items
+//                are not (a removed item is omitted)
 //   patch-guard  screens a JSON Merge Patch body (object, no root readOnly keys); the
 //                merged document is validated separately (payloadSchemas/DESIGN_NOTES.md)
 //
@@ -45,6 +46,12 @@ function transform(node, variant) {
       const drop = (variant === 'db' && prop['x-storage']) || (variant === 'in-create' && prop.readOnly);
       if (drop) removed.add(name);
       else props[name] = transform(prop, variant);
+      // A link property whose target has been removed reads as null; only a
+      // response says so. A link reached through `items` is not nullable: a
+      // removed item is omitted from its array instead.
+      if (variant === 'out' && props[name] && 'x-link' in props[name]) {
+        props[name] = { ...props[name], type: [props[name].type, 'null'] };
+      }
     }
     out.properties = props;
     pruneRequired(out, removed);
@@ -62,8 +69,6 @@ function transform(node, variant) {
   }
 
   if (variant === 'out' && 'x-enumFrom' in out) delete out.enum;
-  // A link whose target has been removed reads as null; only a response says so.
-  if (variant === 'out' && 'x-link' in out) out.type = [out.type, 'null'];
   return out;
 }
 

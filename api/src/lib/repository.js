@@ -13,14 +13,16 @@
  * crud-routes.js. `schemas` is the exception (see schema-tree.js).
  *
  * A resource whose descriptor names a payload `source` is read through the
- * shared payload code instead: the head query also selects the columns the
- * source's x-storage names, and each record is `merge()`d from its row with one
- * codec context per read (see sourceRecords). Its links come from the source's
- * x-link properties, not from `links`.
+ * shared payload code instead: the head query also selects `id` and the columns
+ * the source's x-storage names (through a codec's select expression where it
+ * has one), the descriptor's `children` are read for the page's head ids, and
+ * each record is `merge()`d with one codec context per read (see
+ * sourceRecords). Its links come from the source's x-link properties and items,
+ * not from `links`.
  */
 
 import {
-  merge, collectCodecSources, loadCodecContext, codecKeyColumns, storageColumns,
+  merge, collectCodecSources, loadCodecContext, codecKeySites, storageSelects,
 } from '../../../payloadSchemas/lib/storage.js';
 import { descriptorFor, targetFor } from './resource-tables.js';
 import { DEFAULT_LIMIT } from './list-filters.js';
@@ -181,33 +183,72 @@ function toResource(row, links) {
 }
 
 /**
- * Turn head rows into merged payloads for a resource with a payload source. One
- * codec context serves the whole read: each codec source is restricted to the
- * keys the rows hold (codecKeyColumns), so a single read and a page of a list
- * each cost one lookup query per source. A source the rows hold no key column
- * for is read in full.
+ * Turn head rows into merged payloads for a resource with a payload source.
+ *
+ * Child rows (the descriptor's `children`, e.g. `additional_collection_refs`)
+ * are read in one query per child table for all the rows' ids, selecting `id`
+ * (the codec's order) and the key columns codecKeySites lists for that table.
+ * A child table's FK is a swing FK, so head ids are enough to find a head's rows.
+ *
+ * One codec context then serves the whole read: each codec source is restricted
+ * to the keys held at its sites, in the rows' columns and in the child rows, so
+ * a single read and a page of a list each cost one lookup query per source. A
+ * source with no key sites is read in full.
  *
  * @param {object} pg
  * @param {object} source  annotated payload source
+ * @param {{ table: string, fk: string }[]} children
  * @returns {(rows: object[]) => Promise<object[]>}
  */
-function sourceRecords(pg, source) {
+function sourceRecords(pg, source, children) {
   const codecSources = collectCodecSources(source);
-  const keyColumns = codecKeyColumns(source);
+  const keySites = codecKeySites(source);
+  const childQueries = children.map(({ table, fk }) => {
+    const keyColumns = new Set();
+    for (const sites of keySites.values()) for (const c of sites.children[table] ?? []) keyColumns.add(c);
+    const cols = ['id', ...keyColumns].map((c) => `, ${ident(c)}`).join('');
+    return {
+      table,
+      sql: `SELECT ${ident(fk)} AS parent${cols} FROM ${ident(table)} WHERE ${ident(fk)} = ANY($1) ORDER BY id`,
+    };
+  });
+
   return async (rows) => {
     if (rows.length === 0) return [];
+    const ids = rows.map((row) => row.id);
+    const childRows = {};
+    for (const { table, sql } of childQueries) {
+      const byParent = new Map();
+      for (const r of (await pg.query(sql, [ids])).rows) {
+        const parent = String(r.parent);
+        if (!byParent.has(parent)) byParent.set(parent, []);
+        byParent.get(parent).push(r);
+      }
+      childRows[table] = byParent;
+    }
+
     const selection = {};
     for (const codecSource of codecSources) {
-      const columns = keyColumns.get(codecSource.table);
-      if (!columns) continue;
+      const sites = keySites.get(codecSource.table);
+      if (!sites) continue;
       const values = new Set();
-      for (const row of rows) {
-        for (const column of columns) if (row[column] != null) values.add(String(row[column]));
+      const add = (v) => { if (v != null) values.add(String(v)); };
+      for (const row of rows) for (const column of sites.columns) add(row[column]);
+      for (const [table, columns] of Object.entries(sites.children)) {
+        for (const list of childRows[table]?.values() ?? []) {
+          for (const r of list) for (const column of columns) add(r[column]);
+        }
       }
       selection[codecSource.table] = { column: codecSource.key, values: [...values] };
     }
     const ctx = await loadCodecContext(pg, codecSources, selection);
-    return rows.map((row) => merge(source, { jsonb: row.payload, columns: row }, ctx));
+
+    return rows.map((row) => {
+      const own = Object.fromEntries(
+        Object.entries(childRows).map(([table, byParent]) => [table, byParent.get(String(row.id)) ?? []]),
+      );
+      return merge(source, { jsonb: row.payload, columns: row, children: own }, ctx);
+    });
   };
 }
 
@@ -218,19 +259,26 @@ function sourceRecords(pg, source) {
  * @param {string} args.table        backing table name (from the descriptor)
  * @param {string} args.jsonbColumn  JSONB payload column (from the descriptor)
  * @param {object} [args.source]     annotated payload source; reads go through merge()
+ * @param {{ table: string, fk: string }[]} [args.children]  child tables merge reads, for a source
  */
-export function makeReadRepository({ pg, table, jsonbColumn, links, filters = {}, source }) {
+export function makeReadRepository({ pg, table, jsonbColumn, links, filters = {}, source, children = [] }) {
   const from = ident(table);
   const payload = ident(jsonbColumn);
   // Link sub-selects correlate to the citing row via the quoted table name
   // (the outer select is unaliased), keeping the head-select skeleton unchanged.
-  const projections = linkProjections(links, from);
+  // A source-backed read selects each storage column in the form its codec's
+  // merge expects (aliased when that is an expression), and `id` when it has
+  // child rows to find; merge never emits either.
   const extraCols = source
-    ? storageColumns(source).filter((c) => c !== 'permid').map(ident)
-    : projections;
+    ? [
+      ...(children.length ? ['id'] : []),
+      ...storageSelects(source).filter(({ column }) => column !== 'permid')
+        .map(({ column, expression }) => (expression === ident(column) ? expression : `${expression} AS ${ident(column)}`)),
+    ]
+    : linkProjections(links, from);
   const select = `SELECT permid, ${payload} AS payload${extraCols.map((c) => `, ${c}`).join('')} FROM ${from}`;
   const toRecords = source
-    ? sourceRecords(pg, source)
+    ? sourceRecords(pg, source, children)
     : async (rows) => rows.map((row) => toResource(row, links));
 
   return {

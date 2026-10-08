@@ -59,14 +59,14 @@ test('DB-backed single read with no head returns a structured 404', async (t) =>
 test('DB-backed list returns the mapped heads with counts', async (t) => {
   const pg = fakePg(() => ({
     rows: [
-      { permid: 'col-1', payload: { name: 'Alpha' } },
-      { permid: 'col-2', payload: { name: 'Beta' } },
+      { permid: 'ref-1', payload: { title: 'Alpha' } },
+      { permid: 'ref-2', payload: { title: 'Beta' } },
     ],
   }));
   const app = build({ pg });
   t.after(() => app.close());
 
-  const res = await app.inject({ method: 'GET', url: '/api/v1/collections' });
+  const res = await app.inject({ method: 'GET', url: '/api/v1/references' });
   assert.equal(res.statusCode, 200);
 
   const body = res.json();
@@ -75,7 +75,7 @@ test('DB-backed list returns the mapped heads with counts', async (t) => {
   assert.equal(body.meta.found, 2);
   assert.deepEqual(
     body.data.map((d) => d.permid),
-    ['col-1', 'col-2'],
+    ['ref-1', 'ref-2'],
   );
 });
 
@@ -218,20 +218,24 @@ test('repository without a links config emits no projections and merges nothing 
 });
 
 test('enriched single read carries href hydrated from the route prefix', async (t) => {
+  // Schemas still declare descriptor links; collections' links are covered in
+  // test/source-reads.test.js.
   const pg = fakePg(() => ({
     rows: [
       {
-        permid: 'col-1',
-        payload: { name: 'Alpha' },
+        permid: 'sch-1',
+        payload: { title: 'Leaf architecture' },
         primaryReference: { title: 'Primary', permid: 'ref-9' },
         additionalReferences: [{ title: 'Add', permid: 'ref-10' }],
+        characters: [],
+        states: [],
       },
     ],
   }));
   const app = build({ pg });
   t.after(() => app.close());
 
-  const res = await app.inject({ method: 'GET', url: '/api/v1/collections/col-1' });
+  const res = await app.inject({ method: 'GET', url: '/api/v1/schemas/sch-1' });
   const { data } = res.json();
   assert.equal(data.primaryReference.href, '/api/v1/references/ref-9');
   assert.equal(data.additionalReferences[0].href, '/api/v1/references/ref-10');

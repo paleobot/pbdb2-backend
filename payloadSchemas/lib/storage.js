@@ -17,6 +17,10 @@ import { getCodec } from './codecs.js';
 const isObject = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
 const IDENT = /^[a-z_][a-z0-9_]*$/;
 
+// A codec property's link: on the property itself, or on its items for an
+// array of links. Only `items` is reached; a codec owns the whole array value.
+const linkOf = (prop) => prop['x-link'] ?? prop.items?.['x-link'];
+
 // Group a node's x-storage properties: codec groups keyed by codec name, plain
 // columns individually.
 function storageGroups(properties) {
@@ -25,12 +29,15 @@ function storageGroups(properties) {
     const storage = prop['x-storage'];
     if (!storage) continue;
     const key = storage.codec ? `codec:${storage.codec}` : `column:${name}`;
-    if (!groups.has(key)) groups.set(key, { storage, names: [], link: prop['x-link'] });
+    if (!groups.has(key)) groups.set(key, { storage, names: [], link: linkOf(prop) });
     groups.get(key).names.push(name);
   }
-  // A codec serving one link property receives its x-link as storage.link.
-  return [...groups.values()].map(({ storage, names, link }) =>
-    ({ storage: names.length === 1 && link ? { ...storage, link } : storage, names }));
+  // A codec serving one property receives its name as storage.property, and
+  // its link (if any) as storage.link. One serving several names its own keys.
+  return [...groups.values()].map(({ storage, names, link }) => {
+    if (!storage.codec || names.length !== 1) return { storage, names };
+    return { storage: { ...storage, property: names[0], ...(link ? { link } : {}) }, names };
+  });
 }
 
 // ---------- The codec context ----------
@@ -80,15 +87,15 @@ function checkEnumAgreement(name, prop, sources) {
 }
 
 // Every distinct { table, key, value } the source's codecs declare. A codec
-// property that is also a link (x-link) asks its sources for the link's label;
-// duplicates merge their label lists.
+// property that is a link (x-link on it or on its items) asks its sources for
+// the link's label; duplicates merge their label lists.
 export function collectCodecSources(schema) {
   const seen = new Map();
   const visit = (node) => {
     for (const [name, prop] of Object.entries(node.properties ?? {})) {
       const codecName = prop['x-storage']?.codec;
       if (codecName) {
-        const label = prop['x-link']?.label;
+        const label = linkOf(prop)?.label;
         const sources = (getCodec(codecName).sources ?? []).map((s) =>
           checkSource(codecName, label === undefined ? s : { ...s, labels: [label] }),
         );
@@ -106,25 +113,72 @@ export function collectCodecSources(schema) {
   return [...seen.values()];
 }
 
-// Which stored column's values are a source's keys, per looked-up table: what a
-// caller reading rows in batches restricts that source to. Following x-storage
-// rather than naming the columns keeps a batching caller out of the codecs'
-// business.
-export function codecKeyColumns(schema) {
-  const byTable = new Map();
+// Every x-storage annotation in the source, reached through nested `properties`.
+function storageAnnotations(schema) {
+  const found = [];
   const visit = (node) => {
     for (const prop of Object.values(node.properties ?? {})) {
-      const storage = prop['x-storage'];
-      if (storage?.codec && storage.column) {
-        for (const source of getCodec(storage.codec).sources ?? []) {
-          if (!byTable.has(source.table)) byTable.set(source.table, new Set());
-          byTable.get(source.table).add(storage.column);
-        }
-      }
+      if (prop['x-storage']) found.push(prop['x-storage']);
       if (isObject(prop.properties)) visit(prop);
     }
   };
   visit(schema);
+  return found;
+}
+
+// Which stored column's values are a source's keys, per looked-up table: what a
+// caller reading rows in batches restricts that source to. Following x-storage
+// rather than naming the columns keeps a batching caller out of the codecs'
+// business.
+//
+// A table that a child-table codec also reads is left out entirely, even when
+// another codec reads it through a column: some of its keys live in child rows,
+// which this map cannot name, so restricting it to the columns would drop them.
+// The payload audit, this function's caller, then reads it in full once per run.
+// The API reads child rows and uses codecKeySites instead.
+export function codecKeyColumns(schema) {
+  const annotations = storageAnnotations(schema);
+  const childRead = new Set();
+  for (const storage of annotations) {
+    if (storage.codec && storage.table) {
+      for (const source of getCodec(storage.codec).sources ?? []) childRead.add(source.table);
+    }
+  }
+  const byTable = new Map();
+  for (const storage of annotations) {
+    if (!storage.codec || !storage.column) continue;
+    for (const source of getCodec(storage.codec).sources ?? []) {
+      if (childRead.has(source.table)) continue;
+      if (!byTable.has(source.table)) byTable.set(source.table, new Set());
+      byTable.get(source.table).add(storage.column);
+    }
+  }
+  return byTable;
+}
+
+// Where a source's keys are held, per looked-up table: the parent columns the
+// x-storage annotations name, and per child table the codec's `keyColumn`s. A
+// reader that loads the child rows restricts the codec context to the keys
+// found at these sites. A child-table codec without a keyColumn contributes no
+// child site.
+export function codecKeySites(schema) {
+  const byTable = new Map();
+  const site = (table) => {
+    if (!byTable.has(table)) byTable.set(table, { columns: [], children: {} });
+    return byTable.get(table);
+  };
+  for (const storage of storageAnnotations(schema)) {
+    if (!storage.codec) continue;
+    const codec = getCodec(storage.codec);
+    for (const source of codec.sources ?? []) {
+      const entry = site(source.table);
+      if (storage.column && !entry.columns.includes(storage.column)) entry.columns.push(storage.column);
+      if (storage.table && codec.keyColumn) {
+        const cols = (entry.children[storage.table] ??= []);
+        if (!cols.includes(codec.keyColumn)) cols.push(codec.keyColumn);
+      }
+    }
+  }
   return byTable;
 }
 
@@ -206,16 +260,22 @@ export async function loadCodecContext(pg, sources, selection = {}, reuse) {
 // Every column the source's x-storage annotations name: what a caller reading
 // stored rows selects for merge. A codec annotated with a child table names none.
 export function storageColumns(schema) {
-  const columns = new Set();
-  const visit = (node) => {
-    for (const prop of Object.values(node.properties ?? {})) {
-      const column = prop['x-storage']?.column;
-      if (column) columns.add(column);
-      if (isObject(prop.properties)) visit(prop);
-    }
-  };
-  visit(schema);
-  return [...columns];
+  return [...new Set(storageAnnotations(schema).map((s) => s.column).filter(Boolean))];
+}
+
+// storageColumns with the SQL expression that selects each one in the form merge
+// expects: the codec's select(column) when it declares one (wgs84Point), the
+// quoted column otherwise. A reader aliases each expression to its column.
+export function storageSelects(schema) {
+  const selects = new Map();
+  for (const storage of storageAnnotations(schema)) {
+    const { column } = storage;
+    if (!column || selects.has(column)) continue;
+    if (!IDENT.test(column)) throw new Error(`storageSelects: unsafe column name ${JSON.stringify(column)}`);
+    const select = storage.codec ? getCodec(storage.codec).select : undefined;
+    selects.set(column, select ? select(column) : `"${column}"`);
+  }
+  return [...selects].map(([column, expression]) => ({ column, expression }));
 }
 
 // ---------- split / merge ----------

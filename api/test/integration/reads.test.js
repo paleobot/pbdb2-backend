@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { build } from '../../src/app.js';
 import { makeReadRepository } from '../../src/lib/repository.js';
 import { authoritySource } from '../../../payloadSchemas/authority.schema.js';
+import { collectionSource } from '../../../payloadSchemas/collection.schema.js';
 import { deriveVariant } from '../../../payloadSchemas/lib/variants.js';
 import { createAjv } from '../../../payloadSchemas/lib/ajv.js';
 import { readSchemaTree } from '../../src/lib/schema-tree.js';
@@ -46,6 +47,12 @@ const refsRepo = () =>
 const validateAuthorityOut = createAjv().compile(deriveVariant(authoritySource, 'out'));
 function assertAuthorityContract(record) {
   assert.equal(validateAuthorityOut(record), true, JSON.stringify(validateAuthorityOut.errors));
+}
+
+// The collection response contract, likewise.
+const validateCollectionOut = createAjv().compile(deriveVariant(collectionSource, 'out'));
+function assertCollectionContract(record) {
+  assert.equal(validateCollectionOut(record), true, JSON.stringify(validateCollectionOut.errors));
 }
 
 // Enrichment repos use the production descriptors (table, jsonbColumn, references).
@@ -224,7 +231,7 @@ test('authority routes honour the out contract over real PostgreSQL, with hrefs'
   for (const item of page) assertAuthorityContract(item);
 });
 
-test('collection read embeds primary and additional references', async (t) => {
+test('collection read merges coordinates and embeds references, a repeated primary included', async (t) => {
   if (!ctx.available) return t.skip(ctx.reason);
 
   const primaryPermid = newPermid();
@@ -234,24 +241,41 @@ test('collection read embeds primary and additional references', async (t) => {
 
   const primary = await insertRef(ctx.pool, { permid: primaryPermid, personId, reference: { title: 'Primary' } });
   const add1 = await insertRef(ctx.pool, { permid: add1Permid, personId, reference: { title: 'Add 1' } });
-  const add2 = await insertRef(ctx.pool, { permid: add2Permid, personId, reference: { title: 'Add 2' } });
+  const add2 = await insertRef(ctx.pool, { permid: add2Permid, personId, reference: {} });
   const col = await insertCollection(ctx.pool, {
     permid: collectionPermid,
     personId,
-    collection: { name: 'Quarry A' },
+    collection: { name: 'Quarry A', location: { toponym: { administrativeArea: { admin0: 'US' } }, scale: 'outcrop' } },
     referenceId: primary.id,
+    location: 'SRID=4326;POINT(-110.25 45.5)',
   });
+  // As Classic's secondary_refs usually has it, the primary is also a child row.
+  await insertAdditionalCollectionRef(ctx.pool, { collectionId: col.id, referenceId: primary.id, personId });
   await insertAdditionalCollectionRef(ctx.pool, { collectionId: col.id, referenceId: add1.id, personId });
   await insertAdditionalCollectionRef(ctx.pool, { collectionId: col.id, referenceId: add2.id, personId });
 
   const head = await collectionsRepo().readHead(collectionPermid);
+  assertCollectionContract(head);
+  assert.deepEqual(head.location.coordinates, { latitude: 45.5, longitude: -110.25 });
   assert.deepEqual(head.primaryReference, { title: 'Primary', permid: primaryPermid });
-  const titles = head.additionalReferences.map((r) => r.title).sort();
-  assert.deepEqual(titles, ['Add 1', 'Add 2']);
-  assert.deepEqual(
-    head.additionalReferences.map((r) => r.permid).sort(),
-    [add1Permid, add2Permid].sort(),
-  );
+  assert.deepEqual(head.additionalReferences, [
+    { title: 'Primary', permid: primaryPermid },
+    { title: 'Add 1', permid: add1Permid },
+    { permid: add2Permid },
+  ], 'stored rows in id order; an untitled reference has no title key');
+  for (const leaked of ['id', 'reference_id']) assert.equal(leaked in head, false);
+
+  // The same collection through the route: hydrated links, and a list item that
+  // honours the contract.
+  const app = build({ pg: ctx.pool });
+  t.after(() => app.close());
+  const { data } = (await app.inject({ method: 'GET', url: `/api/v1/collections/${collectionPermid}` })).json();
+  assertCollectionContract(data);
+  assert.equal(data.primaryReference.href, `/api/v1/references/${primaryPermid}`);
+  assert.deepEqual(data.additionalReferences.map((r) => r.href), [primaryPermid, add1Permid, add2Permid].map((p) => `/api/v1/references/${p}`));
+  const list = (await app.inject({ method: 'GET', url: `/api/v1/collections?ids=${collectionPermid}` })).json().data;
+  assert.equal(list.length, 1);
+  assertCollectionContract(list[0]);
 });
 
 test('collection with no additional references yields an empty array', async (t) => {
@@ -267,7 +291,9 @@ test('collection with no additional references yields an empty array', async (t)
   });
 
   const head = await collectionsRepo().readHead(collectionPermid);
+  assertCollectionContract(head);
   assert.deepEqual(head.additionalReferences, []);
+  assert.equal(head.location, undefined, 'no location column and none in the jsonb');
 });
 
 test('schema tree embeds primary and additional references', async (t) => {
@@ -336,6 +362,7 @@ test('edited collection retains its additional references (join FK swung to new 
   });
 
   const head = await collectionsRepo().readHead(collectionPermid);
+  assertCollectionContract(head);
   assert.equal(head.name, 'v2', 'reads the new head');
   assert.deepEqual(head.additionalReferences, [{ title: 'A', permid: addPermid }]);
 });
@@ -376,7 +403,22 @@ test('removed additional references are omitted from the array', async (t) => {
   await insertAdditionalCollectionRef(ctx.pool, { collectionId: col.id, referenceId: gone.id, personId });
 
   const head = await collectionsRepo().readHead(collectionPermid);
+  assertCollectionContract(head);
   assert.deepEqual(head.additionalReferences, [{ title: 'Live', permid: livePermid }]);
+});
+
+test('a collection whose primary reference is removed reads it as null', async (t) => {
+  if (!ctx.available) return t.skip(ctx.reason);
+
+  const collectionPermid = newPermid();
+  const gone = await insertRef(ctx.pool, { permid: newPermid(), personId, reference: { title: 'Gone' }, removed: true });
+  const col = await insertCollection(ctx.pool, { permid: collectionPermid, personId, referenceId: gone.id });
+  await insertAdditionalCollectionRef(ctx.pool, { collectionId: col.id, referenceId: gone.id, personId });
+
+  const head = await collectionsRepo().readHead(collectionPermid);
+  assertCollectionContract(head);
+  assert.equal(head.primaryReference, null);
+  assert.deepEqual(head.additionalReferences, [], 'its repeat among the child rows is omitted too');
 });
 
 /**

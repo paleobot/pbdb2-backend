@@ -1,7 +1,9 @@
 # PBDB2 API — Response Contracts and Shared Payload Code
 
-**Status:** Design A chosen (2026-10-06, §6). It is built for authorities in the OpenSpec change
-`authority-reads-from-payload-schemas`; collections, schemas and the rest follow in later changes.
+**Status:** Design A chosen (2026-10-06, §6). It is built for authorities
+(`authority-reads-from-payload-schemas`) and collections (`collection-reads-from-payload-schemas`,
+2026-10-08, which added arrays of links, child rows and coordinates). Schemas and the rest follow in
+later changes.
 **Audience:** PBDB2 backend contributors
 **Subject:** How the API starts using `payloadSchemas/`, and where linked-resource conveniences
 (`title`, `href`) belong in a GET response
@@ -43,6 +45,9 @@ child tables, and only `merge()` puts them back. The API never calls it:
 | collection/schema `references[]` | `reference_id` + `additional_*_refs` | `primaryReference` + `additionalReferences` |
 
 The first two are bugs. The last two are the shape question this document is about.
+
+Since then: authority `reference` and collection coordinates and references come back through
+`merge()` (status line above). Collections keep `primaryReference` + `additionalReferences`; see §4.
 
 ### Why reads come first
 
@@ -153,7 +158,7 @@ out:      title, href: { ..., readOnly: true }           ← href: { type: strin
 
 ## 4. Field shapes
 
-In the sources, the collection and schema `references[]` items are already objects
+In the sources, the schema `references[]` items (and the collection's, until 2026-10-08; see below) are already objects
 (`{ permid, order }`, after the rename below). Under A, `title` and `href` go beside them and the create body is
 unchanged. The exceptions are scalar links:
 
@@ -163,6 +168,15 @@ unchanged. The exceptions are scalar links:
 | person `authorizer` | permid string (`personPermid`) | same rule, once persons have a route |
 
 Under B the scalar fields can stay strings: the title is found in the related block.
+
+**Collections (2026-10-08).** Whether reference order is real data is with a committee
+(`docs/api-design-backlog.md`, "Collection reference model"). Until it answers, the collection
+source describes what is stored instead of `references[]`: `primaryReference`, a link like an
+authority's `reference` (and `null` when removed), and `additionalReferences`, an unordered array
+whose `items` are links (`x-link` on `items`; a removed item is omitted, not `null`). The response
+keeps the field names the API already used. Most collections repeat the primary among their
+additional references, because Classic's `secondary_refs` lists it there, and it is returned as
+stored. Schemas still use `references[]` with derived orders.
 
 Naming (decided 2026-10-06): a link object names the target's id **`permid`**. The sources had
 called it `referenceID` (in `references[]` items, since the hand-written `collections.schema.js`),
@@ -310,7 +324,15 @@ Settled 2026-10-06, in `authority-reads-from-payload-schemas` (design.md has the
 6. **Change layout:** one change for the annotations and the reads. The `referenceID` → `permid`
    rename went first, as its own change.
 
-Still open: how collections and schemas treat a removed reference in `references[]` under
-`merge()`, and how the write path rejects a PATCH that touches a nested read-only field such as
-`reference.title`. The merged-document check can't catch one, because read-only fields are
-removed before it runs.
+Settled 2026-10-08, in `collection-reads-from-payload-schemas`: a removed reference reads as
+`null` for a single link (collection `primaryReference`) and is omitted from an array of links
+(`additionalReferences`).
+
+Still open:
+- the collection reference model (order, and where the primary lives), with a committee;
+- how the write path rejects a PATCH that touches a nested read-only field such as
+  `reference.title`. The merged-document check can't catch one, because read-only fields are
+  removed before it runs;
+- whether a PATCH that rewrites a collection's references keeps a removed one that GET omitted.
+
+The backlog (`docs/api-design-backlog.md`) holds all three.

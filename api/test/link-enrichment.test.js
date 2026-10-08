@@ -25,14 +25,10 @@ function fakePg(handler) {
 }
 
 // The exact expressions emitted before link targets were parameterized. Any
-// diff here is a behavior change, not a stale expectation. Authorities is not
-// here: it reads through its payload source and declares no links (see
-// test/source-reads.test.js).
+// diff here is a behavior change, not a stale expectation. Authorities and
+// collections are not here: they read through their payload sources and declare
+// no links (see test/source-reads.test.js).
 const PRE_REFACTOR_SQL = {
-  collections: [
-    `(SELECT json_build_object('title', r.reference->>'title', 'permid', r.permid) FROM refs r WHERE r.id = "collections"."reference_id" AND NOT COALESCE(r.removed, false)) AS "primaryReference"`,
-    `(SELECT COALESCE(json_agg(json_build_object('title', r.reference->>'title', 'permid', r.permid)), '[]'::json) FROM "additional_collection_refs" j JOIN refs r ON r.id = j.reference_id WHERE j."collection_id" = "collections".id AND NOT COALESCE(r.removed, false)) AS "additionalReferences"`,
-  ],
   schemas: [
     `(SELECT json_build_object('title', r.reference->>'title', 'permid', r.permid) FROM refs r WHERE r.id = "schemas"."reference_id" AND NOT COALESCE(r.removed, false)) AS "primaryReference"`,
     `(SELECT COALESCE(json_agg(json_build_object('title', r.reference->>'title', 'permid', r.permid)), '[]'::json) FROM "additional_schema_refs" j JOIN refs r ON r.id = j.reference_id WHERE j."schema_id" = "schemas".id AND NOT COALESCE(r.removed, false)) AS "additionalReferences"`,
@@ -56,6 +52,14 @@ test('existing reference declarations emit byte-identical SQL after generalizati
 test('authorities declares no descriptor links: its reference comes from the source', () => {
   assert.equal(descriptorFor('authorities').links, undefined);
   assert.ok(descriptorFor('authorities').source.properties.reference['x-link']);
+});
+
+test('collections declares no descriptor links: its references come from the source', () => {
+  const { links, source, children } = descriptorFor('collections');
+  assert.equal(links, undefined);
+  assert.ok(source.properties.primaryReference['x-link']);
+  assert.ok(source.properties.additionalReferences.items['x-link']);
+  assert.deepEqual(children, [{ table: 'additional_collection_refs', fk: 'collection_id' }]);
 });
 
 // A synthetic citing resource; nothing in the served API declares these yet.

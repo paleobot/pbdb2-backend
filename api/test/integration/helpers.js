@@ -230,21 +230,24 @@ export async function insertAuthority(
 
 /**
  * Insert a collection row, returning its serial id. `reference_id` is the
- * primary reference; pass `permid` to extend a lineage.
+ * primary reference; pass `permid` to extend a lineage. `location` is the
+ * geography column as EWKT text (`SRID=4326;POINT(<lng> <lat>)`), or NULL. The
+ * default payload is valid against the collection source, so a read of it can
+ * be checked against the `out` contract.
  *
  * No age FKs: `collections.early_age_id` / `late_age_id` are commented out in the
  * current backend schema, so fixtures no longer seed an anchor `intervals` row.
  */
 export async function insertCollection(
   pool,
-  { permid, personId, collection = {}, referenceId, removed = null },
+  { permid, personId, collection = { name: 'Test collection' }, referenceId, location = null, removed = null },
 ) {
   const { rows } = await pool.query(
     `INSERT INTO collections
-       (permid, authorizer_person_id, enterer_person_id, collection, reference_id, removed)
-     VALUES ($1, $2, $2, $3::jsonb, $4, $5)
+       (permid, authorizer_person_id, enterer_person_id, collection, reference_id, location, removed)
+     VALUES ($1, $2, $2, $3::jsonb, $4, $5, $6)
      RETURNING id, permid`,
-    [permid, personId, JSON.stringify(collection), referenceId, removed],
+    [permid, personId, JSON.stringify(collection), referenceId, location, removed],
   );
   return rows[0];
 }

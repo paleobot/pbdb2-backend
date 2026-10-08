@@ -6,13 +6,16 @@ export default async function collections(fastify) {
   registerCrudRoutes(fastify, {
     type: 'collection',
     repository: repositoryForResource(fastify, 'collections'),
-    links: descriptorFor('collections').links,
+    source: descriptorFor('collections').source,
+    // A payload in the collection source's shape, as a merged read returns it.
     stub: (permid = 'col-00000000') => ({
       permid,
       name: 'Stub collection',
-      country: 'US',
-      state: 'California',
-      primaryReference: { title: 'Stub reference', permid: 'ref-00000000' },
+      location: {
+        toponym: { administrativeArea: { admin0: 'US', admin1: 'US-CA' } },
+        scale: 'outcrop',
+      },
+      primaryReference: { permid: 'ref-00000000', title: 'Stub reference' },
       additionalReferences: [],
     }),
   });

@@ -95,6 +95,25 @@ test('out alone allows a null link', () => {
   assert.equal(compileLink('in-create')({ reference: null }), false);
 });
 
+test('out allows a null link property but not a null link item', () => {
+  const s = linkSource();
+  s.properties.cites = {
+    type: 'array',
+    items: link({ target: 'references', label: 'title' }),
+    'x-storage': { table: 'cites', codec: 'referenceLinks' },
+  };
+  const out = deriveVariant(s, 'out');
+  assert.deepEqual(out.properties.reference.type, ['object', 'null']);
+  assert.equal(out.properties.cites.type, 'array');
+  assert.equal(out.properties.cites.items.type, 'object');
+  const validate = createAjv().compile(out);
+  assert.equal(validate({ reference: null, cites: [{ permid: 'p', title: 't', href: '/r/p' }] }), true, JSON.stringify(validate.errors));
+  assert.equal(validate({ reference: null, cites: [null] }), false);
+  const create = createAjv().compile(deriveVariant(s, 'in-create'));
+  assert.equal(create({ reference: { permid: 'p' }, cites: [{ permid: 'q', title: 'x' }] }), false);
+  assert.ok(create.errors.some((e) => e.instancePath === '/cites/0' && e.params?.additionalProperty === 'title'));
+});
+
 test('patch-guard names root readOnly keys only', () => {
   const s = linkSource();
   s.properties.permid = { type: 'string', readOnly: true };

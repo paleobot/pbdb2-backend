@@ -174,9 +174,9 @@ async function auditEntity(pg, entry, opts) {
 
   // Codec lookups, where this entity has any. A source is selected per batch from
   // the keys that batch holds when the annotations name the columns those keys
-  // sit in. Dictionaries, and any source with no such columns (refs for collection
-  // and schema, whose referenceList keys sit in both a column and child rows), are
-  // read once for the run instead. Authority names refs by a column, so its refs are
+  // sit in. Dictionaries, and any source whose keys also sit in child rows (refs
+  // for collection and schema), are read once for the run instead: codecKeyColumns
+  // leaves those out. Authority names refs by a column only, so its refs are
   // selected per batch.
   const codecSources = opts.roundTrip ? collectCodecSources(entry.source) : [];
   const keyColumns = codecKeyColumns(entry.source);
