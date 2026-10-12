@@ -5,6 +5,7 @@ import { build } from '../../src/app.js';
 import { makeReadRepository } from '../../src/lib/repository.js';
 import { authoritySource } from '../../../payloadSchemas/authority.schema.js';
 import { collectionSource } from '../../../payloadSchemas/collection.schema.js';
+import { referenceSource } from '../../../payloadSchemas/reference.schema.js';
 import { deriveVariant } from '../../../payloadSchemas/lib/variants.js';
 import { createAjv } from '../../../payloadSchemas/lib/ajv.js';
 import { readSchemaTree } from '../../src/lib/schema-tree.js';
@@ -53,6 +54,12 @@ function assertAuthorityContract(record) {
 const validateCollectionOut = createAjv().compile(deriveVariant(collectionSource, 'out'));
 function assertCollectionContract(record) {
   assert.equal(validateCollectionOut(record), true, JSON.stringify(validateCollectionOut.errors));
+}
+
+// The reference response contract, likewise.
+const validateReferenceOut = createAjv().compile(deriveVariant(referenceSource, 'out'));
+function assertReferenceContract(record) {
+  assert.equal(validateReferenceOut(record), true, JSON.stringify(validateReferenceOut.errors));
 }
 
 // Enrichment repos use the production descriptors (table, jsonbColumn, references).
@@ -229,6 +236,41 @@ test('authority routes honour the out contract over real PostgreSQL, with hrefs'
   const page = (await app.inject({ method: 'GET', url: '/api/v1/authorities?limit=100' })).json().data;
   assert.ok(page.length >= 2);
   for (const item of page) assertAuthorityContract(item);
+});
+
+test('reference routes honour the out contract over real PostgreSQL', async (t) => {
+  if (!ctx.available) return t.skip(ctx.reason);
+
+  // Other tests insert placeholder refs ({} or { title }) that no reference
+  // source would accept, so only the refs inserted here are checked.
+  const titledPayload = {
+    title: 'Trilobites from the Lower Mississippian',
+    authors: [{ givenName: 'D. K.', familyName: 'Brezinski' }],
+    legacyIDs: { oldpbdbID: '1' },
+    journalTitle: 'Journal of Paleontology',
+    publicationType: 'journal article',
+    publicationYear: '1998',
+  };
+  const untitledPayload = {
+    authors: [{ givenName: 'A. K.', familyName: 'Agadjanian' }],
+    legacyIDs: { oldpbdbID: '923' },
+    publicationType: 'journal article',
+    publicationYear: '1999',
+  };
+  const titled = await insertRef(ctx.pool, { permid: newPermid(), personId, reference: titledPayload });
+  const untitled = await insertRef(ctx.pool, { permid: newPermid(), personId, reference: untitledPayload });
+
+  const app = build({ pg: ctx.pool });
+  t.after(() => app.close());
+
+  const single = (await app.inject({ method: 'GET', url: `/api/v1/references/${titled.permid}` })).json().data;
+  assertReferenceContract(single);
+  assert.deepEqual(single, { permid: titled.permid, ...titledPayload });
+
+  const list = (await app.inject({ method: 'GET', url: `/api/v1/references?ids=${titled.permid},${untitled.permid}` })).json().data;
+  assert.equal(list.length, 2);
+  for (const item of list) assertReferenceContract(item);
+  assert.deepEqual(list.find((r) => r.permid === untitled.permid), { permid: untitled.permid, ...untitledPayload });
 });
 
 test('collection read merges coordinates and embeds references, a repeated primary included', async (t) => {

@@ -7,9 +7,7 @@ the environment, a generic version-aware head-read repository, the schema
 aggregate tree read, and an integration test harness that exercises the layer
 against a real PostgreSQL instance. This capability isolates persistence so that
 route handlers read through a single swappable seam.
-
 ## Requirements
-
 ### Requirement: PostgreSQL connection plugin
 
 The system SHALL establish a PostgreSQL connection as a Fastify plugin,
@@ -91,10 +89,12 @@ the record except through `merge`.
 A child table's foreign key to its parent is a swing FK, so the head ids are
 enough to find a head's child rows.
 
-As of this requirement, `authorities` and `collections` read through their
-sources. `collections` declares
+As of this requirement, `authorities`, `collections` and `references` read
+through their sources. `collections` declares
 `children: [{ table: "additional_collection_refs", fk: "collection_id" }]`.
-`references`, `specimens` and `schemas` read the JSONB payload as stored.
+`references` declares no `children`, and its source declares no codecs, so its
+reads load no codec context. `specimens` and `schemas` read the JSONB payload as
+stored.
 
 #### Scenario: Read current head by permid
 
@@ -144,6 +144,18 @@ sources. `collections` declares
 
 - **WHEN** a collection head with a NULL `location` is read
 - **THEN** the record has no `location.coordinates.latitude` or `longitude`
+
+#### Scenario: A reference is merged in one query
+
+- **WHEN** a page of references is read, or one reference by `permid`
+- **THEN** one query reads the heads and no codec-context or child-row query runs
+- **AND** each record is the stored payload with `permid` from its column
+- **AND** no `id` or version-chain column appears in it
+
+#### Scenario: The publication_type filter is unchanged
+
+- **WHEN** references are listed with `publication_type=book`
+- **THEN** the head query matches `reference->>'publicationType'` against the bound value, as before
 
 ### Requirement: Schema aggregate tree read
 
@@ -200,7 +212,9 @@ For a resource read through its payload source, every GET response's `data`, aft
 validate against `deriveVariant(<source>, 'out')` compiled with `createAjv()`. Each list item counts as a
 `data`. A unit test SHALL check this for the single, list and multi-entity (`ids`) reads and for the stub
 read. An integration test against the real DDL SHALL check it for the single and list reads. Both SHALL cover
-a linked resource with a label, one without, and one that is soft-removed. For collections they SHALL also
+a linked resource with a label, one without, and one that is soft-removed, for a resource whose source
+declares links. For references, which declare none, they SHALL cover a titled reference, an untitled one,
+and two publication types. For collections they SHALL also
 cover:
 - a collection with coordinates and one without;
 - child rows, one of which repeats the primary;
@@ -220,7 +234,7 @@ A response field that `out` does not declare fails these tests.
 - **THEN** every item of `data` validates against the authority `out` variant
 
 #### Scenario: Stub honours the contract
-- **WHEN** authorities or collections are read with no database configured
+- **WHEN** authorities, collections or references are read with no database configured
 - **THEN** the stub `data` validates against that resource's `out` variant
 
 #### Scenario: Collection reads honour their contract
@@ -230,3 +244,8 @@ A response field that `out` does not declare fails these tests.
 #### Scenario: Collection removal cases
 - **WHEN** a collection whose primary reference is soft-removed, and one with a soft-removed additional reference, are read
 - **THEN** the first has `primaryReference: null`, the second omits that reference from `additionalReferences`, and both validate against `out`
+
+#### Scenario: Reference reads honour their contract
+- **WHEN** references are read singly, as a list and by `ids`, including an untitled reference and references of two publication types
+- **THEN** every `data` validates against the reference `out` variant
+

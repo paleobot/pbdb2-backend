@@ -4,11 +4,12 @@ import assert from 'node:assert/strict';
 import { build } from '../src/app.js';
 import { authoritySource } from '../../payloadSchemas/authority.schema.js';
 import { collectionSource } from '../../payloadSchemas/collection.schema.js';
+import { referenceSource } from '../../payloadSchemas/reference.schema.js';
 import { deriveVariant } from '../../payloadSchemas/lib/variants.js';
 import { createAjv } from '../../payloadSchemas/lib/ajv.js';
 
 /**
- * Reads through a payload source (authorities, collections), driven with a fake
+ * Reads through a payload source (authorities, collections, references), driven with a fake
  * postgres client. Every response's `data` is checked against the resource's
  * `out` variant: that schema is the response contract, so a field it does not
  * declare is a failure here (data-access, "Responses of a resource with a
@@ -258,4 +259,124 @@ test('collection stub read honours the contract (no DB configured)', async (t) =
   assert.equal(data.primaryReference.href, '/api/v1/references/ref-00000000');
   assert.equal('country' in data || 'state' in data, false);
   assertCollectionContract((await app.inject({ method: 'GET', url: '/api/v1/collections' })).json().data);
+});
+
+// ---------- references ----------
+
+const validateReferenceOut = createAjv().compile(deriveVariant(referenceSource, 'out'));
+
+function assertReferenceContract(data) {
+  for (const item of Array.isArray(data) ? data : [data]) {
+    assert.equal(validateReferenceOut(item), true, `${item.permid}: ${JSON.stringify(validateReferenceOut.errors)}`);
+  }
+}
+
+// Shaped like localhost refs: a titled journal article, an untitled one (541 PBDB
+// refs have no title), and a standalone book, whose type allows different fields.
+const REFERENCE_ROWS = [
+  {
+    permid: 'ref-1',
+    payload: {
+      doi: '10.1017/s0022336000040415',
+      pages: { first: 718, last: 725 },
+      title: 'Trilobites from the Lower Mississippian starved basin facies of the southern United States',
+      authors: [{ givenName: 'D. K.', familyName: 'Brezinski' }],
+      language: 'English',
+      legacyIDs: { oldpbdbID: '1' },
+      journalTitle: 'Journal of Paleontology',
+      journalNumber: '4',
+      journalVolume: '72',
+      publicationType: 'journal article',
+      publicationYear: '1998',
+    },
+  },
+  {
+    permid: 'ref-2',
+    payload: {
+      authors: [{ givenName: 'A. K.', familyName: 'Agadjanian' }],
+      language: 'unknown',
+      legacyIDs: { oldpbdbID: '923' },
+      journalTitle: 'Paleontological Journal',
+      publicationType: 'journal article',
+      publicationYear: '1999',
+    },
+  },
+  {
+    permid: 'ref-3',
+    payload: {
+      title: 'Fossil Plants',
+      authors: [{ givenName: 'A. C.', familyName: 'Seward' }],
+      language: 'English',
+      legacyIDs: { pbotID: 'r3' },
+      publisher: 'Cambridge University Press',
+      publicationCity: 'Cambridge',
+      publicationType: 'standalone book',
+      publicationYear: '1898',
+    },
+  },
+];
+
+function referencesPg() {
+  const calls = [];
+  return {
+    calls,
+    query: async (text, values) => {
+      calls.push({ text, values });
+      if (text.includes('WHERE permid = $1')) return { rows: REFERENCE_ROWS.filter((r) => r.permid === values[0]) };
+      if (text.includes('permid = ANY')) {
+        const wanted = new Set(values[0]);
+        return { rows: REFERENCE_ROWS.filter((r) => wanted.has(r.permid)) };
+      }
+      return { rows: REFERENCE_ROWS };
+    },
+  };
+}
+
+test('reference single read is the stored payload with permid, in one query', async (t) => {
+  const pg = referencesPg();
+  const app = build({ pg });
+  t.after(() => app.close());
+
+  const { data } = (await app.inject({ method: 'GET', url: '/api/v1/references/ref-1' })).json();
+  assertReferenceContract(data);
+  assert.deepEqual(data, { permid: 'ref-1', ...REFERENCE_ROWS[0].payload });
+
+  // The source declares no codecs and no child tables: no lookup, no child query.
+  assert.equal(pg.calls.length, 1);
+  assert.match(pg.calls[0].text, /^SELECT permid, "reference" AS payload FROM "refs" WHERE permid = \$1/);
+});
+
+test('reference list honours the contract: titled, untitled, two publication types', async (t) => {
+  const pg = referencesPg();
+  const app = build({ pg });
+  t.after(() => app.close());
+
+  const { data } = (await app.inject({ method: 'GET', url: '/api/v1/references' })).json();
+  assertReferenceContract(data);
+  assert.deepEqual(data.map((d) => [d.permid, d.publicationType, 'title' in d]), [
+    ['ref-1', 'journal article', true],
+    ['ref-2', 'journal article', false],
+    ['ref-3', 'standalone book', true],
+  ]);
+  assert.equal(pg.calls.length, 1, 'a page is one query');
+});
+
+test('reference multi-entity read honours the contract', async (t) => {
+  const app = build({ pg: referencesPg() });
+  t.after(() => app.close());
+
+  const { data } = (await app.inject({ method: 'GET', url: '/api/v1/references?ids=ref-2,ref-3' })).json();
+  assertReferenceContract(data);
+  assert.deepEqual(data.map((d) => d.permid).sort(), ['ref-2', 'ref-3']);
+});
+
+test('reference stub read honours the contract (no DB configured)', async (t) => {
+  const app = build();
+  t.after(() => app.close());
+
+  const { data } = (await app.inject({ method: 'GET', url: '/api/v1/references/ref-x' })).json();
+  assertReferenceContract(data);
+  assert.equal(data.publicationYear, '2026');
+  assert.equal('year' in data, false);
+  assertReferenceContract((await app.inject({ method: 'GET', url: '/api/v1/references' })).json().data);
 });

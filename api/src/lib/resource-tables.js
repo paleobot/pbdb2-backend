@@ -48,6 +48,7 @@
 
 import { authoritySource } from '../../../payloadSchemas/authority.schema.js';
 import { collectionSource } from '../../../payloadSchemas/collection.schema.js';
+import { referenceSource } from '../../../payloadSchemas/reference.schema.js';
 
 /**
  * Link targets: what a link declaration's `target` resolves to.
@@ -121,6 +122,7 @@ export const RESOURCE_DESCRIPTORS = {
   references: {
     table: 'refs',
     jsonbColumn: 'reference',
+    source: referenceSource,
     filters: { publication_type: { jsonPath: 'publicationType', op: 'eq' } },
   },
   authorities: {

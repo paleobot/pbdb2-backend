@@ -2,8 +2,9 @@
 
 **Status:** Design A chosen (2026-10-06, §6). It is built for authorities
 (`authority-reads-from-payload-schemas`) and collections (`collection-reads-from-payload-schemas`,
-2026-10-08, which added arrays of links, child rows and coordinates). Schemas and the rest follow in
-later changes.
+2026-10-08, which added arrays of links, child rows and coordinates), and references
+(`reference-reads-from-payload-schemas`, 2026-10-12; no links, so the response is unchanged and
+now contract-tested). Schemas and specimens follow in later changes.
 **Audience:** PBDB2 backend contributors
 **Subject:** How the API starts using `payloadSchemas/`, and where linked-resource conveniences
 (`title`, `href`) belong in a GET response
@@ -47,7 +48,7 @@ child tables, and only `merge()` puts them back. The API never calls it:
 The first two are bugs. The last two are the shape question this document is about.
 
 Since then: authority `reference` and collection coordinates and references come back through
-`merge()` (status line above). Collections keep `primaryReference` + `additionalReferences`; see §4.
+`merge()` (status line above), and so do references themselves. Collections keep `primaryReference` + `additionalReferences`; see §4.
 
 ### Why reads come first
 
