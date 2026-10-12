@@ -11,9 +11,7 @@ derived output rather than hand-entered data.
 This capability also governs what a request may carry: the multi-entity `ids`
 read, per-entity field filters, the pagination parameters, and the rule that an
 unrecognized query parameter is rejected rather than ignored.
-
 ## Requirements
-
 ### Requirement: Resource route groups
 
 The system SHALL provide route groups for `references`, `authorities`,
@@ -279,8 +277,17 @@ resource's JSONB payload. The `references` group SHALL support a
 filters SHALL compose with the multi-entity `ids` read and with one another,
 narrowing the same set of current, non-removed heads (logical AND).
 
-A field-filter value that matches no current head SHALL yield an empty result
-with HTTP 200 — field filters are pure filters and SHALL NOT produce the
+When the field a filter matches is a property of the resource's payload source
+that declares an `enum`, the filter's legal values SHALL be exactly that enum, and
+a value outside it SHALL be rejected with HTTP 400 in the standard error shape.
+The error message SHALL name the parameter and list the legal values in enum
+order. The comparison is exact, after trimming surrounding whitespace. The
+`references` `publication_type` filter takes its legal values from the reference
+source's `publicationType` enum. A filter whose field has no such enum accepts any
+non-empty value.
+
+A legal field-filter value that matches no current head SHALL yield an empty
+result with HTTP 200 — field filters are pure filters and SHALL NOT produce the
 `meta.missing` accounting reserved for the `ids` set semantics. A field-filter
 parameter that is present with an empty value SHALL be rejected with HTTP 400.
 
@@ -311,7 +318,7 @@ signal is withheld rather than overloaded.
 
 #### Scenario: Field filter with no match
 
-- **WHEN** a client sends `?publication_type=` with a value no current head has
+- **WHEN** a client sends `?publication_type=` with a legal value no current head has
 - **THEN** the system responds with HTTP 200 and an empty `data` array
 - **AND** no `meta.missing` accounting is produced
 
@@ -319,6 +326,26 @@ signal is withheld rather than overloaded.
 
 - **WHEN** a client sends `?publication_type=` with no value
 - **THEN** the system responds with HTTP 400 in the standard error shape
+
+#### Scenario: Field-filter value outside the enum is a 400
+
+- **WHEN** a client sends `?publication_type=book`, which is not one of the
+  reference source's publication types
+- **THEN** the system responds with HTTP 400 in the standard error shape
+- **AND** the message names `publication_type` and lists the legal values,
+  including `standalone book`
+
+#### Scenario: Enum check applies to the ids read
+
+- **WHEN** a client sends `?ids=` together with a `publication_type` value outside
+  the enum
+- **THEN** the system responds with HTTP 400, as it would on a plain list
+
+#### Scenario: Legal values come from the source
+
+- **WHEN** the `references` repository is built
+- **THEN** its `publication_type` filter's legal values equal
+  `referenceSource.properties.publicationType.enum`, in order
 
 ### Requirement: List endpoints accept pagination parameters
 
@@ -379,10 +406,12 @@ response indistinguishable from a correct one — a misspelled filter returns an
 unfiltered list that reads as "everything matched", and a misspelled expansion
 returns an unexpanded record that reads as "there was nothing to expand".
 
-Field-filter *values* remain opaque strings with no enum validation: a well-formed
-value matching no stored value SHALL still yield an empty result rather than an
-error. That leniency is unchanged and remains provisional pending integration of
-the `pbdb2-dev` JSON Schemas, which would supply the value enums.
+The same reasoning applies to field-filter *values*. A value outside the legal
+values that the resource's payload source declares for that field SHALL be
+rejected with HTTP 400 (see "Per-entity field filters"), because an empty result
+for a value that cannot exist reads as "nothing matched". Where the source
+declares no enum for the field, values remain opaque: a well-formed value that
+matches no stored value SHALL yield an empty result rather than an error.
 
 #### Scenario: Unknown query parameter is rejected
 
@@ -402,9 +431,10 @@ the `pbdb2-dev` JSON Schemas, which would supply the value enums.
   declares
 - **THEN** the request is not rejected for that parameter
 
-#### Scenario: Opaque filter value is still not validated against an enum
+#### Scenario: A legal filter value matching nothing is not an error
 
-- **WHEN** a client sends a declared field-filter value that is well-formed but
-  matches no stored value
+- **WHEN** a client sends a declared field-filter value that is legal for its
+  field but matches no stored value
 - **THEN** the system responds with HTTP 200 and an empty `data` array, not an
-  enum-validation error
+  error
+

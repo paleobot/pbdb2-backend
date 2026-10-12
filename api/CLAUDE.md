@@ -103,9 +103,11 @@ docs/                   design notes (e.g. response-envelope rationale)
   `{ permid, ...payload }` plus descriptor `links`, `taxa` has its own
   repository, and `specimens` is a stub (see `api/docs/response-contracts.md`).
 - **Strict query params:** an unrecognized query parameter is a **400** naming it,
-  on single reads as well as lists. Filter *values* stay opaque (a well-formed
-  value matching nothing is an empty 200). A resource declares what it accepts
-  via its descriptor's `filters` and `expansions`.
+  on single reads as well as lists. A filter *value* outside its field's enum in
+  the payload source is also a 400 listing the legal values (the repository
+  attaches them as `values`); a legal value matching nothing is an empty 200,
+  and a field with no enum keeps opaque values. A resource declares what it
+  accepts via its descriptor's `filters` and `expansions`.
 - **Tests:** `node:test` + `node:assert` driven through `app.inject()`. No
   test-runner dependency. Vitest is the agreed fallback if watch/coverage
   ergonomics later justify it.

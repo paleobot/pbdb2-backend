@@ -39,9 +39,9 @@ function fakeRefsPg(table) {
 }
 
 const REFS = {
-  'ref-1': { title: 'A', publicationType: 'book' },
+  'ref-1': { title: 'A', publicationType: 'standalone book' },
   'ref-2': { title: 'B', publicationType: 'journal article' },
-  'ref-3': { title: 'C', publicationType: 'book' },
+  'ref-3': { title: 'C', publicationType: 'standalone book' },
 };
 
 test('references filtered by publication_type returns only matching heads', async (t) => {
@@ -49,7 +49,7 @@ test('references filtered by publication_type returns only matching heads', asyn
   const app = build({ pg });
   t.after(() => app.close());
 
-  const res = await app.inject({ method: 'GET', url: '/api/v1/references?publication_type=book' });
+  const res = await app.inject({ method: 'GET', url: '/api/v1/references?publication_type=standalone%20book' });
   assert.equal(res.statusCode, 200);
 
   const body = res.json();
@@ -62,7 +62,7 @@ test('references filtered by publication_type returns only matching heads', asyn
   const q = pg.calls.find((c) => /->>'publicationType' = \$1/.test(c.text));
   assert.ok(q, 'a publicationType-bound query ran');
   assert.match(q.text, /succeeded_by_id IS NULL/);
-  assert.deepEqual(q.values, ['book', DEFAULT_LIMIT + 1]);
+  assert.deepEqual(q.values, ['standalone book', DEFAULT_LIMIT + 1]);
 });
 
 test('field filter composes with ids in a single WHERE', async (t) => {
@@ -70,11 +70,11 @@ test('field filter composes with ids in a single WHERE', async (t) => {
   const app = build({ pg });
   t.after(() => app.close());
 
-  // ref-1 (book, in ids) matches; ref-2 (journal, in ids) filtered out;
-  // ref-3 (book, not in ids) excluded.
+  // ref-1 (standalone book, in ids) matches; ref-2 (journal, in ids) filtered
+  // out; ref-3 (standalone book, not in ids) excluded.
   const res = await app.inject({
     method: 'GET',
-    url: '/api/v1/references?ids=ref-1,ref-2&publication_type=book',
+    url: '/api/v1/references?ids=ref-1,ref-2&publication_type=standalone%20book',
   });
   assert.equal(res.statusCode, 200);
 
@@ -93,17 +93,18 @@ test('field filter composes with ids in a single WHERE', async (t) => {
   assert.ok(q, 'a composed query ran');
   assert.match(q.text, /permid = ANY\(\$1\)/);
   assert.match(q.text, /->>'publicationType' = \$2/);
-  assert.deepEqual(q.values, [['ref-1', 'ref-2'], 'book', DEFAULT_LIMIT + 1]);
+  assert.deepEqual(q.values, [['ref-1', 'ref-2'], 'standalone book', DEFAULT_LIMIT + 1]);
 });
 
-test('field filter with no match is an empty 200 with no missing accounting', async (t) => {
+test('a legal field-filter value with no match is an empty 200 with no missing accounting', async (t) => {
   const pg = fakeRefsPg(REFS);
   const app = build({ pg });
   t.after(() => app.close());
 
+  // `unpublished` is a publication type, but no fixture has it.
   const res = await app.inject({
     method: 'GET',
-    url: '/api/v1/references?publication_type=guidebook',
+    url: '/api/v1/references?publication_type=unpublished',
   });
   assert.equal(res.statusCode, 200);
 
@@ -111,6 +112,35 @@ test('field filter with no match is an empty 200 with no missing accounting', as
   assert.deepEqual(body.data, []);
   assert.equal(body.meta.found, 0);
   assert.equal(body.meta.missing, undefined, 'field filters produce no missing accounting');
+});
+
+test('a field-filter value outside the source enum is a 400 listing the legal values', async (t) => {
+  const pg = fakeRefsPg(REFS);
+  const app = build({ pg });
+  t.after(() => app.close());
+
+  // `book` is not a publication type (`standalone book` is), so it could match
+  // no stored reference: an empty 200 would read as "no books".
+  const res = await app.inject({ method: 'GET', url: '/api/v1/references?publication_type=book' });
+  assert.equal(res.statusCode, 400);
+  const { error } = res.json();
+  assert.equal(error.statusCode, 400);
+  assert.match(error.message, /`publication_type` must be one of: /);
+  assert.match(error.message, /standalone book/);
+  assert.equal(pg.calls.length, 0, 'rejected before any query');
+});
+
+test('the enum check applies to an ids read too', async (t) => {
+  const pg = fakeRefsPg(REFS);
+  const app = build({ pg });
+  t.after(() => app.close());
+
+  const res = await app.inject({
+    method: 'GET',
+    url: '/api/v1/references?ids=ref-1,ref-2&publication_type=book',
+  });
+  assert.equal(res.statusCode, 400);
+  assert.match(res.json().error.message, /`publication_type` must be one of: /);
 });
 
 test('empty publication_type value is a 400', async (t) => {

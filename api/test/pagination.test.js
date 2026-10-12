@@ -17,7 +17,7 @@ import { encodeCursor } from '../src/lib/cursor.js';
  */
 const REFS = Array.from({ length: 12 }, (_, i) => ({
   permid: `ref-${String(i + 1).padStart(2, '0')}`,
-  payload: { title: `Reference ${i + 1}`, publicationType: i % 2 === 0 ? 'book' : 'journal article' },
+  payload: { title: `Reference ${i + 1}`, publicationType: i % 2 === 0 ? 'standalone book' : 'journal article' },
 }));
 
 /**
@@ -191,21 +191,23 @@ test('pagination composes with a field filter, and next preserves it', async (t)
   t.after(() => app.close());
 
   const body = (
-    await app.inject({ method: 'GET', url: '/api/v1/references?publication_type=book&limit=3' })
+    await app.inject({ method: 'GET', url: '/api/v1/references?publication_type=standalone%20book&limit=3' })
   ).json();
   assert.deepEqual(permids(body), ['ref-01', 'ref-03', 'ref-05'], 'only matching heads');
-  assert.match(body.links.next, /publication_type=book/, 'the filter survives into next');
+  // URLSearchParams writes the space as '+'; the loop below follows it, so the
+  // server must read it back as 'standalone book'.
+  assert.match(body.links.next, /publication_type=standalone\+book/, 'the filter survives into next');
   assert.match(body.links.next, /limit=3/, 'so does the page size');
 
   // Paging through yields exactly the filtered set.
   const seen = [];
-  let url = '/api/v1/references?publication_type=book&limit=3';
+  let url = '/api/v1/references?publication_type=standalone%20book&limit=3';
   while (url) {
     const page = (await app.inject({ method: 'GET', url })).json();
     seen.push(...permids(page));
     url = page.links.next;
   }
-  assert.deepEqual(seen, REFS.filter((r) => r.payload.publicationType === 'book').map((r) => r.permid));
+  assert.deepEqual(seen, REFS.filter((r) => r.payload.publicationType === 'standalone book').map((r) => r.permid));
 });
 
 test('malformed limit and cursor are rejected with 400', async (t) => {

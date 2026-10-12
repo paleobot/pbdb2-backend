@@ -43,8 +43,9 @@ export const MAX_LIMIT = 1000;
  * Field filters (per-entity, from `filterDefs`):
  * - a declared param present with a value → narrows by that JSONB field
  * - present with an empty value → 400 (mirrors the `ids` rule)
- * - values are opaque strings — NO enum validation (provisional; an
- *   enum-bearing JSON Schema will later be able to reject out-of-enum values)
+ * - a filter whose definition carries `values` (its field's enum in the
+ *   payload source) → any other value is a 400 listing the legal ones, since
+ *   it cannot match a stored row; without `values`, values are opaque strings
  * - unrecognized params are REJECTED with a 400 naming them (see
  *   `rejectUnknownParams` for why this is strict rather than lenient)
  *
@@ -69,8 +70,9 @@ export const MAX_LIMIT = 1000;
  * @param {Record<string, unknown>} query  `request.query`
  * @param {import('fastify').FastifyInstance['httpErrors']} httpErrors
  *   `fastify.httpErrors` (from @fastify/sensible)
- * @param {Record<string, { jsonPath: string, op: string }>} [filterDefs]
- *   the resource's declared field filters (its `define` stage)
+ * @param {Record<string, { jsonPath: string, op: string, values?: string[] }>} [filterDefs]
+ *   the resource's declared field filters (its `define` stage), with the legal
+ *   values the repository attached from the source
  * @param {Record<string, { type: 'boolean' }>} [expansionDefs]
  *   the resource's declared expansion parameters
  * @returns {{ ids?: string[], fields?: Record<string, string>,
@@ -108,14 +110,18 @@ export function collectListFilters(query, httpErrors, filterDefs = {}, expansion
     filters.ids = ids;
   }
 
-  // Per-entity field filters: only params this resource declares are recognized;
-  // everything else falls through untouched (lenient — see provisional note).
+  // Per-entity field filters: only params this resource declares are recognized
+  // (rejectUnknownParams above), and a value outside a filter's legal values is
+  // rejected rather than left to match nothing.
   const fields = {};
-  for (const param of Object.keys(filterDefs)) {
+  for (const [param, def] of Object.entries(filterDefs)) {
     if (param in query) {
       const value = String(query[param]).trim();
       if (value === '') {
         throw httpErrors.badRequest(`\`${param}\` must have a value`);
+      }
+      if (def.values && !def.values.includes(value)) {
+        throw httpErrors.badRequest(`\`${param}\` must be one of: ${def.values.join(', ')}`);
       }
       fields[param] = value;
     }
