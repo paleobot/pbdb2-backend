@@ -6,9 +6,12 @@ import { makeReadRepository } from '../../src/lib/repository.js';
 import { authoritySource } from '../../../payloadSchemas/authority.schema.js';
 import { collectionSource } from '../../../payloadSchemas/collection.schema.js';
 import { referenceSource } from '../../../payloadSchemas/reference.schema.js';
+import { schemaSource } from '../../../payloadSchemas/schema.schema.js';
+import { characterSource } from '../../../payloadSchemas/character.schema.js';
+import { stateSource } from '../../../payloadSchemas/state.schema.js';
 import { deriveVariant } from '../../../payloadSchemas/lib/variants.js';
 import { createAjv } from '../../../payloadSchemas/lib/ajv.js';
-import { readSchemaTree } from '../../src/lib/schema-tree.js';
+import { readSchemaCharacters } from '../../src/lib/schema-tree.js';
 import { descriptorFor } from '../../src/lib/resource-tables.js';
 import {
   setupTestDb,
@@ -40,8 +43,7 @@ after(async () => {
   if (ctx.teardown) await ctx.teardown();
 });
 
-const refsRepo = () =>
-  makeReadRepository({ pg: ctx.pool, table: 'refs', jsonbColumn: 'reference' });
+const refsRepo = () => makeReadRepository({ pg: ctx.pool, ...descriptorFor('references') });
 
 // The authority response contract (data-access): every authority read is
 // checked against it.
@@ -62,9 +64,54 @@ function assertReferenceContract(record) {
   assert.equal(validateReferenceOut(record), true, JSON.stringify(validateReferenceOut.errors));
 }
 
+// The schema response contract. A single read carries a characters tree the
+// schema out variant does not declare, so it is checked in parts: the record
+// without `characters`, each character without its children, each state
+// without its own (data-access, "Responses ... validate against its out variant").
+const validateSchemaOut = createAjv().compile(deriveVariant(schemaSource, 'out'));
+const validateCharacterOut = createAjv().compile(deriveVariant(characterSource, 'out'));
+const validateStateOut = createAjv().compile(deriveVariant(stateSource, 'out'));
+const without = (obj, keys) => Object.fromEntries(Object.entries(obj).filter(([k]) => !keys.includes(k)));
+function assertValid(validate, record) {
+  assert.equal(validate(record), true, `${record.permid}: ${JSON.stringify(validate.errors)}`);
+}
+function assertSchemaContract(record) {
+  assertValid(validateSchemaOut, record);
+}
+function assertSchemaTreeContract(data) {
+  assertValid(validateSchemaOut, without(data, ['characters']));
+  const states = (list) => list.forEach((st) => { assertValid(validateStateOut, without(st, ['states'])); states(st.states); });
+  const characters = (list) => list.forEach((c) => {
+    assertValid(validateCharacterOut, without(c, ['characters', 'states']));
+    characters(c.characters);
+    states(c.states);
+  });
+  characters(data.characters);
+}
+
 // Enrichment repos use the production descriptors (table, jsonbColumn, references).
 const authoritiesRepo = () => makeReadRepository({ pg: ctx.pool, ...descriptorFor('authorities') });
 const collectionsRepo = () => makeReadRepository({ pg: ctx.pool, ...descriptorFor('collections') });
+const schemasRepo = () => makeReadRepository({ pg: ctx.pool, ...descriptorFor('schemas') });
+
+// Source-valid schema, character and state rows, as the PBot migration writes them.
+const schemaPayload = (title) => ({ legacyIDs: { pbotID: `p-${title}` }, title, year: '2023' });
+async function insertCharacter(pool, { permid = newPermid(), schemaId = null, characterId = null, character, sortOrder }) {
+  const { rows: [row] } = await pool.query(
+    `INSERT INTO characters (permid, authorizer_person_id, enterer_person_id, parent_schema_id, parent_character_id, character, sort_order)
+     VALUES ($1, $2, $2, $3, $4, $5::jsonb, $6) RETURNING id, permid`,
+    [permid, personId, schemaId, characterId, JSON.stringify(character), sortOrder],
+  );
+  return row;
+}
+async function insertState(pool, { permid = newPermid(), characterId = null, stateId = null, state, quantitative = false, sortOrder }) {
+  const { rows: [row] } = await pool.query(
+    `INSERT INTO states (permid, authorizer_person_id, enterer_person_id, parent_character_id, parent_state_id, state, quantitative, sort_order)
+     VALUES ($1, $2, $2, $3, $4, $5::jsonb, $6, $7) RETURNING id, permid`,
+    [permid, personId, characterId, stateId, JSON.stringify(state), quantitative, sortOrder],
+  );
+  return row;
+}
 
 test('readHead returns the current head and excludes superseded versions', async (t) => {
   if (!ctx.available) return t.skip(ctx.reason);
@@ -113,53 +160,80 @@ test('list returns one record per non-removed lineage head', async (t) => {
   assert.equal(all.find((r) => r.permid === live1).title, 'L1 v2');
 });
 
-test('schema tree assembles current versions, keyed by permid', async (t) => {
+test('schema read: merged head, a repeated primary, and a merged tree of current versions', async (t) => {
   if (!ctx.available) return t.skip(ctx.reason);
 
-  const schemaPermid = newPermid();
-  const charPermid = newPermid();
-  const statePermid = newPermid();
-
-  const ref = await insertRef(ctx.pool, {
-    permid: newPermid(),
-    personId,
-    reference: { title: 'Backing ref' },
+  const ref = await insertRef(ctx.pool, { permid: newPermid(), personId, reference: { title: 'Backing ref' } });
+  const schema = await insertSchema(ctx.pool, {
+    permid: newPermid(), personId, schema: schemaPayload('Leaf architecture'), referenceId: ref.id,
   });
+  // The one localhost child row repeats its schema's primary; so does this one.
+  await insertAdditionalSchemaRef(ctx.pool, { schemaId: schema.id, referenceId: ref.id, personId });
 
-  const { rows: [schema] } = await ctx.pool.query(
-    `INSERT INTO schemas (permid, authorizer_person_id, enterer_person_id, schema, reference_id)
-     VALUES ($1, $2, $2, $3::jsonb, $4) RETURNING id`,
-    [schemaPermid, personId, JSON.stringify({ title: 'Leaf architecture' }), ref.id],
-  );
+  const leaf = await insertCharacter(ctx.pool, { schemaId: schema.id, character: { name: 'Leaf', definition: 'The lamina' }, sortOrder: 1 });
+  const margin = await insertCharacter(ctx.pool, { characterId: leaf.id, character: { name: 'Margin' }, sortOrder: 1 });
+  const length = await insertState(ctx.pool, { characterId: margin.id, state: { name: 'Length' }, quantitative: true, sortOrder: 2 });
+  const toothed = await insertState(ctx.pool, { characterId: margin.id, state: { name: 'Toothed' }, sortOrder: 1 });
+  const serrate = await insertState(ctx.pool, { stateId: toothed.id, state: { name: 'Serrate' }, sortOrder: 1 });
+  // A superseded character version stays out of the tree.
+  await insertCharacter(ctx.pool, { permid: margin.permid, characterId: leaf.id, character: { name: 'Margin v2' }, sortOrder: 1 });
 
-  const { rows: [char] } = await ctx.pool.query(
-    `INSERT INTO characters (permid, authorizer_person_id, enterer_person_id, parent_schema_id, character, sort_order)
-     VALUES ($1, $2, $2, $3, $4::jsonb, $5) RETURNING id`,
-    [charPermid, personId, schema.id, JSON.stringify({ name: 'Margin' }), 1],
-  );
+  const app = build({ pg: ctx.pool });
+  t.after(() => app.close());
 
-  await ctx.pool.query(
-    `INSERT INTO states (permid, authorizer_person_id, enterer_person_id, parent_character_id, state, sort_order)
-     VALUES ($1, $2, $2, $3, $4::jsonb, $5)`,
-    [statePermid, personId, char.id, JSON.stringify({ name: 'Entire' }), 1],
-  );
+  const { data } = (await app.inject({ method: 'GET', url: `/api/v1/schemas/${schema.permid}` })).json();
+  assertSchemaTreeContract(data);
+  const link = { title: 'Backing ref', permid: ref.permid, href: `/api/v1/references/${ref.permid}` };
+  assert.deepEqual(data.primaryReference, link);
+  assert.deepEqual(data.additionalReferences, [link], 'the primary repeats as stored');
 
-  const tree = await readSchemaTree(ctx.pool, schemaPermid);
-  assert.equal(tree.permid, schemaPermid);
-  assert.equal(tree.title, 'Leaf architecture');
-  assert.equal(tree.characters.length, 1);
-  assert.equal(tree.characters[0].permid, charPermid);
-  assert.equal(tree.characters[0].name, 'Margin');
-  assert.equal(tree.characters[0].states[0].permid, statePermid);
-  assert.equal(tree.characters[0].states[0].name, 'Entire');
+  assert.equal(data.characters.length, 1);
+  const [leafNode] = data.characters;
+  assert.deepEqual(without(leafNode, ['characters', 'states']), { permid: leaf.permid, name: 'Leaf', definition: 'The lamina' });
+  const [marginNode] = leafNode.characters;
+  assert.equal(marginNode.name, 'Margin v2', 'the current version of a re-versioned character');
+  assert.equal(marginNode.permid, margin.permid);
+  assert.deepEqual(marginNode.states.map((s) => [s.permid, s.quantitative]), [[toothed.permid, false], [length.permid, true]]);
+  assert.deepEqual(marginNode.states[0].states, [{ permid: serrate.permid, name: 'Serrate', quantitative: false, states: [] }]);
 
-  // No internal serial id leaked into the tree.
-  assert.ok(!('id' in tree.characters[0]));
+  // The head is the list item, and the list honours the contract whole.
+  const list = (await app.inject({ method: 'GET', url: `/api/v1/schemas?ids=${schema.permid}` })).json().data;
+  assert.equal(list.length, 1);
+  assertSchemaContract(list[0]);
+  assert.deepEqual(without(data, ['characters']), list[0]);
+  const page = (await app.inject({ method: 'GET', url: '/api/v1/schemas?limit=100' })).json().data;
+  for (const item of page.filter((s) => s.permid === schema.permid)) assertSchemaContract(item);
 });
 
-test('schema tree returns null for an unknown permid', async (t) => {
+test('schema read of an unknown permid is a 404, and it has no characters', async (t) => {
   if (!ctx.available) return t.skip(ctx.reason);
-  assert.equal(await readSchemaTree(ctx.pool, newPermid()), null);
+  const app = build({ pg: ctx.pool });
+  t.after(() => app.close());
+  const missing = newPermid();
+  assert.equal((await app.inject({ method: 'GET', url: `/api/v1/schemas/${missing}` })).statusCode, 404);
+  assert.deepEqual(await readSchemaCharacters(ctx.pool, missing), []);
+});
+
+test('re-versioned schema keeps its tree and child rows (FKs swung to the new head)', async (t) => {
+  if (!ctx.available) return t.skip(ctx.reason);
+
+  const primary = await insertRef(ctx.pool, { permid: newPermid(), personId, reference: { title: 'P' } });
+  const add = await insertRef(ctx.pool, { permid: newPermid(), personId, reference: {} });
+  const v1 = await insertSchema(ctx.pool, { permid: newPermid(), personId, schema: schemaPayload('v1'), referenceId: primary.id });
+  await insertAdditionalSchemaRef(ctx.pool, { schemaId: v1.id, referenceId: add.id, personId });
+  const char = await insertCharacter(ctx.pool, { schemaId: v1.id, character: { name: 'Margin' }, sortOrder: 1 });
+
+  // New version: characters.parent_schema_id and additional_schema_refs.schema_id
+  // are swung to the new head.
+  await insertSchema(ctx.pool, { permid: v1.permid, personId, schema: schemaPayload('v2'), referenceId: primary.id });
+
+  const app = build({ pg: ctx.pool });
+  t.after(() => app.close());
+  const { data } = (await app.inject({ method: 'GET', url: `/api/v1/schemas/${v1.permid}` })).json();
+  assertSchemaTreeContract(data);
+  assert.equal(data.title, 'v2', 'reads the new head');
+  assert.deepEqual(data.additionalReferences, [{ permid: add.permid, href: `/api/v1/references/${add.permid}` }], 'an untitled reference has no title key');
+  assert.deepEqual(data.characters.map((c) => c.permid), [char.permid]);
 });
 
 // --- Reference enrichment -------------------------------------------------
@@ -338,26 +412,30 @@ test('collection with no additional references yields an empty array', async (t)
   assert.equal(head.location, undefined, 'no location column and none in the jsonb');
 });
 
-test('schema tree embeds primary and additional references', async (t) => {
+test('schema head embeds primary and additional references; removed ones are suppressed', async (t) => {
   if (!ctx.available) return t.skip(ctx.reason);
 
   const primaryPermid = newPermid();
   const add1Permid = newPermid();
-  const schemaPermid = newPermid();
-
   const primary = await insertRef(ctx.pool, { permid: primaryPermid, personId, reference: { title: 'Schema primary' } });
   const add1 = await insertRef(ctx.pool, { permid: add1Permid, personId, reference: { title: 'Schema add 1' } });
-  const schema = await insertSchema(ctx.pool, {
-    permid: schemaPermid,
-    personId,
-    schema: { title: 'Leaf architecture' },
-    referenceId: primary.id,
-  });
-  await insertAdditionalSchemaRef(ctx.pool, { schemaId: schema.id, referenceId: add1.id, personId });
+  const gone = await insertRef(ctx.pool, { permid: newPermid(), personId, reference: { title: 'Gone' }, removed: true });
 
-  const tree = await readSchemaTree(ctx.pool, schemaPermid);
-  assert.deepEqual(tree.primaryReference, { title: 'Schema primary', permid: primaryPermid });
-  assert.deepEqual(tree.additionalReferences, [{ title: 'Schema add 1', permid: add1Permid }]);
+  const live = await insertSchema(ctx.pool, { permid: newPermid(), personId, schema: schemaPayload('Live'), referenceId: primary.id });
+  await insertAdditionalSchemaRef(ctx.pool, { schemaId: live.id, referenceId: add1.id, personId });
+  await insertAdditionalSchemaRef(ctx.pool, { schemaId: live.id, referenceId: gone.id, personId });
+  const orphaned = await insertSchema(ctx.pool, { permid: newPermid(), personId, schema: schemaPayload('Orphaned'), referenceId: gone.id });
+
+  const head = await schemasRepo().readHead(live.permid);
+  assertSchemaContract(head);
+  assert.deepEqual(head.primaryReference, { title: 'Schema primary', permid: primaryPermid });
+  assert.deepEqual(head.additionalReferences, [{ title: 'Schema add 1', permid: add1Permid }], 'a removed additional reference is omitted');
+  for (const leaked of ['id', 'reference_id', 'references']) assert.equal(leaked in head, false);
+
+  const removedPrimary = await schemasRepo().readHead(orphaned.permid);
+  assertSchemaContract(removedPrimary);
+  assert.equal(removedPrimary.primaryReference, null);
+  assert.deepEqual(removedPrimary.additionalReferences, [], 'no child rows');
 });
 
 test('edited reference is reflected on re-read; permid is stable (FK swing tracks head)', async (t) => {

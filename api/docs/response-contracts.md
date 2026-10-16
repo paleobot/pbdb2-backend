@@ -4,7 +4,9 @@
 (`authority-reads-from-payload-schemas`) and collections (`collection-reads-from-payload-schemas`,
 2026-10-08, which added arrays of links, child rows and coordinates), and references
 (`reference-reads-from-payload-schemas`, 2026-10-12; no links, so the response is unchanged and
-now contract-tested). Schemas and specimens follow in later changes.
+now contract-tested), and schemas (`schema-reads-from-payload-schemas`, 2026-10-16, which took the
+collection reference shape and merges the character/state tree through its sources). Specimens
+follow in a later change.
 **Audience:** PBDB2 backend contributors
 **Subject:** How the API starts using `payloadSchemas/`, and where linked-resource conveniences
 (`title`, `href`) belong in a GET response
@@ -47,8 +49,11 @@ child tables, and only `merge()` puts them back. The API never calls it:
 
 The first two are bugs. The last two are the shape question this document is about.
 
-Since then: authority `reference` and collection coordinates and references come back through
-`merge()` (status line above), and so do references themselves. Collections keep `primaryReference` + `additionalReferences`; see §4.
+Since then: authority `reference`, collection coordinates and references, and schema references
+come back through `merge()` (status line above), and so do references themselves. State
+`quantitative` comes back too: the schema tree merges each state through its source (2026-10-16).
+Collections and schemas keep `primaryReference` + `additionalReferences`; see §4. `toResource` was
+deleted on 2026-10-16, when schemas, its last caller, moved to `merge()`.
 
 ### Why reads come first
 
@@ -159,7 +164,7 @@ out:      title, href: { ..., readOnly: true }           ← href: { type: strin
 
 ## 4. Field shapes
 
-In the sources, the schema `references[]` items (and the collection's, until 2026-10-08; see below) are already objects
+In the sources, the schema and collection `references[]` items (until 2026-10-16 and 2026-10-08; see below) were already objects
 (`{ permid, order }`, after the rename below). Under A, `title` and `href` go beside them and the create body is
 unchanged. The exceptions are scalar links:
 
@@ -177,7 +182,14 @@ authority's `reference` (and `null` when removed), and `additionalReferences`, a
 whose `items` are links (`x-link` on `items`; a removed item is omitted, not `null`). The response
 keeps the field names the API already used. Most collections repeat the primary among their
 additional references, because Classic's `secondary_refs` lists it there, and it is returned as
-stored. Schemas still use `references[]` with derived orders.
+stored.
+
+**Schemas (2026-10-16).** `schema-reads-from-payload-schemas` gives the schema source the same two
+properties, on `schemas.reference_id` and `additional_schema_refs`, through the same codecs, and
+deletes `referenceList`. Schemas are now the fourth resource on design A. The one
+`additional_schema_refs` row on localhost repeats its schema's primary, and is returned as stored.
+The committee's answer on the reference model applies to collections and schemas alike, as one
+edit.
 
 Naming (decided 2026-10-06): a link object names the target's id **`permid`**. The sources had
 called it `referenceID` (in `references[]` items, since the hand-written `collections.schema.js`),

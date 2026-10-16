@@ -282,7 +282,13 @@ other resources still read as described above.
 **Update 2026-10-08:** `collection-reads-from-payload-schemas` does the same for collections. Their
 source adopted the API's shape: `primaryReference` and an unordered `additionalReferences` replace
 `references[]`, pending "Collection reference model" below. GET also returns coordinates now.
-Schemas still read through descriptor links over a `references[]` source.
+
+**Update 2026-10-16:** `schema-reads-from-payload-schemas` does the same for schemas: the schema
+source takes the collection's `primaryReference` and `additionalReferences` (`referenceList` is
+deleted), every schema GET is `merge()` output, and each character and state in the tree is merged
+through its own source, so states now carry `quantitative`. Every version-chained resource now reads
+this way; only `taxa` keeps descriptor links. Whether `out` describes the schema's characters tree is
+still open (the single read is contract-tested in parts).
 
 The API is about 2,000 lines. Its transport layer (envelope, pagination, discovery, filters,
 405 handling; about 950 lines, specified and tested) doesn't depend on payload shape. About
@@ -510,8 +516,10 @@ primary usually repeated. The answer decides what comes next:
 - **Order not wanted:** keep `reference_id` as the primary, and change the migration to stop
   copying it into `additional_collection_refs` (about 242k fewer rows). The two fields stay.
 
-Schemas (`additional_schema_refs`, still `references[]` with derived orders) should follow the same
-answer.
+Schemas have had the collection shape since 2026-10-16 (`schema-reads-from-payload-schemas`):
+`primaryReference` from `schemas.reference_id`, and an unordered `additionalReferences` from
+`additional_schema_refs`, whose one localhost row repeats its schema's primary. The answer therefore
+applies to collections and schemas alike, as the same edit to both; for schemas it touches 8 rows.
 
 **Write path, either way:**
 - Does a PATCH that rewrites the references keep a removed reference that GET omitted?

@@ -17,9 +17,7 @@ On the citing side: `authorities` carry a single `reference`; `collections` and
 `schemas` carry a `primaryReference` and an `additionalReferences` array; `taxa`
 carry an `authority` and a self-referential `accepted`. `specimens` follows the
 same primary + additional pattern once it has a backing table.
-
 ## Requirements
-
 ### Requirement: Links are declared per resource against a link-target registry
 
 Relationship enrichment SHALL be declared in one of two ways:
@@ -28,11 +26,13 @@ Relationship enrichment SHALL be declared in one of two ways:
   with it, for a resource that reads through its source (`data-access`). The codec
   named by the property's `x-storage` resolves the link, and the label is read from
   the codec's source.
-- **As data on the resource's descriptor**, for every other resource: a map of
-  output field name to a link declaration naming the **target route group**, the
-  column carrying the foreign key, and — for many-to-many links — the join table
-  and join key. The system SHALL resolve a target route group through a registry
-  supplying that group's backing table, its label source, and the label's name.
+- **As data on the resource's descriptor**, for a resource with no payload source
+  (today only `taxa`): a map of output field name to a link declaration naming the
+  **target route group** and the column carrying the foreign key. A descriptor link
+  SHALL be single-valued; there is no join-table form. A multi-valued link is
+  declared in a payload source, as an array whose `items` are links. The system
+  SHALL resolve a target route group through a registry supplying that group's
+  backing table, its label source, and the label's name.
 
 Either way, the target's route-group name SHALL be the single identifier used to
 derive the `href` base. For descriptor links it also selects the SQL source, so the
@@ -85,6 +85,12 @@ enrichment applied.
 - **WHEN** a resource whose descriptor declares no links is read
 - **THEN** its `data` carries no enrichment fields and the read is otherwise
   unchanged
+
+#### Scenario: A descriptor link has no join-table form
+
+- **WHEN** the descriptor link declarations are inspected
+- **THEN** none names a `joinTable` or `joinKey`, and the link projection builds
+  no join-table sub-select
 
 ### Requirement: A link target's label may be a plain column
 
@@ -153,7 +159,7 @@ value) or whose `items` carry it (adding `href` to each item of the array).
 
 #### Scenario: The persistence layer emits no href for any link
 
-- **WHEN** the read repository or the schema-tree read produces any link object
+- **WHEN** the read repository or the taxa repository produces any link object
 - **THEN** it yields the label and `permid` without an `href`
 - **AND** the `href` is added only at the route/envelope boundary
 
@@ -209,14 +215,11 @@ include a `primaryReference` field resolved from the main table's
 additional-references child table (`additional_collection_refs` keyed by
 `collection_id`; `additional_schema_refs` keyed by `schema_id`).
 
-How they are declared differs between the two:
-- **Collections** declare them in the collection payload source.
-  `primaryReference` is `link({ target: "references", label: "title" })`,
-  resolved by `referencePermid`. `additionalReferences` is an array of those
-  links, resolved by `referenceLinks`. Collections SHALL declare no descriptor
-  `links`.
-- **Schemas** declare them as id-keyed descriptor links targeting the
-  `references` route group.
+Both declare them the same way, in their payload sources. `primaryReference` is
+`link({ target: "references", label: "title" })`, resolved by `referencePermid`.
+`additionalReferences` is an array of those links, resolved by `referenceLinks`.
+Neither collections nor schemas SHALL declare descriptor `links`. The two SHALL
+stay alike: the answer on the reference model applies to both.
 
 For both, `primaryReference` SHALL be an object `{ title, permid, href }` of the
 same shape as an authority's `reference`, or `null` when the primary reference is
@@ -227,7 +230,8 @@ references omitted, and it SHALL be `[]` when there are none.
 `additionalReferences` SHALL be unordered, and SHALL carry one object per stored
 child row. A row citing the primary reference SHALL be returned like any other,
 so the primary usually appears in both fields: Classic's `secondary_refs`, which
-the child table copies, lists it there. Whether that changes awaits the
+`additional_collection_refs` copies, lists it there, and the one
+`additional_schema_refs` row on localhost repeats its schema's primary too. Whether that changes awaits the
 collection reference model (`docs/api-design-backlog.md`).
 
 #### Scenario: Collection read includes primary and additional references
@@ -249,8 +253,8 @@ collection reference model (`docs/api-design-backlog.md`).
 - **WHEN** a schema with a primary reference and additional references is read by
   `permid`
 - **THEN** `data.primaryReference` and `data.additionalReferences` are present
-  with the same shapes
-- **AND** the schema's nested characters and states are unchanged
+  with the same shapes as on a collection, each item carrying `href`
+- **AND** the schema's nested characters and states are present
 
 #### Scenario: No additional references yields an empty array
 
@@ -265,6 +269,11 @@ collection reference model (`docs/api-design-backlog.md`).
 - **THEN** the soft-removed primary resolves to `null`
 - **AND** soft-removed additional references are omitted from
   `data.additionalReferences`
+
+#### Scenario: Untitled schema reference
+
+- **WHEN** a schema's primary reference has no title
+- **THEN** `data.primaryReference` is `{ permid, href }`, with no `title` key
 
 ### Requirement: Enriched references are embedded in data with a navigable href
 
@@ -286,7 +295,7 @@ at a suppressed resource.
 
 #### Scenario: Persistence layer is HTTP-agnostic
 
-- **WHEN** the read repository or schema-tree read produces a reference
+- **WHEN** the read repository produces a reference
 - **THEN** it yields `{ title, permid }` without an `href`
 - **AND** the `href` is added only at the route/envelope boundary
 
@@ -319,8 +328,10 @@ The stubbed `authorities`, `collections`, and `schemas` responses SHALL include
 the same reference fields (`reference`, or `primaryReference` +
 `additionalReferences`) when no PostgreSQL connection is configured and reads
 fall back to stub data, so the response shape is identical whether or not a
-database is present. The `authorities` and `collections` stubs SHALL be payloads
-in their sources' shapes, carrying only fields their sources declare.
+database is present. The `authorities`, `collections` and `schemas` stubs SHALL be
+payloads in their sources' shapes, carrying only fields their sources declare. The
+schema single-read stub's character and state nodes SHALL likewise be in the
+character and state sources' shapes.
 
 #### Scenario: Stub authority carries a reference field
 
@@ -340,3 +351,11 @@ in their sources' shapes, carrying only fields their sources declare.
 - **THEN** the stub `data` carries its country and state under
   `location.toponym.administrativeArea`, not as top-level `country` and `state`
 - **AND** it carries no field the collection source does not declare
+
+#### Scenario: Stub schema follows its source
+
+- **WHEN** schemas are read with no database configured
+- **THEN** the stub `data` carries no field the schema source does not declare,
+  apart from the single read's `characters` tree
+- **AND** its state node carries `quantitative`
+

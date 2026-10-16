@@ -5,11 +5,14 @@ import { build } from '../src/app.js';
 import { authoritySource } from '../../payloadSchemas/authority.schema.js';
 import { collectionSource } from '../../payloadSchemas/collection.schema.js';
 import { referenceSource } from '../../payloadSchemas/reference.schema.js';
+import { schemaSource } from '../../payloadSchemas/schema.schema.js';
+import { characterSource } from '../../payloadSchemas/character.schema.js';
+import { stateSource } from '../../payloadSchemas/state.schema.js';
 import { deriveVariant } from '../../payloadSchemas/lib/variants.js';
 import { createAjv } from '../../payloadSchemas/lib/ajv.js';
 
 /**
- * Reads through a payload source (authorities, collections, references), driven with a fake
+ * Reads through a payload source (authorities, collections, references, schemas), driven with a fake
  * postgres client. Every response's `data` is checked against the resource's
  * `out` variant: that schema is the response contract, so a field it does not
  * declare is a failure here (data-access, "Responses of a resource with a
@@ -379,4 +382,195 @@ test('reference stub read honours the contract (no DB configured)', async (t) =>
   assert.equal(data.publicationYear, '2026');
   assert.equal('year' in data, false);
   assertReferenceContract((await app.inject({ method: 'GET', url: '/api/v1/references' })).json().data);
+});
+
+// ---------- schemas ----------
+
+const validateSchemaOut = createAjv().compile(deriveVariant(schemaSource, 'out'));
+const validateCharacterOut = createAjv().compile(deriveVariant(characterSource, 'out'));
+const validateStateOut = createAjv().compile(deriveVariant(stateSource, 'out'));
+
+const without = (obj, keys) => Object.fromEntries(Object.entries(obj).filter(([k]) => !keys.includes(k)));
+const assertValid = (validate, item) => assert.equal(validate(item), true, `${item.permid}: ${JSON.stringify(validate.errors)}`);
+
+function assertSchemaContract(data) {
+  for (const item of Array.isArray(data) ? data : [data]) assertValid(validateSchemaOut, item);
+}
+
+// A single read carries a characters tree the schema out variant does not
+// declare, so it is checked in parts (data-access, D7): the record without
+// `characters`, each character without its children, each state without its own.
+function assertSchemaTreeContract(data) {
+  assertValid(validateSchemaOut, without(data, ['characters']));
+  const states = (list) => {
+    for (const st of list) {
+      assertValid(validateStateOut, without(st, ['states']));
+      states(st.states);
+    }
+  };
+  const characters = (list) => {
+    for (const c of list) {
+      assertValid(validateCharacterOut, without(c, ['characters', 'states']));
+      characters(c.characters);
+      states(c.states);
+    }
+  };
+  characters(data.characters);
+}
+
+const schemaPayload = (title) => ({
+  legacyIDs: { pbotID: `p-${title}` },
+  title,
+  year: '2023',
+  authors: [{ order: 1, givenName: 'Claire', familyName: 'Cleveland' }],
+  partsPreserved: ['leaf'],
+});
+// Three schema heads (ids and reference_id as strings, as node-postgres returns
+// bigints), sharing REFS_ROWS with the authorities above:
+//   sch-1: primary ref 7, repeated among its child rows beside untitled ref 9
+//   sch-2: an untitled primary (ref 9); no child rows
+//   sch-3: a removed primary (ref 12), and a removed child row beside ref 7
+const SCHEMA_ROWS = [
+  { id: '4', permid: 'sch-1', payload: schemaPayload('Alpha'), reference_id: '7' },
+  { id: '5', permid: 'sch-2', payload: schemaPayload('Beta'), reference_id: '9' },
+  { id: '6', permid: 'sch-3', payload: schemaPayload('Gamma'), reference_id: '12' },
+];
+const SCHEMA_CHILD_ROWS = [
+  { parent: '4', id: '2', reference_id: '9' },
+  { parent: '4', id: '1', reference_id: '7' },
+  { parent: '6', id: '3', reference_id: '7' },
+  { parent: '6', id: '4', reference_id: '12' },
+];
+// The tree under sch-1, as the recursive query returns it: a character under a
+// character, a state under a state, and a quantitative state.
+const SCHEMA_TREE_ROW = {
+  characters: [
+    { id: 1, permid: 'chr-1', payload: { legacyIDs: { pbotID: 'c1' }, name: 'Leaf', definition: 'The lamina' }, sortOrder: 1, parentCharacterId: null },
+    { id: 2, permid: 'chr-2', payload: { name: 'Margin' }, sortOrder: 1, parentCharacterId: 1 },
+  ],
+  states: [
+    { id: 10, permid: 'stt-1', payload: { name: 'Toothed' }, quantitative: false, sortOrder: 1, parentCharacterId: 2, parentStateId: null },
+    { id: 11, permid: 'stt-2', payload: { name: 'Length' }, quantitative: true, sortOrder: 2, parentCharacterId: 2, parentStateId: null },
+    { id: 12, permid: 'stt-3', payload: { name: 'Serrate' }, quantitative: false, sortOrder: 1, parentCharacterId: null, parentStateId: 10 },
+  ],
+};
+
+function schemasPg() {
+  const calls = [];
+  return {
+    calls,
+    query: async (text, values) => {
+      calls.push({ text, values });
+      if (text.includes('WITH RECURSIVE')) return { rows: [values[0] === 'sch-1' ? SCHEMA_TREE_ROW : { characters: [], states: [] }] };
+      if (text.includes('FROM "refs"')) {
+        const ids = new Set(values[0]);
+        return { rows: REFS_ROWS.filter((r) => ids.has(r.k)) };
+      }
+      if (text.includes('FROM "additional_schema_refs"')) {
+        const parents = new Set(values[0]);
+        return { rows: SCHEMA_CHILD_ROWS.filter((r) => parents.has(r.parent)) };
+      }
+      if (text.includes('WHERE permid = $1')) return { rows: SCHEMA_ROWS.filter((r) => r.permid === values[0]) };
+      if (text.includes('permid = ANY')) {
+        const wanted = new Set(values[0]);
+        return { rows: SCHEMA_ROWS.filter((r) => wanted.has(r.permid)) };
+      }
+      return { rows: SCHEMA_ROWS };
+    },
+  };
+}
+
+test('schema list: a repeated primary, no child rows, an untitled and removed references; three queries', async (t) => {
+  const pg = schemasPg();
+  const app = build({ pg });
+  t.after(() => app.close());
+
+  const { data } = (await app.inject({ method: 'GET', url: '/api/v1/schemas' })).json();
+  assertSchemaContract(data);
+  const [alpha, beta, gamma] = data;
+  assert.deepEqual(alpha.primaryReference, ref('ref-7', 'Fossil leaves'));
+  assert.deepEqual(alpha.additionalReferences, [ref('ref-7', 'Fossil leaves'), ref('ref-9')], 'the primary repeats, by row id');
+  assert.deepEqual(beta.primaryReference, ref('ref-9'), 'an untitled primary has no title key');
+  assert.deepEqual(beta.additionalReferences, [], 'no child rows');
+  assert.equal(gamma.primaryReference, null, 'a removed primary');
+  assert.deepEqual(gamma.additionalReferences, [ref('ref-7', 'Fossil leaves')], 'a removed child row is omitted');
+  for (const item of data) {
+    for (const leaked of ['id', 'reference_id', 'references', 'characters']) assert.equal(leaked in item, false, `${leaked} is absent`);
+  }
+
+  // A page costs three queries: heads, their child rows, the refs they cite.
+  const [head, children, refs] = pg.calls;
+  assert.match(head.text, /^SELECT permid, "schema" AS payload, id, "reference_id" FROM "schemas"/);
+  assert.equal(children.text, 'SELECT "schema_id" AS parent, "id", "reference_id" FROM "additional_schema_refs" WHERE "schema_id" = ANY($1) ORDER BY id');
+  assert.deepEqual([...children.values[0]].sort(), ['4', '5', '6']);
+  assert.deepEqual([...refs.values[0]].sort(), ['12', '7', '9']);
+  assert.equal(pg.calls.length, 3);
+});
+
+test('schema multi-entity read honours the contract', async (t) => {
+  const app = build({ pg: schemasPg() });
+  t.after(() => app.close());
+
+  const { data } = (await app.inject({ method: 'GET', url: '/api/v1/schemas?ids=sch-2,sch-3' })).json();
+  assertSchemaContract(data);
+  assert.deepEqual(data.map((d) => d.permid).sort(), ['sch-2', 'sch-3']);
+});
+
+test('schema single read: the list item plus a merged tree, honouring the contract in parts', async (t) => {
+  const pg = schemasPg();
+  const app = build({ pg });
+  t.after(() => app.close());
+
+  const { data } = (await app.inject({ method: 'GET', url: '/api/v1/schemas/sch-1' })).json();
+  assertSchemaTreeContract(data);
+  const [item] = (await app.inject({ method: 'GET', url: '/api/v1/schemas?ids=sch-1' })).json().data;
+  assert.deepEqual(without(data, ['characters']), item, 'the head is the list item');
+
+  assert.deepEqual(data.characters, [
+    {
+      permid: 'chr-1',
+      legacyIDs: { pbotID: 'c1' },
+      name: 'Leaf',
+      definition: 'The lamina',
+      characters: [
+        {
+          permid: 'chr-2',
+          name: 'Margin',
+          characters: [],
+          states: [
+            {
+              permid: 'stt-1',
+              name: 'Toothed',
+              quantitative: false,
+              states: [{ permid: 'stt-3', name: 'Serrate', quantitative: false, states: [] }],
+            },
+            { permid: 'stt-2', name: 'Length', quantitative: true, states: [] },
+          ],
+        },
+      ],
+      states: [],
+    },
+  ]);
+});
+
+test('schema single read of an empty tree, and of a missing schema', async (t) => {
+  const pg = schemasPg();
+  const app = build({ pg });
+  t.after(() => app.close());
+
+  const { data } = (await app.inject({ method: 'GET', url: '/api/v1/schemas/sch-3' })).json();
+  assertSchemaTreeContract(data);
+  assert.equal(data.primaryReference, null);
+  assert.deepEqual(data.characters, []);
+  assert.equal((await app.inject({ method: 'GET', url: '/api/v1/schemas/sch-none' })).statusCode, 404);
+});
+
+test('schema stub reads honour the contract (no DB configured)', async (t) => {
+  const app = build();
+  t.after(() => app.close());
+
+  const { data } = (await app.inject({ method: 'GET', url: '/api/v1/schemas/sch-x' })).json();
+  assertSchemaTreeContract(data);
+  assert.equal(data.characters[0].states[0].quantitative, false);
+  assertSchemaContract((await app.inject({ method: 'GET', url: '/api/v1/schemas' })).json().data);
 });

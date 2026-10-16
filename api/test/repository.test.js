@@ -96,28 +96,31 @@ test('reads expose only permid + payload — no internal ids or chain columns le
   }
 });
 
-test('schemas single read assembles the tree and strips internal linkage', async (t) => {
-  const pg = fakePg(() => ({
-    rows: [
-      {
-        permid: 'sch-1',
-        payload: { title: 'Leaf architecture' },
-        characters: [
-          { id: 1, permid: 'chr-1', payload: { name: 'Margin' }, sortOrder: 1, parentCharacterId: null },
-        ],
-        states: [
-          {
-            id: 10,
-            permid: 'stt-1',
-            payload: { name: 'Entire' },
-            sortOrder: 1,
-            parentCharacterId: 1,
-            parentStateId: null,
-          },
-        ],
-      },
-    ],
-  }));
+// A schema head as the source path selects it (id and reference_id are bigints,
+// so strings), one child row repeating its primary, and the tree query's row:
+// a character holding a quantitative state and a qualitative one.
+const SCHEMA_HEAD = { id: '4', permid: 'sch-1', payload: { title: 'Leaf architecture', year: '2023' }, reference_id: '7' };
+const SCHEMA_TREE_ROW = {
+  characters: [
+    { id: 1, permid: 'chr-1', payload: { name: 'Margin' }, sortOrder: 1, parentCharacterId: null },
+  ],
+  states: [
+    { id: 11, permid: 'stt-2', payload: { name: 'Length' }, quantitative: true, sortOrder: 2, parentCharacterId: 1, parentStateId: null },
+    { id: 10, permid: 'stt-1', payload: { name: 'Entire' }, quantitative: false, sortOrder: 1, parentCharacterId: 1, parentStateId: null },
+  ],
+};
+
+function schemasPg() {
+  return fakePg((text, values) => {
+    if (text.includes('WITH RECURSIVE')) return { rows: values[0] === 'sch-1' ? [SCHEMA_TREE_ROW] : [] };
+    if (text.includes('FROM "additional_schema_refs"')) return { rows: [{ parent: '4', id: '1', reference_id: '7' }] };
+    if (text.includes('FROM "refs"')) return { rows: [{ k: '7', v: 'ref-7', l0: 'Primary', removed: false }] };
+    return { rows: [SCHEMA_HEAD].filter((r) => r.permid === values[0]) };
+  });
+}
+
+test('schemas single read: the repository head, then the tree, each node merged', async (t) => {
+  const pg = schemasPg();
   const app = build({ pg });
   t.after(() => app.close());
 
@@ -132,15 +135,26 @@ test('schemas single read assembles the tree and strips internal linkage', async
   const char = data.characters[0];
   assert.equal(char.permid, 'chr-1');
   assert.equal(char.name, 'Margin');
-  assert.equal(char.states[0].permid, 'stt-1');
-  assert.equal(char.states[0].name, 'Entire');
+  assert.deepEqual(char.states.map((s) => [s.permid, s.quantitative]), [['stt-1', false], ['stt-2', true]]);
 
-  // Internal linkage/sort fields are stripped from the output tree.
-  for (const node of [char, char.states[0]]) {
-    for (const forbidden of ['id', '_sortOrder', '_parentCharacterId', '_parentStateId', 'sortOrder']) {
-      assert.ok(!(forbidden in node), `${forbidden} must not be exposed`);
-    }
+  // Heads, their child rows, the refs they cite, then the tree: no link columns.
+  const [head, children, refs, tree] = pg.calls;
+  assert.match(head.text, /^SELECT permid, "schema" AS payload, id, "reference_id" FROM "schemas" WHERE permid = \$1/);
+  assert.match(children.text, /FROM "additional_schema_refs" WHERE "schema_id" = ANY\(\$1\)/);
+  assert.match(refs.text, /FROM "refs"/);
+  assert.match(tree.text, /WITH RECURSIVE/);
+  assert.equal(pg.calls.length, 4);
+  for (const leaked of ['reference_id', 'json_build_object(\'title\'', 'additional_schema_refs']) {
+    assert.equal(tree.text.includes(leaked), false, `the tree query selects no ${leaked}`);
   }
+
+  // No node carries a storage internal.
+  const internals = ['id', 'reference_id', 'parent_schema_id', 'parent_character_id', 'parent_state_id', 'sort_order',
+    'sortOrder', 'parentCharacterId', 'parentStateId'];
+  for (const node of [data, char, ...char.states]) {
+    for (const forbidden of internals) assert.ok(!(forbidden in node), `${forbidden} must not be exposed`);
+  }
+  assert.equal('quantitative' in char, false, 'a character has no quantitative');
 });
 
 test('schemas single read with no head returns a structured 404', async (t) => {
@@ -151,6 +165,7 @@ test('schemas single read with no head returns a structured 404', async (t) => {
   const res = await app.inject({ method: 'GET', url: '/api/v1/schemas/missing' });
   assert.equal(res.statusCode, 404);
   assert.equal(res.json().error.statusCode, 404);
+  assert.equal(pg.calls.length, 1, 'the head read answers it; no tree query runs');
 });
 
 test('specimens read stays stubbed and never touches the database', async (t) => {
@@ -165,82 +180,26 @@ test('specimens read stays stubbed and never touches the database', async (t) =>
   assert.equal(pg.calls.length, 0, 'no query should have run for specimens');
 });
 
-const collectionLinks = {
-  primaryReference: { target: 'references', on: 'id', via: 'reference_id' },
-  additionalReferences: {
-    target: 'references',
-    on: 'id',
-    via: 'reference_id',
-    joinTable: 'additional_collection_refs',
-    joinKey: 'collection_id',
-  },
-};
-
-test('repository builds link projections and merges them by their output field name', async () => {
-  const pg = fakePg(() => ({
-    rows: [
-      {
-        permid: 'col-1',
-        payload: { name: 'Alpha' },
-        primaryReference: { title: 'Primary', permid: 'ref-9' },
-        additionalReferences: [{ title: 'Add', permid: 'ref-10' }],
-      },
-    ],
-  }));
-  const repo = makeReadRepository({
-    pg,
-    table: 'collections',
-    jsonbColumn: 'collection',
-    links: collectionLinks,
+test('a repository without a payload source is refused, naming its table', () => {
+  const pg = fakePg(() => {
+    throw new Error('no query may run');
   });
-
-  const rec = await repo.readHead('col-1');
-  assert.equal(rec.name, 'Alpha');
-  assert.deepEqual(rec.primaryReference, { title: 'Primary', permid: 'ref-9' });
-  assert.deepEqual(rec.additionalReferences, [{ title: 'Add', permid: 'ref-10' }]);
-
-  // The projection SQL: a primary scalar sub-select + an additional json_agg,
-  // both suppressing removed refs, over the join table.
-  const q = pg.calls[0].text;
-  assert.match(q, /json_build_object\('title', r\.reference->>'title', 'permid', r\.permid\)/);
-  assert.match(q, /FROM refs r WHERE r\.id = "collections"\."reference_id"/);
-  assert.match(q, /json_agg/);
-  assert.match(q, /"additional_collection_refs" j JOIN refs r/);
-  assert.match(q, /j\."collection_id" = "collections"\.id/);
-  assert.match(q, /NOT COALESCE\(r\.removed, false\)/);
-});
-
-test('repository without a links config emits no projections and merges nothing extra', async () => {
-  const pg = fakePg(() => ({ rows: [{ permid: 'ref-1', payload: { title: 'T' } }] }));
-  const repo = makeReadRepository({ pg, table: 'refs', jsonbColumn: 'reference' });
-
-  const rec = await repo.readHead('ref-1');
-  assert.deepEqual(Object.keys(rec).sort(), ['permid', 'title']);
-  assert.doesNotMatch(pg.calls[0].text, /json_build_object/);
+  assert.throws(
+    () => makeReadRepository({ pg, table: 'collections', jsonbColumn: 'collection' }),
+    /Resource table 'collections' has no payload source/,
+  );
+  assert.equal(pg.calls.length, 0);
 });
 
 test('enriched single read carries href hydrated from the route prefix', async (t) => {
-  // Schemas still declare descriptor links; collections' links are covered in
-  // test/source-reads.test.js.
-  const pg = fakePg(() => ({
-    rows: [
-      {
-        permid: 'sch-1',
-        payload: { title: 'Leaf architecture' },
-        primaryReference: { title: 'Primary', permid: 'ref-9' },
-        additionalReferences: [{ title: 'Add', permid: 'ref-10' }],
-        characters: [],
-        states: [],
-      },
-    ],
-  }));
-  const app = build({ pg });
+  // Collections' links are covered in test/source-reads.test.js.
+  const app = build({ pg: schemasPg() });
   t.after(() => app.close());
 
   const res = await app.inject({ method: 'GET', url: '/api/v1/schemas/sch-1' });
   const { data } = res.json();
-  assert.equal(data.primaryReference.href, '/api/v1/references/ref-9');
-  assert.equal(data.additionalReferences[0].href, '/api/v1/references/ref-10');
+  assert.deepEqual(data.primaryReference, { permid: 'ref-7', title: 'Primary', href: '/api/v1/references/ref-7' });
+  assert.deepEqual(data.additionalReferences, [{ permid: 'ref-7', title: 'Primary', href: '/api/v1/references/ref-7' }]);
 });
 
 test('stub reads expose the enriched reference shape with href (no DB configured)', async (t) => {
@@ -256,8 +215,11 @@ test('stub reads expose the enriched reference shape with href (no DB configured
   assert.deepEqual(collection.additionalReferences, []);
 
   const schema = (await app.inject({ method: 'GET', url: '/api/v1/schemas/sch-x' })).json().data;
-  assert.equal(schema.primaryReference.href, '/api/v1/references/ref-00000000');
+  assert.deepEqual(schema.primaryReference, {
+    permid: 'ref-00000000', title: 'Stub reference', href: '/api/v1/references/ref-00000000',
+  });
   assert.deepEqual(schema.additionalReferences, []);
+  assert.equal(schema.characters[0].states[0].quantitative, false);
 });
 
 test('a filter on a source enum carries that enum as its legal values', () => {
@@ -269,11 +231,8 @@ test('a filter on a source enum carries that enum as its legal values', () => {
   });
 });
 
-test('filters with no source, or on a field with no enum, are exposed as declared', () => {
+test('a filter on a field with no enum is exposed as declared', () => {
   const pg = fakePg(() => ({ rows: [] }));
-  const declared = { publication_type: { jsonPath: 'publicationType', op: 'eq' } };
-  assert.deepEqual(makeReadRepository({ pg, table: 'refs', jsonbColumn: 'reference', filters: declared }).filters, declared);
-
   const onTitle = { title: { jsonPath: 'title', op: 'eq' } };
   const repo = makeReadRepository({ pg, table: 'refs', jsonbColumn: 'reference', filters: onTitle, source: referenceSource });
   assert.deepEqual(repo.filters, onTitle);

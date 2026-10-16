@@ -1,4 +1,4 @@
-import { hydrateLinkHrefs, hydrateSourceLinks } from './link-hydration.js';
+import { hydrateSourceLinks } from './link-hydration.js';
 import { collectListFilters, rejectUnknownQuery } from './list-filters.js';
 import { pageLinks } from './cursor.js';
 
@@ -29,28 +29,26 @@ import { pageLinks } from './cursor.js';
  * @param {{ readHead: (permid: string) => Promise<object|null>, readHeads: (criteria?: object) => Promise<{ records: object[], hasMore: boolean }>, filters?: object }} [opts.repository]
  *   read repository; when omitted, reads use `stub`. `repository.filters` (when
  *   present) declares the field-filter query params this resource accepts.
- * @param {Record<string, import('./resource-tables.js').LinkDeclaration>} [opts.links]
- *   link enrichment config; when present, resolved links get an `href`
  * @param {object} [opts.source]  annotated payload source; when present, its
- *   x-link properties get an `href` instead of `links`
+ *   x-link properties and items get an `href`
  * @param {Record<string, { type: 'boolean' }>} [opts.expansions]
  *   declared expansion params this resource's list accepts
  * @param {boolean} [opts.readOnly]  expose GET only; write verbs answer 405
  * @param {(record: object) => object} [opts.hydrate]
- *   override the default link hydration, for a group with extra hydration of
- *   its own (the taxa containing chain)
+ *   override the default link hydration, for a group with no payload source
+ *   (taxa, whose descriptor links and containing chain hydrate themselves)
  */
 export function registerCrudRoutes(
   fastify,
-  { type, stub, repository, links, source, expansions, readOnly = false, hydrate: customHydrate },
+  { type, stub, repository, source, expansions, readOnly = false, hydrate: customHydrate },
 ) {
   const write = { preHandler: fastify.authenticate };
   // Each link's href base is derived from this group's mounted prefix and the
-  // link's own target group, not hard-coded. A group with extra hydration of its
-  // own (the taxa chain) supplies `hydrate` instead.
+  // link's own target group, not hard-coded. A group with no source and no
+  // `hydrate` of its own (specimens, a stub) has no links to hydrate.
   const hydrate = customHydrate ?? (source
     ? (record) => hydrateSourceLinks(record, source, fastify.prefix)
-    : (record) => hydrateLinkHrefs(record, links, fastify.prefix));
+    : (record) => record);
 
   fastify.get('/', listReadHandler(fastify, { type, stub, repository, hydrate, expansions }));
 

@@ -48,7 +48,6 @@ export default async function taxa(fastify) {
     type: TYPE,
     readOnly: true,
     repository,
-    links: descriptor.links,
     expansions: descriptor.expansions,
     hydrate,
     // Reached only when no database is configured: the shared handlers fall back

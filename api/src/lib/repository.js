@@ -8,17 +8,19 @@
  * that is not soft-removed. The version/lineage logic itself lives in the
  * database (plpgsql triggers), so the app side stays this thin.
  *
- * One engine serves every uniform resource, parameterized by table + JSONB
- * column from the descriptor map — mirroring the route factory in
- * crud-routes.js. `schemas` is the exception (see schema-tree.js).
+ * One engine serves every version-chained resource, parameterized by the
+ * descriptor map — mirroring the route factory in crud-routes.js. A schema's
+ * single read adds its character/state tree to the head read here (see
+ * schema-tree.js).
  *
- * A resource whose descriptor names a payload `source` is read through the
- * shared payload code instead: the head query also selects `id` and the columns
- * the source's x-storage names (through a codec's select expression where it
- * has one), the descriptor's `children` are read for the page's head ids, and
- * each record is `merge()`d with one codec context per read (see
- * sourceRecords). Its links come from the source's x-link properties and items,
- * not from `links`.
+ * Every resource it reads names a payload `source`, and is read through the
+ * shared payload code: the head query selects `permid`, the payload, `id` when
+ * there are child rows to find, and the columns the source's x-storage names
+ * (through a codec's select expression where it has one); the descriptor's
+ * `children` are read for the page's head ids; and each record is `merge()`d
+ * with one codec context per read (see sourceRecords). Links come from the
+ * source's x-link properties and items. Descriptor `links` are for `taxa`
+ * alone, which has its own repository and uses linkProjections from here.
  */
 
 import {
@@ -55,12 +57,11 @@ function literal(value) {
 
 /**
  * A name that was a SQL literal before link targets became data: the target's
- * table and payload column, and a join table's FK column. They are interpolated
- * unquoted so the generated SQL is unchanged from the hand-written form they
- * replace; since they now come from the descriptor/registry rather than the
- * template, the shape check is what keeps that safe. Names that were already
- * interpolated (`via` on the citing table, `joinTable`, `joinKey`, the output
- * field) keep their {@link ident} quoting.
+ * table, payload column and label column. They are interpolated unquoted so the
+ * generated SQL is unchanged from the hand-written form they replace; since they
+ * now come from the descriptor/registry rather than the template, the shape
+ * check is what keeps that safe. Names that were already interpolated (`via` on
+ * the citing table, the output field) keep their {@link ident} quoting.
  *
  * @param {string} name
  */
@@ -106,16 +107,15 @@ function labelObject(target, group) {
 /**
  * Build the SELECT-list expressions that resolve a resource's declared links
  * into embedded `{ <label>, permid }` objects, from the descriptor's `links`
- * config. The target route group supplies the table and the label source (see
+ * config (today only `taxa`'s; see taxa-repository.js). Each link is
+ * single-valued: a multi-valued link belongs in a payload source. The target route group supplies the table and the label source (see
  * LINK_TARGETS); the declaration supplies the FK column and whether it holds
  * the target's serial id or its `permid`. The persistence layer stays
  * HTTP-agnostic: `href` is NOT built here — it is hydrated at the route
  * boundary (see link-hydration.js).
  *
  * Soft-removed targets are suppressed in SQL (`NOT COALESCE(r.removed, false)`):
- * a removed single-valued target yields `NULL`, removed join-table rows drop out
- * of the aggregate — so the array count is always correct and no dangling link
- * can form. The label is read from the target's declared source (JSONB key or
+ * a removed target yields `NULL`, so no dangling link can form. The label is read from the target's declared source (JSONB key or
  * plain column); `permid` is the lineage id. Because the backend swing trigger
  * keeps id-keyed FKs pointed at the current head, reading straight off the
  * target row yields the current label + stable permid.
@@ -127,8 +127,8 @@ function labelObject(target, group) {
  * exemption. Taxa's OWN read applies no such predicate; see taxa-repository.js.
  *
  * @param {Record<string, import('./resource-tables.js').LinkDeclaration>} [links]
- * @param {string} qualifier  SQL qualifier for the citing row (a quoted table
- *   name for the generic select, or a CTE alias like `ts` for the schema tree)
+ * @param {string} qualifier  SQL qualifier for the citing row (e.g. the `t`
+ *   alias in taxa-repository.js)
  * @returns {string[]} aliased SELECT-list expressions (empty when no links)
  */
 export function linkProjections(links, qualifier) {
@@ -145,41 +145,14 @@ export function linkProjections(links, qualifier) {
     // matches its permid directly, needing no id→permid translation.
     const matchOn = link.on === 'permid' ? 'permid' : 'id';
 
-    if (link.joinTable) {
-      exprs.push(
-        `(SELECT COALESCE(json_agg(${object}), '[]'::json) ` +
-          `FROM ${ident(link.joinTable)} j JOIN ${from} r ON r.${matchOn} = j.${bareIdent(link.via)} ` +
-          `WHERE j.${ident(link.joinKey)} = ${qualifier}.id ` +
-          `AND NOT COALESCE(r.removed, false)) AS ${ident(as)}`,
-      );
-    } else {
-      exprs.push(
-        `(SELECT ${object} ` +
-          `FROM ${from} r WHERE r.${matchOn} = ${qualifier}.${ident(link.via)} ` +
-          `AND NOT COALESCE(r.removed, false)) AS ${ident(as)}`,
-      );
-    }
+    exprs.push(
+      `(SELECT ${object} ` +
+        `FROM ${from} r WHERE r.${matchOn} = ${qualifier}.${ident(link.via)} ` +
+        `AND NOT COALESCE(r.removed, false)) AS ${ident(as)}`,
+    );
   }
 
   return exprs;
-}
-
-/**
- * Shape a DB row into the public resource: the `permid` plus the JSONB payload,
- * plus any resolved link projections (merged in under their output field name).
- * Only fields named by the `links` config are merged, and only when present on
- * the row — so a `null` single-valued link is kept (removed → null) while a
- * column absent from a test fake is skipped. Internal serial ids and
- * version-chain columns are NEVER selected, so they cannot leak.
- */
-function toResource(row, links) {
-  const result = { permid: row.permid, ...row.payload };
-  if (links) {
-    for (const as of Object.keys(links)) {
-      if (as in row) result[as] = row[as];
-    }
-  }
-  return result;
 }
 
 /**
@@ -256,14 +229,13 @@ function sourceRecords(pg, source, children) {
  * Give each declared filter the legal values its field has in the payload
  * source: `values` is the source property's `enum` when it has a literal one.
  * The route seam rejects any other value with a 400, since it cannot match a
- * stored row. A filter on a field with no enum (or a resource with no source)
- * is returned as declared, and its values stay opaque.
+ * stored row. A filter on a field with no enum is returned as declared, and
+ * its values stay opaque.
  *
  * @param {Record<string, { jsonPath: string, op: string }>} filters
- * @param {object} [source]
+ * @param {object} source
  */
 function withLegalValues(filters, source) {
-  if (!source) return filters;
   return Object.fromEntries(Object.entries(filters).map(([param, def]) => {
     const values = source.properties?.[def.jsonPath]?.enum;
     return [param, Array.isArray(values) ? { ...def, values: [...values] } : def];
@@ -276,28 +248,25 @@ function withLegalValues(filters, source) {
  *   a @fastify/postgres client (or a compatible fake in tests)
  * @param {string} args.table        backing table name (from the descriptor)
  * @param {string} args.jsonbColumn  JSONB payload column (from the descriptor)
- * @param {object} [args.source]     annotated payload source; reads go through merge()
- * @param {{ table: string, fk: string }[]} [args.children]  child tables merge reads, for a source
+ * @param {object} args.source      annotated payload source; reads go through merge()
+ * @param {{ table: string, fk: string }[]} [args.children]  child tables merge reads
  */
-export function makeReadRepository({ pg, table, jsonbColumn, links, filters = {}, source, children = [] }) {
+export function makeReadRepository({ pg, table, jsonbColumn, filters = {}, source, children = [] }) {
+  if (!source) {
+    throw new Error(`Resource table '${table}' has no payload source; the generic repository reads only through one`);
+  }
   const from = ident(table);
   const payload = ident(jsonbColumn);
-  // Link sub-selects correlate to the citing row via the quoted table name
-  // (the outer select is unaliased), keeping the head-select skeleton unchanged.
-  // A source-backed read selects each storage column in the form its codec's
-  // merge expects (aliased when that is an expression), and `id` when it has
-  // child rows to find; merge never emits either.
-  const extraCols = source
-    ? [
-      ...(children.length ? ['id'] : []),
-      ...storageSelects(source).filter(({ column }) => column !== 'permid')
-        .map(({ column, expression }) => (expression === ident(column) ? expression : `${expression} AS ${ident(column)}`)),
-    ]
-    : linkProjections(links, from);
+  // Each storage column is selected in the form its codec's merge expects
+  // (aliased when that is an expression), and `id` when there are child rows
+  // to find; merge never emits either.
+  const extraCols = [
+    ...(children.length ? ['id'] : []),
+    ...storageSelects(source).filter(({ column }) => column !== 'permid')
+      .map(({ column, expression }) => (expression === ident(column) ? expression : `${expression} AS ${ident(column)}`)),
+  ];
   const select = `SELECT permid, ${payload} AS payload${extraCols.map((c) => `, ${c}`).join('')} FROM ${from}`;
-  const toRecords = source
-    ? sourceRecords(pg, source, children)
-    : async (rows) => rows.map((row) => toResource(row, links));
+  const toRecords = sourceRecords(pg, source, children);
 
   return {
     // Declared field filters, exposed so the route seam knows which query params

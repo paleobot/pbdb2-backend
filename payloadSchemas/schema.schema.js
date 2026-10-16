@@ -8,10 +8,15 @@
  * The jsonb keys are the ones src/pbot-schemas-migration writes, so none is
  * renamed.
  *
- * `references` are the schema's citations as reference permids: the first is
- * schemas.reference_id, the rest are additional_schema_refs rows, as on
- * collection (the referenceList codec). Required in the base, which costs `db`
- * nothing and lets `out` guarantee it, since the column is NOT NULL.
+ * References are declared exactly as on collection: the primary in
+ * schemas.reference_id (primaryReference), and an unordered set of
+ * additional_schema_refs rows (additionalReferences). Both are links
+ * (lib/links.js) and neither is in the jsonb. The rows are returned as stored;
+ * the one row on localhost repeats its schema's primary, as Classic's
+ * secondary_refs do on collections. Whether order is real data, and whether the
+ * primary belongs in the child table, is with a committee:
+ * docs/api-design-backlog.md, "Collection reference model". Its answer applies
+ * to schemas as to collections.
  *
  * `year` is loose at rest and four digits on create, as on authority.
  *
@@ -20,6 +25,7 @@
  * decided; the sketch for that option is kept in a comment at the end of this
  * file. authorizer_person_id and enterer_person_id are provenance and get no field.
  */
+import { link } from "./lib/links.js";
 
 const schemaProperties = {
 	permid: {
@@ -38,25 +44,16 @@ const schemaProperties = {
 			}
 		}
 	},
-	references: {
+	primaryReference: {
+		...link({ target: "references", label: "title" }),
+		"x-storage": { column: "reference_id", codec: "referencePermid" },
+		description: "the reference this schema is primarily recorded from"
+	},
+	additionalReferences: {
 		type: "array",
-		items: {
-			type: "object",
-			required: ["permid", "order"],
-			properties: {
-				permid: {
-					type: "string",
-					description: "permid of the cited reference"
-				},
-				order: {
-					type: "string",
-					description: "Order of the reference"
-				}
-			}
-		},
-		minItems: 1,
-		"x-storage": { table: "additional_schema_refs", codec: "referenceList" },
-		description: "List of references for this schema"
+		items: link({ target: "references", label: "title" }),
+		"x-storage": { table: "additional_schema_refs", codec: "referenceLinks" },
+		description: "every additional_schema_refs row, unordered; may include the primary"
 	},
 	title: {
 		type: "string",
@@ -112,8 +109,9 @@ export const schemaSource = {
 	description: "A schema payload in the PBDB database",
 	type: "object",
 	properties: schemaProperties,
-	required: ["title", "year", "references"],
+	required: ["title", "year"],
 	"x-create": {
+		required: ["primaryReference"],
 		properties: {
 			year: { type: "string", pattern: "^[0-9]{4}$" }
 		}

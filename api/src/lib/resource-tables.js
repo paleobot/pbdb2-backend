@@ -9,14 +9,16 @@
  * `specimens` is intentionally absent — no backing table exists in the backend
  * schema yet, so that route stays on stub data (see the change proposal).
  *
- * Relationship enrichment lands here as the optional `links` field. Foreign keys
- * are never stored in the JSONB; they live as columns on the enclosing table
- * (`reference_id`) or in a join table. The `links` config is consumed by the one
- * generic repository engine (see repository.js); a descriptor without it behaves
- * exactly as before. Other FKs (`early_age_id`, `enterer_person_id`, …) remain
- * unenriched. See design.md for the head-resolution rationale (the backend swing
- * trigger keeps these FKs pointed at the current head, so a plain join resolves
- * the current label + lineage permid).
+ * Every version-chained resource here names a payload `source`, and its links
+ * come from that source's x-link properties and items. The optional `links`
+ * field is descriptor-declared enrichment for a resource with no source, which
+ * today is only `taxa` (read by taxa-repository.js through linkProjections). A
+ * descriptor link is single-valued: a column on the resource's own table. A
+ * multi-valued link is declared in a payload source, as an array of links. Other
+ * FKs (`early_age_id`, `enterer_person_id`, …) remain unenriched. See design.md
+ * for the head-resolution rationale (the backend swing trigger keeps these FKs
+ * pointed at the current head, so a plain join resolves the current label +
+ * lineage permid).
  *
  * @typedef {object} FieldFilter
  * @property {string} jsonPath  JSONB key within the payload to match (e.g. 'publicationType')
@@ -49,6 +51,7 @@
 import { authoritySource } from '../../../payloadSchemas/authority.schema.js';
 import { collectionSource } from '../../../payloadSchemas/collection.schema.js';
 import { referenceSource } from '../../../payloadSchemas/reference.schema.js';
+import { schemaSource } from '../../../payloadSchemas/schema.schema.js';
 
 /**
  * Link targets: what a link declaration's `target` resolves to.
@@ -103,18 +106,15 @@ export const LINK_TARGETS = {
 
 /**
  * A declared link from a resource to a target route group, keyed in `links` by
- * the output field name it produces. `via` names the column carrying the
- * foreign key: a column on this resource's table for a single-valued link, or a
- * column on `joinTable` for a many-to-many one. `on` states what that column
- * holds — the target's internal serial id, or the target lineage's `permid`
- * (which needs no id→permid translation).
+ * the output field name it produces. `via` names the column on this resource's
+ * table carrying the foreign key; a descriptor link is single-valued. `on`
+ * states what that column holds — the target's internal serial id, or the
+ * target lineage's `permid` (which needs no id→permid translation).
  *
  * @typedef {object} LinkDeclaration
  * @property {string} target        target route group name (a {@link LINK_TARGETS} key)
  * @property {'id'|'permid'} on     what the `via` column holds
- * @property {string} via           FK column (e.g. 'reference_id')
- * @property {string} [joinTable]   many-to-many join table (e.g. 'additional_collection_refs')
- * @property {string} [joinKey]     join-table column pointing back at this table (e.g. 'collection_id')
+ * @property {string} via           FK column (e.g. 'authority_id')
  */
 
 /** @type {Record<string, ResourceDescriptor>} */
@@ -139,16 +139,8 @@ export const RESOURCE_DESCRIPTORS = {
   schemas: {
     table: 'schemas',
     jsonbColumn: 'schema',
-    links: {
-      primaryReference: { target: 'references', on: 'id', via: 'reference_id' },
-      additionalReferences: {
-        target: 'references',
-        on: 'id',
-        via: 'reference_id',
-        joinTable: 'additional_schema_refs',
-        joinKey: 'schema_id',
-      },
-    },
+    source: schemaSource,
+    children: [{ table: 'additional_schema_refs', fk: 'schema_id' }],
   },
   // `taxa` carries NO `jsonbColumn`: it is a derived table of typed columns. It
   // is therefore unreadable by the generic repository, which selects a payload

@@ -94,14 +94,19 @@ docs/                   design notes (e.g. response-envelope rationale)
 - **Reads through a payload source:** a descriptor naming a `source` (from
   `payloadSchemas/`) is read with `merge()` and one codec-context query per
   page, plus one query per child table the descriptor lists in `children`
-  (collections: `additional_collection_refs`). A column whose codec declares a
-  `select` expression is read through it (`location` as GeoJSON). Links come
-  from the source's `x-link` properties and array `items`, and `href` is added
-  by `hydrateSourceLinks`. Each response validates against the source's `out`
-  variant, which `test/source-reads.test.js` checks. `authorities`,
-  `collections` and `references` read this way. `schemas` still returns
-  `{ permid, ...payload }` plus descriptor `links`, `taxa` has its own
-  repository, and `specimens` is a stub (see `api/docs/response-contracts.md`).
+  (collections: `additional_collection_refs`; schemas:
+  `additional_schema_refs`). A column whose codec declares a `select`
+  expression is read through it (`location` as GeoJSON). Links come from the
+  source's `x-link` properties and array `items`, and `href` is added by
+  `hydrateSourceLinks`. Each response validates against the source's `out`
+  variant, which `test/source-reads.test.js` checks. Every version-chained
+  resource reads this way (`authorities`, `collections`, `references`,
+  `schemas`): the generic repository refuses a descriptor with no `source`. A
+  schema single read adds its characters tree (`lib/schema-tree.js`), each
+  node merged through `characterSource`/`stateSource`, and is contract-tested
+  in parts. Only `taxa` keeps descriptor `links` (single-valued, through
+  `linkProjections`) and has its own repository; `specimens` is a stub (see
+  `api/docs/response-contracts.md`).
 - **Strict query params:** an unrecognized query parameter is a **400** naming it,
   on single reads as well as lists. A filter *value* outside its field's enum in
   the payload source is also a 400 listing the legal values (the repository

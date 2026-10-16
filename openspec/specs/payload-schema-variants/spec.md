@@ -65,7 +65,8 @@ For the authority source:
 For the schema source:
 - `permid` SHALL carry both, as on collection and specimen.
 - `legacyIDs` SHALL carry `readOnly` only.
-- `references` SHALL carry `x-storage: { table: "additional_schema_refs", codec: "referenceList" }` and no `readOnly`.
+- `primaryReference` SHALL be a link property carrying `x-storage: { column: "reference_id", codec: "referencePermid" }` and no `readOnly` of its own, as on collection.
+- `additionalReferences` SHALL be an array whose `items` are links, carrying `x-storage: { table: "additional_schema_refs", codec: "referenceLinks" }` and no `readOnly` of its own, as on collection.
 
 For the character and state sources:
 - `permid` SHALL carry both.
@@ -640,10 +641,10 @@ plural array, because dedup merges several `taxon_no`s into one authority.
 ### Requirement: `referencePermid` codec
 The `referencePermid` codec SHALL declare the source
 `{ table: "refs", key: "id", value: "permid", versioned: true, payload: "reference" }`, the same source
-`referenceList` declares.
+`referenceLinks` declares.
 
-It serves one link property and reads and emits it under `storage.property`: authority `reference`, and
-collection `primaryReference`.
+It serves one link property and reads and emits it under `storage.property`: authority `reference`,
+collection `primaryReference`, and schema `primaryReference`.
 
 On merge it SHALL map the column `x-storage` names to the link object:
 - a NULL column SHALL emit no property;
@@ -654,11 +655,11 @@ On split it SHALL read the link's `permid`, ignore every other key of the link o
 that reference's head `id` in the column `x-storage` names. An absent or `null` link SHALL emit no
 column. A permid whose head is removed SHALL throw, because nothing may cite a removed reference.
 
-Ids SHALL be keyed as strings, as in `referenceList`, because `refs.id` is a bigint that node-postgres
+Ids SHALL be keyed as strings, as in `referenceLinks`, because `refs.id` is a bigint that node-postgres
 returns as a string.
 
 An unresolvable permid on split, or an unresolvable id on merge, SHALL throw naming `referencePermid` and the
-value. With `authorities.reference_id` and `collections.reference_id` NOT NULL foreign keys that the swing
+value. With `authorities.reference_id`, `collections.reference_id` and `schemas.reference_id` NOT NULL foreign keys that the swing
 trigger keeps on the head, an unresolvable id is an integrity failure, not a data state.
 
 Because the codec is annotated with a `column`, `codecKeyColumns` SHALL map `refs` to that column for a source
@@ -676,6 +677,10 @@ the same source also reads `refs`.
 #### Scenario: Collection primary
 - **WHEN** a stored collection has `reference_id = 7`
 - **THEN** the merged payload's `primaryReference` is that ref's link object, and no `reference` key is emitted
+
+#### Scenario: Schema primary
+- **WHEN** a stored schema has `reference_id = 7`
+- **THEN** the merged payload's `primaryReference` is that ref's link object, and no `references` key is emitted
 
 #### Scenario: Untitled reference
 - **WHEN** the ref at `id = 7` has no title
@@ -701,65 +706,6 @@ the same source also reads `refs`.
 - **WHEN** `codecKeyColumns(authoritySource)` is called
 - **THEN** it maps `refs` to `reference_id`
 
-### Requirement: `referenceList` codec
-The `referenceList` codec SHALL declare the source
-`{ table: "refs", key: "id", value: "permid", versioned: true }`.
-
-It maps a `references[]` array to the parent row's `reference_id` column plus rows of the child table that
-the property's `x-storage` names. It SHALL NOT name any entity or child table itself. Its one caller is the
-schema source, which annotates it with `additional_schema_refs`. The foreign key from a child row back to its
-parent is supplied by the caller that reads or writes the child rows, not by the codec. The collection source
-no longer uses it (see "The collection source declares its stored references").
-
-On split it SHALL:
-- sort `references[]` by numeric `order`;
-- resolve the first entry's `permid` to that reference's head `id` and emit it as `columns.reference_id`;
-- resolve the remaining entries' permids and emit them, in sequence, as rows of the `x-storage` child table carrying `reference_id`.
-
-On merge it SHALL emit the primary reference with `order: "1"`, followed by child rows ordered by the child
-table's `id` ascending with `order: "2"`, `"3"`, and so on, mapping each stored `reference_id` back to that
-reference's `permid`.
-
-Each item names its reference by `permid`, the reference's own id field, so a `references[]` item uses the
-same name as the reference it cites and as every other link object. It SHALL carry a reference's permid, not
-`refs.id`: this project exposes permids rather than internal ids. No item SHALL carry `referenceID`, the
-item key's earlier name. The storage topology is unchanged by the codec: the primary occupies the parent's `reference_id`,
-the rest are child rows, and those rows have no order column, so order is re-derived on merge.
-
-An unresolvable permid on split, or an unresolvable `reference_id` on merge, SHALL throw naming
-`referenceList` and the value.
-
-The codec was named `collectionReferences` while collection was its only caller. No codec by that name SHALL
-remain in the registry.
-
-#### Scenario: Order normalized on round trip
-- **WHEN** a schema payload with references ordered `"1"` and `"5"` is split and merged back
-- **THEN** the merged references carry orders `"1"` and `"2"` with the same `permid`s in the same sequence
-
-#### Scenario: Primary goes to the column
-- **WHEN** a schema payload's references are `[{ permid: "<permid-B>", order: "2" }, { permid: "<permid-A>", order: "1" }]` and those permids belong to `refs.id` 7 and 12 respectively
-- **THEN** `columns.reference_id` is `7` and one child row carries `reference_id` `12`
-
-#### Scenario: Merge yields permids
-- **WHEN** a stored schema has `reference_id = 7` and one child row with `reference_id = 12`
-- **THEN** the merged payload's `references[]` items carry those two references' permids under `permid`, no item carries `referenceID`, and no `refs.id` appears anywhere in the payload
-
-#### Scenario: Child table follows the annotation
-- **WHEN** a schema payload with two references is split
-- **THEN** the second reference is emitted as a row of `additional_schema_refs`, and nothing is emitted for `additional_collection_refs`
-
-#### Scenario: Superseded reference is never cited
-- **WHEN** the ref at `id = 7` is superseded by a new version sharing its permid
-- **THEN** splitting a payload naming that permid yields the new head's `id`, not `7`
-
-#### Scenario: Unknown reference permid
-- **WHEN** a payload's reference item names a `permid` held by no reference
-- **THEN** `split` throws naming `referenceList` and that permid
-
-#### Scenario: Old name is gone
-- **WHEN** a source names the codec `collectionReferences`
-- **THEN** `split` and `merge` throw naming it as an unknown codec
-
 ### Requirement: The schema source
 `schemaSource` SHALL declare exactly these root properties:
 
@@ -767,7 +713,8 @@ remain in the registry.
 |---|---|---|
 | `permid` | string | `readOnly`, `x-storage: { column: "permid" }` |
 | `legacyIDs` | object with `pbotID`: string | `readOnly` |
-| `references` | array, `minItems: 1`, of `{ permid: string, order: string }` with both required | `x-storage: { table: "additional_schema_refs", codec: "referenceList" }` |
+| `primaryReference` | `link({ target: "references", label: "title" })`: `{ permid, title, href }` | `x-storage: { column: "reference_id", codec: "referencePermid" }` |
+| `additionalReferences` | array whose `items` are `link({ target: "references", label: "title" })` | `x-storage: { table: "additional_schema_refs", codec: "referenceLinks" }` |
 | `title` | string | |
 | `year` | string, `maxLength: 4` | |
 | `purpose` | string | |
@@ -776,12 +723,19 @@ remain in the registry.
 | `partsPreserved` | array of strings | items `x-enumFrom: { table: "parts_preserved", column: "name" }` |
 | `notableFeatures` | array of strings | items `x-enumFrom: { table: "notable_features", column: "name" }` |
 
-Base `required` SHALL be `title`, `year` and `references`. Because `references` is an `x-storage` property,
-the `db` variant SHALL neither declare nor require it, and SHALL require only `title` and `year`, as the
-legacy schema did.
+The references SHALL be declared exactly as on the collection source ("The collection source declares its
+stored references"): `additionalReferences` is an unordered set with no `order`, no `minItems` and no
+`uniqueItems`; it holds every `additional_schema_refs` row of the schema, including one citing the
+primary; and neither property carries `readOnly`. The source SHALL NOT declare a `references` property.
+Its comment SHALL say that the rows are returned as stored and SHALL point at
+`docs/api-design-backlog.md`, "Collection reference model", whose answer applies to schemas as to
+collections.
 
-`x-create` SHALL constrain `year` to `pattern: "^[0-9]{4}$"`, declared with `type: "string"` so that the
-`in-create` variant compiles in strict mode. The `db` variant SHALL carry no pattern on `year`.
+Base `required` SHALL be `title` and `year`. Root `x-create` SHALL require `primaryReference` and SHALL
+constrain `year` to `pattern: "^[0-9]{4}$"`, declared with `type: "string"` so that the `in-create` variant
+compiles in strict mode. `additionalReferences` is optional on create. The `db` variant SHALL declare
+neither reference property, SHALL require only `title` and `year`, as the legacy schema did, and SHALL
+carry no pattern on `year`.
 
 Every jsonb key SHALL keep the name and shape the PBot schema migration writes. The source SHALL declare no
 character or state tree: whether the API creates a schema's characters and states in the same call is not
@@ -792,7 +746,7 @@ in the file as comments.
 
 #### Scenario: Stored payload validates at rest
 - **WHEN** `{ legacyIDs: { pbotID: "p-1" }, title: "Fungi Morphology", year: "2023", purpose: "…", authors: [{ order: 1, givenName: "Claire", familyName: "Cleveland" }], partsPreserved: ["leaf"] }` is validated against the resolved `db` variant
-- **THEN** it passes, with no `references` and no `permid` present
+- **THEN** it passes, with no reference property and no `permid` present
 
 #### Scenario: Legacy requirements carried over
 - **WHEN** a payload omitting `title`, or omitting `year`, or with `year: "20230"`, or with `authors: []`, or with an author `order: 0`, or with an undeclared key, is validated against `db`
@@ -802,17 +756,21 @@ in the file as comments.
 - **WHEN** a payload with `partsPreserved: ["bark"]` or `notableFeatures: ["pith structure"]` is validated against the resolved `db` variant
 - **THEN** it fails, because neither value is in its dictionary table
 
-#### Scenario: References required on create
-- **WHEN** a create body with `title` and `year` but no `references`, or with `references: []`, is validated against `in-create`
-- **THEN** it fails
+#### Scenario: Primary reference required on create
+- **WHEN** a create body with `title` and `year` but no `primaryReference` is validated against `in-create`
+- **THEN** it fails, and the same body with `primaryReference: { permid: "<p>" }` and no `additionalReferences` passes
 
-#### Scenario: Reference item needs its permid
-- **WHEN** a create body carries `references: [{ order: "1" }]`
-- **THEN** `in-create` rejects it for the missing `permid`
+#### Scenario: The old references array is rejected
+- **WHEN** a create body carries `references: [{ permid: "<p>", order: "1" }]` in place of `primaryReference`
+- **THEN** `in-create` rejects it
 
-#### Scenario: The old item key is rejected
-- **WHEN** a create body carries `references: [{ referenceID: "r-1", order: "1" }]`
-- **THEN** `in-create` rejects it for the missing `permid`
+#### Scenario: No order on an additional reference
+- **WHEN** a create body carries `additionalReferences: [{ permid: "<p>", order: "2" }]`
+- **THEN** validation against `in-create` fails on `order`
+
+#### Scenario: The primary may repeat among the additional references
+- **WHEN** a merged schema has `primaryReference.permid` equal to the `permid` of one `additionalReferences` item
+- **THEN** it is valid against `out`
 
 #### Scenario: Four-digit year on create
 - **WHEN** create bodies otherwise valid carry `year: "0"`, `year: "abc"` and `year: "2023"`
@@ -1003,12 +961,14 @@ order turns out to be wanted, or the primary leaves the child table, this requir
 ### Requirement: `referenceLinks` codec
 The `referenceLinks` codec SHALL declare the source
 `{ table: "refs", key: "id", value: "permid", versioned: true, payload: "reference" }`, the same one that
-`referencePermid` and `referenceList` declare. It SHALL declare `keyColumn: "reference_id"`, the
+`referencePermid` declares. It SHALL declare `keyColumn: "reference_id"`, the
 child-row column that holds a `refs.id`.
 
 It maps an unordered array of reference links, the property it serves (`storage.property`), to rows of the
 child table its `x-storage` names. It writes no column on the parent. The foreign key from a child row back
-to its parent is supplied by the caller, not by the codec.
+to its parent is supplied by the caller, not by the codec. It has two callers: collection
+`additionalReferences` (`additional_collection_refs`) and schema `additionalReferences`
+(`additional_schema_refs`).
 
 On merge it SHALL:
 - take the rows of `storage.table`, ordered by `id` ascending;
@@ -1048,6 +1008,10 @@ value. Ids SHALL be keyed as strings.
 - **WHEN** a payload's `additionalReferences` names the permid of a soft-removed head
 - **THEN** `split` throws naming `referenceLinks`
 
+#### Scenario: Child table follows the annotation
+- **WHEN** a schema payload with `additionalReferences` naming two references is split
+- **THEN** two rows of `additional_schema_refs` are emitted, and nothing is emitted for `additional_collection_refs`
+
 ### Requirement: `storageSelects` and `codecKeySites` describe what a reader selects
 `payloadSchemas/lib/storage.js` SHALL export:
 - `storageSelects(source)`: one `{ column, expression }` per column `storageColumns(source)` returns. The
@@ -1074,3 +1038,4 @@ behaves as before.
 #### Scenario: Keys in a column only
 - **WHEN** `codecKeySites(authoritySource)` is called
 - **THEN** it maps `refs` to `{ columns: ["reference_id"], children: {} }`
+

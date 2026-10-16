@@ -1,31 +1,34 @@
 /**
- * The `schemas` resource is the deliberate exception to the uniform CRUD
- * pattern: its single-read representation is an AGGREGATE that composes the
- * schema with its nested characters and states (see
- * pbdb2-migrations/play/server.js for the shape this mirrors), rather than a
- * flat record. So GET /:permid is written explicitly instead of via the shared
- * factory. Write handling for nested characters/states is out of scope here.
+ * The `schemas` resource: uniform list and `ids` reads, and a single read that
+ * is an AGGREGATE composing the schema with its nested characters and states
+ * (see pbdb2-migrations/play/server.js for the shape this mirrors). So GET
+ * /:permid is written explicitly instead of via the shared factory. Write
+ * handling for nested characters/states is out of scope here.
  *
- * READS are DB-backed when a connection is present: the list goes through the
- * same shared list-filter seam as the uniform groups — so it accepts `ids`,
- * pagination, and any declared field filters on the same terms — and the single
- * read assembles the tree via schema-tree.js (404 on a miss). The aggregate tree
- * is deliberately NOT paginated: its nested characters and states are part of
- * one resource, not a list. With no DB configured, both fall back to the stubs
- * below. Write verbs remain stubbed (a later change).
+ * READS are DB-backed when a connection is present, and go through the generic
+ * repository and `schemaSource`, as collections do: `primaryReference` and
+ * `additionalReferences` come from `schemas.reference_id` and the
+ * `additional_schema_refs` rows, and `href` is added by `hydrateSourceLinks`.
+ * The list goes through the same shared list-filter seam as the uniform groups
+ * (`ids`, pagination, declared field filters). The single read is the
+ * repository's head (404 on a miss) plus its characters from schema-tree.js,
+ * each node merged through its own source; the tree is deliberately NOT
+ * paginated, since its characters and states are part of one resource. With no
+ * DB configured, both fall back to the stubs below, which are in the sources'
+ * shapes. Write verbs remain stubbed (a later change).
  */
 
 import { repositoryForResource } from '../../../../lib/repository.js';
-import { readSchemaTree } from '../../../../lib/schema-tree.js';
+import { readSchemaCharacters } from '../../../../lib/schema-tree.js';
 import { descriptorFor } from '../../../../lib/resource-tables.js';
-import { hydrateLinkHrefs } from '../../../../lib/link-hydration.js';
+import { hydrateSourceLinks } from '../../../../lib/link-hydration.js';
 import { listReadHandler } from '../../../../lib/crud-routes.js';
 
 const stubSchema = (permid = 'sch-00000000') => ({
   permid,
   title: 'Stub schema',
   year: '2026',
-  primaryReference: { title: 'Stub reference', permid: 'ref-00000000' },
+  primaryReference: { permid: 'ref-00000000', title: 'Stub reference' },
   additionalReferences: [],
 });
 
@@ -35,8 +38,8 @@ const stubSchemaTree = (permid = 'sch-00000000') => ({
     {
       permid: 'chr-00000000',
       name: 'Stub character',
-      states: [{ permid: 'stt-00000000', name: 'Stub state', states: [] }],
       characters: [],
+      states: [{ permid: 'stt-00000000', name: 'Stub state', quantitative: false, states: [] }],
     },
   ],
 });
@@ -44,8 +47,8 @@ const stubSchemaTree = (permid = 'sch-00000000') => ({
 export default async function schemas(fastify) {
   const write = { preHandler: fastify.authenticate };
   const repository = repositoryForResource(fastify, 'schemas');
-  const links = descriptorFor('schemas').links;
-  const hydrate = (record) => hydrateLinkHrefs(record, links, fastify.prefix);
+  const { source } = descriptorFor('schemas');
+  const hydrate = (record) => hydrateSourceLinks(record, source, fastify.prefix);
 
   // List — flat heads through the shared seam (the tree shape is per-read)
   fastify.get(
@@ -59,11 +62,12 @@ export default async function schemas(fastify) {
       return reply.sendData(hydrate(stubSchemaTree(request.params.permid)), { type: 'schema' });
     }
 
-    const tree = await readSchemaTree(fastify.pg, request.params.permid);
-    if (!tree) {
+    const head = await repository.readHead(request.params.permid);
+    if (!head) {
       throw fastify.httpErrors.notFound(`No schema with permid '${request.params.permid}'`);
     }
-    return reply.sendData(hydrate(tree), { type: 'schema' });
+    const characters = await readSchemaCharacters(fastify.pg, request.params.permid);
+    return reply.sendData({ ...hydrate(head), characters }, { type: 'schema' });
   });
 
   // Create

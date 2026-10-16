@@ -1,52 +1,27 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { makeReadRepository, linkProjections } from '../src/lib/repository.js';
-import { descriptorFor, targetFor } from '../src/lib/resource-tables.js';
+import { linkProjections } from '../src/lib/repository.js';
+import { descriptorFor, targetFor, RESOURCE_DESCRIPTORS } from '../src/lib/resource-tables.js';
 import { groupBase, hydrateLinkHrefs } from '../src/lib/link-hydration.js';
 
 /**
  * Link enrichment generalized beyond references: the target route group is a
- * declaration, not a hardcoded table. These cover the capability the existing
- * reference suites cannot — a non-`references` target, a permid-keyed join, and
- * one record linking into two different groups — plus the regression pin that
- * the four pre-existing reference declarations emit the very same SQL they did
- * before the target became a parameter.
+ * declaration, not a hardcoded table. Descriptor links are now declared only by
+ * `taxa` (every other resource takes its links from its payload source), so
+ * these drive `linkProjections` and `hydrateLinkHrefs` directly: a
+ * non-`references` target, a permid-keyed match, and one record linking into
+ * two different groups.
  */
-function fakePg(handler) {
-  const calls = [];
-  return {
-    calls,
-    query: async (text, values) => {
-      calls.push({ text, values });
-      return handler(text, values);
-    },
-  };
-}
 
-// The exact expressions emitted before link targets were parameterized. Any
-// diff here is a behavior change, not a stale expectation. Authorities and
-// collections are not here: they read through their payload sources and declare
-// no links (see test/source-reads.test.js).
-const PRE_REFACTOR_SQL = {
-  schemas: [
-    `(SELECT json_build_object('title', r.reference->>'title', 'permid', r.permid) FROM refs r WHERE r.id = "schemas"."reference_id" AND NOT COALESCE(r.removed, false)) AS "primaryReference"`,
-    `(SELECT COALESCE(json_agg(json_build_object('title', r.reference->>'title', 'permid', r.permid)), '[]'::json) FROM "additional_schema_refs" j JOIN refs r ON r.id = j.reference_id WHERE j."schema_id" = "schemas".id AND NOT COALESCE(r.removed, false)) AS "additionalReferences"`,
-  ],
-};
-
-// The schema tree correlates the same declarations to its head CTE instead.
-const PRE_REFACTOR_SQL_TS = [
-  `(SELECT json_build_object('title', r.reference->>'title', 'permid', r.permid) FROM refs r WHERE r.id = ts."reference_id" AND NOT COALESCE(r.removed, false)) AS "primaryReference"`,
-  `(SELECT COALESCE(json_agg(json_build_object('title', r.reference->>'title', 'permid', r.permid)), '[]'::json) FROM "additional_schema_refs" j JOIN refs r ON r.id = j.reference_id WHERE j."schema_id" = ts.id AND NOT COALESCE(r.removed, false)) AS "additionalReferences"`,
-];
-
-test('existing reference declarations emit byte-identical SQL after generalization', () => {
-  for (const [resource, expected] of Object.entries(PRE_REFACTOR_SQL)) {
-    const descriptor = descriptorFor(resource);
-    assert.deepEqual(linkProjections(descriptor.links, `"${descriptor.table}"`), expected, resource);
+test('no descriptor declares a join-table link, and only taxa declares links', () => {
+  for (const [resource, descriptor] of Object.entries(RESOURCE_DESCRIPTORS)) {
+    for (const [as, link] of Object.entries(descriptor.links ?? {})) {
+      assert.equal('joinTable' in link, false, `${resource}.${as}`);
+      assert.equal('joinKey' in link, false, `${resource}.${as}`);
+    }
+    assert.equal(Boolean(descriptor.links), resource === 'taxa', resource);
   }
-  assert.deepEqual(linkProjections(descriptorFor('schemas').links, 'ts'), PRE_REFACTOR_SQL_TS);
 });
 
 test('authorities declares no descriptor links: its reference comes from the source', () => {
@@ -62,35 +37,28 @@ test('collections declares no descriptor links: its references come from the sou
   assert.deepEqual(children, [{ table: 'additional_collection_refs', fk: 'collection_id' }]);
 });
 
+test('schemas declares no descriptor links: its references come from the source', () => {
+  const { links, source, children } = descriptorFor('schemas');
+  assert.equal(links, undefined);
+  assert.ok(source.properties.primaryReference['x-link']);
+  assert.ok(source.properties.additionalReferences.items['x-link']);
+  assert.deepEqual(children, [{ table: 'additional_schema_refs', fk: 'schema_id' }]);
+});
+
 // A synthetic citing resource; nothing in the served API declares these yet.
 const authorityLink = { target: 'authorities', on: 'id', via: 'authority_id' };
 const conceptLink = { target: 'taxa', on: 'permid', via: 'concept_permid' };
 
-test('a link to a non-references target resolves via that target and hydrates its own href', async () => {
-  const pg = fakePg(() => ({
-    rows: [
-      {
-        permid: 'txn-1',
-        payload: { name: 'Calymene' },
-        authority: { citation: 'Green 1974', permid: 'aut-7' },
-      },
-    ],
-  }));
-  const repo = makeReadRepository({
-    pg,
-    table: 'taxa',
-    jsonbColumn: 'taxon',
-    links: { authority: authorityLink },
-  });
-
-  const record = await repo.readHead('txn-1');
+test('a link to a non-references target resolves via that target and hydrates its own href', () => {
+  const [expr] = linkProjections({ authority: authorityLink }, '"taxa"');
   // The target registry supplies the table, payload column and label key.
   assert.match(
-    pg.calls[0].text,
+    expr,
     /json_build_object\('citation', r\.authority->>'citation', 'permid', r\.permid\) FROM authorities r/,
   );
-  assert.match(pg.calls[0].text, /WHERE r\.id = "taxa"\."authority_id"/);
+  assert.match(expr, /WHERE r\.id = "taxa"\."authority_id"/);
 
+  const record = { permid: 'txn-1', authority: { citation: 'Green 1974', permid: 'aut-7' } };
   hydrateLinkHrefs(record, { authority: authorityLink }, '/api/v1/taxa');
   assert.deepEqual(record.authority, {
     citation: 'Green 1974',
@@ -99,26 +67,13 @@ test('a link to a non-references target resolves via that target and hydrates it
   });
 });
 
-test('a permid-keyed link matches on permid and yields the same object shape', async () => {
-  // `taxa` is a real registered target now, so no fixture is needed. It was
-  // previously registered test-locally as `{ payloadColumn: 'taxon' }` — a
-  // column that does not exist — which is what hid the plain-column gap until
-  // the resource actually arrived.
-  const pg = fakePg(() => ({
-    rows: [{ permid: 'txn-1', payload: {}, accepted: { name: 'Calymene', permid: 'txn-9' } }],
-  }));
-  const repo = makeReadRepository({
-    pg,
-    table: 'taxa',
-    jsonbColumn: 'taxon',
-    links: { accepted: conceptLink },
-  });
-
-  const record = await repo.readHead('txn-1');
+test('a permid-keyed link matches on permid and yields the same object shape', () => {
+  const [expr] = linkProjections({ accepted: conceptLink }, '"taxa"');
   // Permid-keyed: matched against the target's permid, with no id translation.
-  assert.match(pg.calls[0].text, /WHERE r\.permid = "taxa"\."concept_permid"/);
-  assert.doesNotMatch(pg.calls[0].text, /WHERE r\.id = "taxa"\."concept_permid"/);
+  assert.match(expr, /WHERE r\.permid = "taxa"\."concept_permid"/);
+  assert.doesNotMatch(expr, /WHERE r\.id = "taxa"\."concept_permid"/);
 
+  const record = { permid: 'txn-1', accepted: { name: 'Calymene', permid: 'txn-9' } };
   hydrateLinkHrefs(record, { accepted: conceptLink }, '/api/v1/taxa');
   assert.deepEqual(record.accepted, {
     name: 'Calymene',
@@ -168,62 +123,24 @@ test('links to two different groups each hydrate against their own group base', 
   assert.equal(groupBase('/api/v2/taxa', 'authorities'), '/api/v2/authorities');
 });
 
-test('soft-removal suppression holds for a non-references target', async () => {
-  const joinLink = {
-    target: 'authorities',
-    on: 'id',
-    via: 'authority_id',
-    joinTable: 'taxon_authorities',
-    joinKey: 'taxon_id',
-  };
-  const links = { authority: authorityLink, authorities: joinLink };
-  const pg = fakePg(() => ({
-    // A removed single-valued target resolves to null in SQL; a removed
-    // join-table row drops out of the aggregate.
-    rows: [{ permid: 'txn-1', payload: {}, authority: null, authorities: [] }],
-  }));
-  const repo = makeReadRepository({ pg, table: 'taxa', jsonbColumn: 'taxon', links });
+test('soft-removal suppression holds for a non-references target', () => {
+  const links = { authority: authorityLink, accepted: conceptLink };
+  const exprs = linkProjections(links, '"taxa"');
+  for (const expr of exprs) assert.match(expr, /NOT COALESCE\(r\.removed, false\)/);
 
-  const record = await repo.readHead('txn-1');
-  const suppression = pg.calls[0].text.match(/NOT COALESCE\(r\.removed, false\)/g);
-  assert.equal(suppression.length, 2, 'both link forms suppress removed targets');
-
+  // A removed target resolves to null in SQL, and hydration leaves it null.
+  const record = { permid: 'txn-1', authority: null, accepted: null };
   hydrateLinkHrefs(record, links, '/api/v1/taxa');
-  assert.equal(record.authority, null, 'a removed single-valued target stays null');
-  assert.deepEqual(record.authorities, [], 'a removed join-table entry is omitted');
+  assert.equal(record.authority, null);
+  assert.equal(record.accepted, null);
 });
 
-test('neither join form exposes an internal serial id', async () => {
-  const links = {
-    authority: authorityLink,
-    authorities: {
-      target: 'authorities',
-      on: 'id',
-      via: 'authority_id',
-      joinTable: 'taxon_authorities',
-      joinKey: 'taxon_id',
-    },
-  };
-  const pg = fakePg(() => ({
-    rows: [
-      {
-        permid: 'txn-1',
-        payload: { name: 'Calymene' },
-        authority: { citation: 'Green 1974', permid: 'aut-7' },
-        authorities: [{ citation: 'Blue 1980', permid: 'aut-8' }],
-      },
-    ],
-  }));
-  const repo = makeReadRepository({ pg, table: 'taxa', jsonbColumn: 'taxon', links });
-  const record = await repo.readHead('txn-1');
-
-  // Serial ids appear only in join predicates, never in a projected object.
-  for (const expr of linkProjections(links, '"taxa"')) {
+test('a link projection exposes no internal serial id', () => {
+  // Serial ids appear only in match predicates, never in a projected object.
+  for (const expr of linkProjections({ authority: authorityLink, accepted: conceptLink }, '"taxa"')) {
     const projected = expr.slice(expr.indexOf('json_build_object'), expr.indexOf('FROM'));
     assert.doesNotMatch(projected, /r\.id/);
-  }
-  for (const value of [record.authority, ...record.authorities]) {
-    assert.deepEqual(Object.keys(value).sort(), ['citation', 'permid']);
+    assert.doesNotMatch(expr, /json_agg/, 'no join-table aggregate');
   }
 });
 

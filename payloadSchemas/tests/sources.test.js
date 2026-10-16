@@ -435,10 +435,10 @@ const storedSchema = () => ({
   partsPreserved: ['leaf'],
   notableFeatures: ['trace fossils (e.g., insect damage)'],
 });
-const createSchema = () => ({ ...storedSchema(), legacyIDs: undefined, references: [{ permid: 'r-1', order: '1' }] });
+const createSchema = () => ({ ...storedSchema(), legacyIDs: undefined, primaryReference: { permid: 'r-1' } });
 const withoutUndefined = (o) => JSON.parse(JSON.stringify(o));
 
-test('schema db declares neither permid nor references and requires only title and year', () => {
+test('schema db declares neither permid nor a reference field and requires only title and year', () => {
   const db = deriveVariant(sources.schema, 'db');
   assert.deepEqual(Object.keys(db.properties), ['legacyIDs', 'title', 'year', 'purpose', 'authors', 'acknowledgments', 'partsPreserved', 'notableFeatures']);
   assert.deepEqual(db.required, ['title', 'year']);
@@ -463,7 +463,8 @@ test('schema db: a stored payload passes; legacy rules still hold', () => {
   assert.equal(validate({ ...storedSchema(), authors: [] }), false);
   assert.equal(validate({ ...storedSchema(), authors: [{ order: 0, givenName: 'a', familyName: 'b' }] }), false);
   assert.equal(validate({ ...storedSchema(), characters: [] }), false);
-  assert.equal(validate({ ...storedSchema(), references: [{ permid: 'r-1', order: '1' }] }), false, 'references live in a column and child rows');
+  assert.equal(validate({ ...storedSchema(), references: [{ permid: 'r-1', order: '1' }] }), false, 'references[] is gone');
+  assert.equal(validate({ ...storedSchema(), primaryReference: { permid: 'r-1' } }), false, 'references live in a column and child rows');
 });
 
 test('schema db: dictionary values are enforced', () => {
@@ -472,16 +473,20 @@ test('schema db: dictionary values are enforced', () => {
   assert.equal(validate({ ...storedSchema(), notableFeatures: ['pith structure'] }), false);
 });
 
-test('schema in-create requires references with permids and a four-digit year', () => {
+test('schema in-create requires a primary reference and a four-digit year', () => {
   const validate = compile('schema', 'in-create');
   const body = withoutUndefined(createSchema());
+  assert.equal('additionalReferences' in body, false);
   assert.equal(validate(body), true, JSON.stringify(validate.errors));
-  const { references, ...noReferences } = body;
-  assert.equal(validate(noReferences), false);
-  assert.ok(validate.errors.some((e) => e.params?.missingProperty === 'references'));
-  assert.equal(validate({ ...body, references: [] }), false);
-  assert.equal(validate({ ...body, references: [{ order: '1' }] }), false);
-  assert.ok(validate.errors.some((e) => e.params?.missingProperty === 'permid'));
+  const { primaryReference, ...noPrimary } = body;
+  assert.equal(validate(noPrimary), false);
+  assert.ok(validate.errors.some((e) => e.params?.missingProperty === 'primaryReference'));
+  assert.equal(validate({ ...noPrimary, references: [{ permid: 'r-1', order: '1' }] }), false, 'references[] is gone');
+  assert.equal(validate({ ...body, additionalReferences: [] }), true, JSON.stringify(validate.errors));
+  assert.equal(validate({ ...body, additionalReferences: [{ permid: 'r-1' }] }), true, 'the primary may repeat');
+  assert.equal(validate({ ...body, additionalReferences: [{ permid: 'r-2', order: '2' }] }), false, 'no order');
+  assert.ok(validate.errors.some((e) => e.instancePath === '/additionalReferences/0' && e.params?.additionalProperty === 'order'));
+  assert.equal(validate({ ...body, primaryReference: { permid: 'r-1', title: 'x' } }), false, 'the label is read-only');
   assert.equal(validate({ ...body, year: '0' }), false);
   assert.equal(validate({ ...body, year: 'abc' }), false);
   assert.equal(validate({ ...body, year: '2023' }), true);
@@ -489,10 +494,22 @@ test('schema in-create requires references with permids and a four-digit year', 
   assert.equal(validate({ ...body, legacyIDs: { pbotID: 'p' } }), false);
 });
 
+test('schema references are annotated as on collection', () => {
+  const { primaryReference, additionalReferences } = sources.schema.properties;
+  assert.deepEqual(primaryReference['x-storage'], { column: 'reference_id', codec: 'referencePermid' });
+  assert.deepEqual(primaryReference['x-link'], { target: 'references', label: 'title' });
+  assert.deepEqual(additionalReferences['x-storage'], { table: 'additional_schema_refs', codec: 'referenceLinks' });
+  assert.deepEqual(additionalReferences.items['x-link'], { target: 'references', label: 'title' });
+  for (const node of [primaryReference, additionalReferences, additionalReferences.items]) assert.equal('readOnly' in node, false);
+  for (const key of ['minItems', 'uniqueItems']) assert.equal(key in additionalReferences, false, key);
+  assert.equal('references' in sources.schema.properties, false);
+  assert.deepEqual(sources.schema.required, ['title', 'year']);
+});
+
 test('in-create: a reference item keyed by the old name referenceID is rejected for its missing permid', () => {
   const cases = {
     collection: [createCollection({ admin0: 'FR' }), { additionalReferences: [{ referenceID: 'r-1' }] }],
-    schema: [withoutUndefined(createSchema()), { references: [{ referenceID: 'r-1', order: '1' }] }],
+    schema: [withoutUndefined(createSchema()), { additionalReferences: [{ referenceID: 'r-1' }] }],
   };
   for (const [entity, [body, oldKey]] of Object.entries(cases)) {
     const validate = compile(entity, 'in-create');
@@ -507,11 +524,17 @@ test('schema patch-guard blocks exactly permid and legacyIDs', () => {
   assert.deepEqual(guard.propertyNames.not.enum, ['permid', 'legacyIDs']);
 });
 
-test('schema out requires references', () => {
+test('schema out: a repeated primary, a null primary, an empty set, and no order', () => {
   const validate = compile('schema', 'out');
-  const references = [{ permid: 'r-1', order: '1' }];
-  assert.equal(validate({ ...storedSchema(), permid: 's-1', references }), true, JSON.stringify(validate.errors));
-  assert.equal(validate({ ...storedSchema(), permid: 's-1' }), false);
+  const href = (p) => `/api/v1/references/${p}`;
+  const read = (primaryReference, additionalReferences) => ({ ...storedSchema(), permid: 's-1', primaryReference, additionalReferences });
+  const r1 = { permid: 'r-1', title: 'T', href: href('r-1') };
+  const r2 = { permid: 'r-2', href: href('r-2') };
+  assert.equal(validate(read(r1, [r1])), true, JSON.stringify(validate.errors));
+  assert.equal(validate(read(r1, [])), true, 'no additional references');
+  assert.equal(validate(read(null, [r2])), true, 'a removed primary');
+  assert.equal(validate(read(r1, [{ ...r2, order: '2' }])), false, 'no order');
+  assert.equal(validate({ ...storedSchema(), permid: 's-1', references: [{ permid: 'r-1', order: '1' }] }), false, 'references[] is gone');
 });
 
 // ---------- character and state ----------
@@ -551,6 +574,13 @@ for (const entity of ['character', 'state']) {
     assert.deepEqual(deriveVariant(sources[entity], 'patch-guard').propertyNames.not.enum, ['permid', 'legacyIDs']);
   });
 }
+
+test('character and state declare no codec, so the schema tree merges them with no codec context', () => {
+  for (const entity of ['character', 'state']) {
+    assert.deepEqual(collectCodecSources(sources[entity]), [], entity);
+    assert.equal(JSON.stringify(sources[entity]).includes('"codec"'), false, entity);
+  }
+});
 
 test('state in-create: quantitative is settable and optional', () => {
   const validate = compile('state', 'in-create');

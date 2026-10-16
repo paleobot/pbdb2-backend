@@ -1,35 +1,31 @@
 /**
- * The `schemas` read is the deliberate exception to the uniform repository: its
- * representation is an aggregate tree composing the schema head with its nested
- * characters and states. Adapted from pbdb2-migrations/play/server.js.
+ * The characters and states under a schema, nested: the part of the `schemas`
+ * single read that the generic repository does not produce. The route takes the
+ * schema head from the repository (merged through `schemaSource`, as a list item
+ * is) and adds this tree to it. Adapted from pbdb2-migrations/play/server.js.
  *
- * Differences from that legacy query, by design:
- *  - Nodes are keyed by `permid` (the legacy exposed `pbotID`).
- *  - Internal serial ids and parent-link columns are used only to assemble the
- *    hierarchy in JS, then stripped — never exposed.
- *  - Every level filters to the current, non-removed version
- *    (`succeeded_by_id IS NULL AND NOT COALESCE(removed, false)`).
- *  - Link enrichment (primaryReference / additionalReferences) is resolved here
- *    too, reusing the shared `linkProjections` helper so the schema single-read
- *    can't drift from the generic repository engine. The schema head's
- *    `reference_id` and its `additional_schema_refs` join rows resolve to
- *    embedded `{ title, permid }` objects; `href` is hydrated at the route
- *    boundary, and soft-removed targets are suppressed in SQL.
+ * One recursive query reads every current, non-removed character and state
+ * under the schema's current head (`succeeded_by_id IS NULL AND NOT
+ * COALESCE(removed, false)` at every level), and selects no reference or link
+ * columns. Each node is then merged through its payload source:
+ * `characterSource` with its `permid` column, `stateSource` with `permid` and
+ * `quantitative`. The sources decide which columns reach a node, so the tree
+ * holds no storage layout of its own. Neither source declares a codec (a test
+ * asserts it), so the nodes merge with no codec context.
+ *
+ * Internal serial ids, parent columns and `sort_order` are used only to nest
+ * and order the nodes, and never reach a node. Nodes are keyed by `permid`
+ * (the legacy exposed `pbotID`).
  */
 
-import { linkProjections } from './repository.js';
-import { descriptorFor } from './resource-tables.js';
+import { merge } from '../../../payloadSchemas/lib/storage.js';
+import { characterSource } from '../../../payloadSchemas/character.schema.js';
+import { stateSource } from '../../../payloadSchemas/state.schema.js';
 
-// Correlate the link sub-selects to the schema head CTE (alias `ts`).
-const SCHEMA_LINK_PROJECTIONS = linkProjections(descriptorFor('schemas').links, 'ts');
-const SCHEMA_LINK_COLUMNS = SCHEMA_LINK_PROJECTIONS.length
-  ? `,\n  ${SCHEMA_LINK_PROJECTIONS.join(',\n  ')}`
-  : '';
-
-const SCHEMA_TREE_QUERY = `
+const SCHEMA_CHARACTERS_QUERY = `
 WITH RECURSIVE
 target_schema AS (
-  SELECT s.id, s.permid, s.schema AS payload, s.reference_id
+  SELECT s.id
   FROM schemas s
   WHERE s.permid = $1
     AND s.succeeded_by_id IS NULL
@@ -51,7 +47,7 @@ char_tree AS (
   WHERE c.succeeded_by_id IS NULL AND NOT COALESCE(c.removed, false)
 ),
 state_tree AS (
-  SELECT s.id, s.permid, s.state AS payload,
+  SELECT s.id, s.permid, s.state AS payload, s.quantitative,
          s.parent_character_id, s.parent_state_id, s.sort_order, 0 AS depth
   FROM states s
   JOIN char_tree ct ON s.parent_character_id = ct.id
@@ -59,15 +55,13 @@ state_tree AS (
 
   UNION ALL
 
-  SELECT s.id, s.permid, s.state AS payload,
+  SELECT s.id, s.permid, s.state AS payload, s.quantitative,
          s.parent_character_id, s.parent_state_id, s.sort_order, st.depth + 1
   FROM states s
   JOIN state_tree st ON s.parent_state_id = st.id
   WHERE s.succeeded_by_id IS NULL AND NOT COALESCE(s.removed, false)
 )
 SELECT
-  ts.permid AS permid,
-  ts.payload AS payload${SCHEMA_LINK_COLUMNS},
   (
     SELECT COALESCE(json_agg(json_build_object(
       'id',                ct.id,
@@ -83,6 +77,7 @@ SELECT
       'id',                st.id,
       'permid',            st.permid,
       'payload',           st.payload,
+      'quantitative',      st.quantitative,
       'sortOrder',         st.sort_order,
       'parentCharacterId', st.parent_character_id,
       'parentStateId',     st.parent_state_id
@@ -92,86 +87,60 @@ SELECT
 FROM target_schema ts;
 `;
 
-const byOrder = (a, b) => (a._sortOrder ?? Infinity) - (b._sortOrder ?? Infinity);
+const byOrder = (a, b) => (a.sortOrder ?? Infinity) - (b.sortOrder ?? Infinity);
+const sortedNodes = (entries) => entries.sort(byOrder).map((e) => e.node);
 
 /**
- * Assemble the flat char/state rows into a nested tree, keyed by `permid`,
- * with internal ids used only for linkage and then stripped.
+ * Merge the flat character/state rows through their sources and nest them.
+ * Each node's linkage and sort order is kept beside it, not in it.
  */
 function assemble(row) {
-  const charMap = new Map();
+  const chars = new Map();
   for (const c of row.characters) {
-    charMap.set(c.id, {
-      ...c.payload,
-      permid: c.permid,
-      _parentCharacterId: c.parentCharacterId,
-      _sortOrder: c.sortOrder,
-      characters: [],
-      states: [],
-    });
+    const node = merge(characterSource, { jsonb: c.payload, columns: { permid: c.permid } });
+    chars.set(c.id, { node, parentCharacterId: c.parentCharacterId, sortOrder: c.sortOrder, characters: [], states: [] });
   }
 
-  const stateMap = new Map();
+  const states = new Map();
   for (const s of row.states) {
-    stateMap.set(s.id, {
-      ...s.payload,
-      permid: s.permid,
-      _parentCharacterId: s.parentCharacterId,
-      _parentStateId: s.parentStateId,
-      _sortOrder: s.sortOrder,
-      states: [],
+    const node = merge(stateSource, { jsonb: s.payload, columns: { permid: s.permid, quantitative: s.quantitative } });
+    states.set(s.id, {
+      node, parentCharacterId: s.parentCharacterId, parentStateId: s.parentStateId, sortOrder: s.sortOrder, states: [],
     });
   }
 
   // States nest under a parent state, else under their parent character.
-  for (const s of stateMap.values()) {
-    if (s._parentStateId != null) stateMap.get(s._parentStateId).states.push(s);
-    else if (s._parentCharacterId != null) charMap.get(s._parentCharacterId).states.push(s);
+  for (const s of states.values()) {
+    if (s.parentStateId != null) states.get(s.parentStateId).states.push(s);
+    else if (s.parentCharacterId != null) chars.get(s.parentCharacterId).states.push(s);
   }
 
   // Characters nest under a parent character, else they are schema-level.
-  const topChars = [];
-  for (const c of charMap.values()) {
-    if (c._parentCharacterId != null) charMap.get(c._parentCharacterId).characters.push(c);
-    else topChars.push(c);
+  const top = [];
+  for (const c of chars.values()) {
+    if (c.parentCharacterId != null) chars.get(c.parentCharacterId).characters.push(c);
+    else top.push(c);
   }
 
-  for (const c of charMap.values()) {
-    c.characters.sort(byOrder);
-    c.states.sort(byOrder);
+  for (const c of chars.values()) {
+    c.node.characters = sortedNodes(c.characters);
+    c.node.states = sortedNodes(c.states);
   }
-  for (const s of stateMap.values()) s.states.sort(byOrder);
-  topChars.sort(byOrder);
-
-  // Strip the internal-only linkage/sort fields.
-  for (const c of charMap.values()) {
-    delete c._parentCharacterId;
-    delete c._sortOrder;
-  }
-  for (const s of stateMap.values()) {
-    delete s._parentCharacterId;
-    delete s._parentStateId;
-    delete s._sortOrder;
-  }
-
-  return {
-    permid: row.permid,
-    ...row.payload,
-    primaryReference: row.primaryReference ?? null,
-    additionalReferences: row.additionalReferences ?? [],
-    characters: topChars,
-  };
+  for (const s of states.values()) s.node.states = sortedNodes(s.states);
+  return sortedNodes(top);
 }
 
 /**
- * Read a schema's aggregate tree by `permid`, or null if there is no current,
- * non-removed schema head for it.
+ * Read the nested characters (and their states) of a schema's current head by
+ * `permid`. A permid with no current, non-removed head yields `[]`; the route
+ * has already answered 404 from the head read in that case.
  *
  * @param {{ query: (text: string, values?: unknown[]) => Promise<{ rows: any[] }> }} pg
  * @param {string} permid
+ * @returns {Promise<object[]>}
  */
-export async function readSchemaTree(pg, permid) {
-  const { rows } = await pg.query(SCHEMA_TREE_QUERY, [permid]);
-  if (rows.length === 0) return null;
+export async function readSchemaCharacters(pg, permid) {
+  const { rows } = await pg.query(SCHEMA_CHARACTERS_QUERY, [permid]);
+  if (rows.length === 0) return [];
   return assemble(rows[0]);
 }
