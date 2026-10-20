@@ -38,7 +38,7 @@ context: |
     - Data integrity and referential consistency are critical — paleontology records
       must not be lost or corrupted
 
-  Migrations (migrations/): moving data from the legacy MariaDB `pbdb_archive` (99 tables,
+  Migrations (migrations/): moving data from the legacy MariaDB `pbdb_2026_10_18` (99 tables,
   ~22.4M rows, InnoDB) and PBot into the target PostgreSQL database.
     Legacy analysis in migrations/mariadb/PBDBLegacy-DeepAnalysis/: analysis-summary.md,
     schema-catalog.md, er-diagrams.md, anomaly-report.md, diagrams/.

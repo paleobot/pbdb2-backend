@@ -96,7 +96,7 @@ The `.env` file SHALL support the following variables:
 | MARIADB_PORT | no | 3306 |
 | MARIADB_USER | yes (if using real MariaDB) | — |
 | MARIADB_PASSWORD | yes (if using real MariaDB) | — |
-| MARIADB_DATABASE | no | pbdb_archive |
+| MARIADB_DATABASE | yes (if using real MariaDB) | — |
 | PG_HOST | yes | — |
 | PG_PORT | no | 5432 |
 | PG_USER | yes | — |
@@ -117,9 +117,9 @@ that omits them is unaffected.
 - **WHEN** `MARIADB_PORT` or `PG_PORT` is not set in `.env`
 - **THEN** the connection module uses 3306 and 5432 respectively
 
-#### Scenario: Default MariaDB database name
+#### Scenario: MariaDB database name not set
 - **WHEN** `MARIADB_DATABASE` is not set in `.env`
-- **THEN** the connection module connects to `pbdb_archive`
+- **THEN** the MariaDB pool module reports it as a missing required variable and exits, rather than connecting to a default database
 
 #### Scenario: PG_CA_CERT not set
 - **WHEN** `PG_CA_CERT` is not set in `.env`
