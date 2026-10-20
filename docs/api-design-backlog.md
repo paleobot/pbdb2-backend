@@ -453,13 +453,18 @@ Nothing deploys from these repos yet, so nothing needs re-pointing.
 
 ## Human-facing identifiers
 
-**Deferred; permids stay UUIDv7.** Some advisory committee members have proposed replacing UUID
-permids with integers. The underlying need is probably an identifier people can cite, say and type
-("PBDB col. 12345"). That can be met with a short *handle* beside the permid, without changing the
-permid. The case against integer permids is written up separately for the committee (claude.ai doc
-"Why pbdb2 permids are UUIDs"). In short: integers would collide with 25 years of cited Classic
-integer IDs; an integer permid could be confused with the integer version `id` with no type error;
-and integers need a central sequence to mint.
+**Open; permids stay UUIDv7 until decided.** Some advisory committee members have proposed
+replacing UUID permids with integers. The underlying need is probably an identifier people can cite,
+say and type ("PBDB col. 12345"). Two ways to meet it are on the table: a short *handle* beside the
+UUID permid (A), or a prefixed short code that replaces the UUID as the permid (B). The case
+against *integer* permids is written up separately for the committee (claude.ai doc "Why pbdb2
+permids are UUIDs"). In short: integers would collide with 25 years of cited Classic integer IDs;
+an integer permid could be confused with the integer version `id` with no type error; and integers
+need a central sequence to mint. A prefixed random code (`COLL-8K3F2QXA`) answers all three: the
+prefix can't be read as a Classic number, it names the entity type, and random codes need no
+sequence. So B is not ruled out by that doc.
+
+### A. A handle beside the permid
 
 **Where to store it: a registry table.** It shouldn't go in the payload, because a handle is
 system-minted and immutable like the permid, not user-editable data. A column on each versioned
@@ -486,7 +491,7 @@ handles
    starting above the legacy maximum, rules out confusion with Classic numbers. Needs the database to
    mint, and reveals creation order.
 2. *Option 1 plus a check digit* (`COL-300417-6`, e.g. ORCID's ISO 7064 mod 11-2). Catches mistyped
-   citations. The leaning.
+   citations. The leaning for A.
 3. *Random short code* (`COL-8K3F-2QXA`, Crockford base32, 40 bits). Insert, and retry on a key
    collision. Can be minted anywhere and reveals nothing, but is harder to read aloud.
 4. *Legacy continuity*: migrated records keep their Classic number, and new ones are numbered above
@@ -498,7 +503,84 @@ constraint and retry: option 3, only uglier.
 **Minting.** The handle is minted where the permid is, when an entity's first version is inserted:
 in each migration script, and on live writes in the API create path or a version trigger
 (`preceded_by_id IS NULL`). It's purely additive, so it can be backfilled for every existing entity
-in one pass whenever an API or UI needs it. Nothing needs it yet.
+in one pass whenever an API or UI needs it.
+
+### B. A prefixed code as the permid
+
+The permid itself becomes `<PREFIX>-<code>`: one prefix per permid space (references, collections,
+authorities, schemas, characters, states, specimens, persons, each opinion table, names), and a
+Crockford base32 code (no I, L, O or U; case-insensitive, stored uppercase).
+
+**The blocker: nothing enforces a unique permid on a versioned table.** `place_in_lineage()`
+(`db/02-core.sql`) makes a new row the successor of the existing head with the same permid. A
+freshly minted code that collides with an existing one would silently become a new version of an
+unrelated entity, FKs swung and all, with no error. A unique index on lineage roots doesn't catch it,
+because the trigger has already set `preceded_by_id`. UUIDv7 makes this practically impossible, so
+no guard was ever written; a short code makes it a matter of time.
+
+**The fix: a permid registry,** where permids are minted, not a mapping layer:
+
+```
+permids
+ permid (PK, text) │ entity_type │ created_at
+───────────────────┼─────────────┼───────────
+ COLL-8K3F2QXA     │ collection  │ …
+```
+
+- Creating an entity inserts here first and retries on a key conflict; one database function
+  (`mint_permid(prefix)`) could do it for the migrations and the API alike.
+- Every permid column can be a foreign key to it, including `subject_permid`, `concept_permid` and
+  `specimens.name_opinions_permid`, which have no integrity check today. (Many version rows referring
+  to one registry row is an ordinary FK; it is A's `handles.permid` → versioned table that can't be.)
+
+**Length.** Collisions need the retry whatever the length:
+
+| Length | Bits | Expected collisions minting 517k (name opinions) | Chance per insert at 5M rows |
+|---|---|---|---|
+| 8 | 40 | ~0.12 | ~5×10⁻⁶ |
+| 10 | 50 | ~10⁻⁴ | ~4×10⁻⁹ |
+
+Crockford base32 defines an optional check symbol, which gives B the mistyped-citation check that A
+leaned toward.
+
+**Consequences.**
+- `ORDER BY permid` becomes arbitrary instead of creation order. Keyset pagination still works (any
+  total order does). Store as `text COLLATE "C"`. The API fixtures' strictly increasing `newPermid()`
+  and any assertion that relies on it change. If creation order matters to clients, it becomes an
+  explicit `created_at` sort, not a property of the ID.
+- Minting anywhere without coordination is lost. That matters only if something outside this
+  database mints permids (PBot, offline clients, bulk importers). Unanswered.
+- Scope: permid columns and CHECKs in `db/` (including the uuid temporaries, `uuid[]` parameters and
+  `::uuid` casts in `derive_taxa`), the single swap point `migrations/src/lib/uuidv7.js` plus
+  in-run collision handling in the bulk inserts, a `pattern` on each source's `permid`, the API
+  fixtures, and 17 specs that mention UUIDs (`permid-uuidv7` replaced). `homonym_group_id` is never
+  exposed and could stay a UUID.
+- No data conversion: everything rebuilds from MariaDB through the runner. This is cheap only until
+  permids are published or cited.
+
+**A variant: Classic numbers as the code for migrated records.** A collection migrated from
+Classic `collection_no` 12345 would be `COLL-12345`; records created through the API get random
+codes. Not obviously worth it, but worth considering:
+- Old citations ("PBDB collection 12345") map straight onto the permid, which is A's option 4 without
+  a second identifier.
+- Provenance shows in the ID's shape, though `legacyIDs.oldpbdbID` already records it.
+- The two spaces can't collide if their shapes differ. Classic maxima in `pbdb_2026_10_18` are all
+  under 8 digits (collections 281,030; refs 96,229; taxa 526,272; opinions 1,029,177; specimens
+  168,287; persons 1,332), so a fixed 8-character random code is disjoint by length. That rules out
+  zero-padding the legacy numbers to 8 or more.
+- Migration permids become deterministic: a rebuild reproduces them, where today every rebuild mints
+  new UUIDs.
+- Each entity needs a mapping policy. Classic opinions are split across three pbdb2 opinion tables
+  (separate prefixes keep that apart, unless one Classic opinion yields two rows in one table);
+  authorities were restructured; PBot records, sentinel rows and anything the migration creates
+  without a Classic row get random codes; merged records need a rule for whose number wins.
+- Counter-argument: a permid with meaning in it. Sequential numbers are also enumerable, though the
+  data is public anyway.
+
+*Reasoning:* the committee doc above; `place_in_lineage()` in `db/02-core.sql`; explored 2026-10-20,
+including azlibrary's trigger-minted `<group>-<epoch ms>-<1..1000>` IDs, rejected because `now()` is
+fixed per transaction (a collision is a coin flip at ~38 rows in one transaction), nothing retries, and the time part makes
+the ID long without making it readable.
 
 ## Collection reference model
 
