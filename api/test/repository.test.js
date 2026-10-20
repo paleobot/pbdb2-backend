@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { build } from '../src/app.js';
+import { build, DEFAULT_PUBLIC_BASE_URL as BASE } from '../src/app.js';
 import { makeReadRepository } from '../src/lib/repository.js';
 import { descriptorFor } from '../src/lib/resource-tables.js';
 import { referenceSource } from '../../payloadSchemas/reference.schema.js';
@@ -198,8 +198,8 @@ test('enriched single read carries href hydrated from the route prefix', async (
 
   const res = await app.inject({ method: 'GET', url: '/api/v1/schemas/sch-1' });
   const { data } = res.json();
-  assert.deepEqual(data.primaryReference, { permid: 'ref-7', title: 'Primary', href: '/api/v1/references/ref-7' });
-  assert.deepEqual(data.additionalReferences, [{ permid: 'ref-7', title: 'Primary', href: '/api/v1/references/ref-7' }]);
+  assert.deepEqual(data.primaryReference, { permid: 'ref-7', title: 'Primary', href: `${BASE}/api/v1/references/ref-7` });
+  assert.deepEqual(data.additionalReferences, [{ permid: 'ref-7', title: 'Primary', href: `${BASE}/api/v1/references/ref-7` }]);
 });
 
 test('stub reads expose the enriched reference shape with href (no DB configured)', async (t) => {
@@ -208,15 +208,15 @@ test('stub reads expose the enriched reference shape with href (no DB configured
 
   const authority = (await app.inject({ method: 'GET', url: '/api/v1/authorities/aut-x' })).json().data;
   assert.equal(authority.reference.title, 'Stub reference');
-  assert.equal(authority.reference.href, '/api/v1/references/ref-00000000');
+  assert.equal(authority.reference.href, `${BASE}/api/v1/references/ref-00000000`);
 
   const collection = (await app.inject({ method: 'GET', url: '/api/v1/collections/col-x' })).json().data;
-  assert.equal(collection.primaryReference.href, '/api/v1/references/ref-00000000');
+  assert.equal(collection.primaryReference.href, `${BASE}/api/v1/references/ref-00000000`);
   assert.deepEqual(collection.additionalReferences, []);
 
   const schema = (await app.inject({ method: 'GET', url: '/api/v1/schemas/sch-x' })).json().data;
   assert.deepEqual(schema.primaryReference, {
-    permid: 'ref-00000000', title: 'Stub reference', href: '/api/v1/references/ref-00000000',
+    permid: 'ref-00000000', title: 'Stub reference', href: `${BASE}/api/v1/references/ref-00000000`,
   });
   assert.deepEqual(schema.additionalReferences, []);
   assert.equal(schema.characters[0].states[0].quantitative, false);

@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { build } from '../src/app.js';
+import { build, DEFAULT_PUBLIC_BASE_URL as BASE } from '../src/app.js';
 
 test('base paths return index documents in the standard envelope', async (t) => {
   const app = build();
@@ -14,7 +14,7 @@ test('base paths return index documents in the standard envelope', async (t) => 
     const body = res.json();
     assert.ok(body.data && typeof body.data === 'object');
     assert.equal(body.meta.type, 'index');
-    assert.equal(body.links.self, url);
+    assert.equal(body.links.self, `${BASE}${url}`);
   }
 });
 
@@ -23,11 +23,11 @@ test('discovery links are derived from the route tree', async (t) => {
   t.after(() => app.close());
 
   const root = (await app.inject({ method: 'GET', url: '/' })).json();
-  assert.equal(root.links.api, '/api');
+  assert.equal(root.links.api, `${BASE}/api`);
 
   const v1 = (await app.inject({ method: 'GET', url: '/api/v1' })).json();
   for (const resource of ['references', 'authorities', 'collections', 'specimens', 'schemas']) {
-    assert.equal(v1.links[resource], `/api/v1/${resource}`, `links should include ${resource}`);
+    assert.equal(v1.links[resource], `${BASE}/api/v1/${resource}`, `links should include ${resource}`);
   }
 });
 

@@ -1,7 +1,7 @@
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { build } from '../../src/app.js';
+import { build, DEFAULT_PUBLIC_BASE_URL as BASE } from '../../src/app.js';
 import {
   setupTestDb,
   newPermid,
@@ -167,7 +167,7 @@ test('chain entries carry hrefs into the taxa group', async (t) => {
   ).json();
 
   for (const node of flatten(data.containingTaxa)) {
-    assert.equal(node.href, `/api/v1/taxa/${node.permid}`);
+    assert.equal(node.href, `${BASE}/api/v1/taxa/${node.permid}`);
   }
 });
 
@@ -204,7 +204,7 @@ test('accepted resolves self-referentially to a different taxon', async (t) => {
   assert.deepEqual(data.accepted, {
     name: 'Calymene blumenbachii',
     permid: blumenbachii,
-    href: `/api/v1/taxa/${blumenbachii}`,
+    href: `${BASE}/api/v1/taxa/${blumenbachii}`,
   });
 });
 
@@ -225,7 +225,7 @@ test('the authority link resolves across groups', async (t) => {
   ).json();
 
   assert.equal(data.authority.citation, 'Brongniart 1822');
-  assert.match(data.authority.href, /^\/api\/v1\/authorities\//);
+  assert.ok(data.authority.href.startsWith(`${BASE}/api/v1/authorities/`), data.authority.href);
 });
 
 test('a taxon with no authority reads as null', async (t) => {

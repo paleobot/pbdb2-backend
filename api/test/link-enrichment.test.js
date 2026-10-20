@@ -5,6 +5,8 @@ import { linkProjections } from '../src/lib/repository.js';
 import { descriptorFor, targetFor, RESOURCE_DESCRIPTORS } from '../src/lib/resource-tables.js';
 import { groupBase, hydrateLinkHrefs } from '../src/lib/link-hydration.js';
 
+const BASE = 'https://pbdb2.example.org';
+
 /**
  * Link enrichment generalized beyond references: the target route group is a
  * declaration, not a hardcoded table. Descriptor links are now declared only by
@@ -59,11 +61,11 @@ test('a link to a non-references target resolves via that target and hydrates it
   assert.match(expr, /WHERE r\.id = "taxa"\."authority_id"/);
 
   const record = { permid: 'txn-1', authority: { citation: 'Green 1974', permid: 'aut-7' } };
-  hydrateLinkHrefs(record, { authority: authorityLink }, '/api/v1/taxa');
+  hydrateLinkHrefs(record, { authority: authorityLink }, '/api/v1/taxa', BASE);
   assert.deepEqual(record.authority, {
     citation: 'Green 1974',
     permid: 'aut-7',
-    href: '/api/v1/authorities/aut-7',
+    href: `${BASE}/api/v1/authorities/aut-7`,
   });
 });
 
@@ -74,11 +76,11 @@ test('a permid-keyed link matches on permid and yields the same object shape', (
   assert.doesNotMatch(expr, /WHERE r\.id = "taxa"\."concept_permid"/);
 
   const record = { permid: 'txn-1', accepted: { name: 'Calymene', permid: 'txn-9' } };
-  hydrateLinkHrefs(record, { accepted: conceptLink }, '/api/v1/taxa');
+  hydrateLinkHrefs(record, { accepted: conceptLink }, '/api/v1/taxa', BASE);
   assert.deepEqual(record.accepted, {
     name: 'Calymene',
     permid: 'txn-9',
-    href: '/api/v1/taxa/txn-9',
+    href: `${BASE}/api/v1/taxa/txn-9`,
   });
 });
 
@@ -116,9 +118,9 @@ test('links to two different groups each hydrate against their own group base', 
     authority: { citation: 'Green 1974', permid: 'aut-7' },
   };
 
-  hydrateLinkHrefs(record, links, '/api/v1/taxa');
-  assert.equal(record.reference.href, '/api/v1/references/ref-3');
-  assert.equal(record.authority.href, '/api/v1/authorities/aut-7');
+  hydrateLinkHrefs(record, links, '/api/v1/taxa', BASE);
+  assert.equal(record.reference.href, `${BASE}/api/v1/references/ref-3`);
+  assert.equal(record.authority.href, `${BASE}/api/v1/authorities/aut-7`);
   // The base is derived from the mounted prefix, so a future version follows.
   assert.equal(groupBase('/api/v2/taxa', 'authorities'), '/api/v2/authorities');
 });
@@ -130,7 +132,7 @@ test('soft-removal suppression holds for a non-references target', () => {
 
   // A removed target resolves to null in SQL, and hydration leaves it null.
   const record = { permid: 'txn-1', authority: null, accepted: null };
-  hydrateLinkHrefs(record, links, '/api/v1/taxa');
+  hydrateLinkHrefs(record, links, '/api/v1/taxa', BASE);
   assert.equal(record.authority, null);
   assert.equal(record.accepted, null);
 });

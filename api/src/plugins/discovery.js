@@ -39,10 +39,11 @@ function childSegments(base, urls) {
   return [...segments].sort();
 }
 
-function buildLinks(base, urls) {
-  const links = { self: base };
+/** Absolute links for a base path: the public base URL followed by each path. */
+function buildLinks(base, urls, publicBaseUrl) {
+  const links = { self: publicBaseUrl + base };
   for (const segment of childSegments(base, urls)) {
-    links[segment] = base === '/' ? `/${segment}` : `${base}/${segment}`;
+    links[segment] = publicBaseUrl + (base === '/' ? `/${segment}` : `${base}/${segment}`);
   }
   return links;
 }
@@ -61,7 +62,7 @@ export default fp(async (fastify) => {
   // rather than walking routes on every request.
   fastify.addHook('onReady', async () => {
     for (const base of BASE_PATHS) {
-      linkMaps[base] = buildLinks(base, urls);
+      linkMaps[base] = buildLinks(base, urls, fastify.publicBaseUrl);
     }
   });
 

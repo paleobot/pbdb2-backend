@@ -5,6 +5,8 @@
  * is followable in both single reads and list items.
  *
  * `href` points at the linked lineage's read URL in its own target route group.
+ * It is absolute: the app's public base URL (`fastify.publicBaseUrl`, passed in
+ * as `base` so this module stays free of Fastify) followed by the path.
  * Because hydration runs over data already filtered for soft-removal
  * (suppression happens in SQL), no `href` can ever point at a removed resource.
  */
@@ -19,6 +21,9 @@ import path from 'node:path';
  * adapts automatically to a future `v2` and assumes only that the target is a
  * sibling group under the same version prefix (it is, per the autoload layout).
  *
+ * The result is a path, not a URL: `path.posix.join` would mangle `https://`,
+ * so the base is prefixed only when the `href` is written.
+ *
  * @param {string} prefix  the citing route group's `fastify.prefix`
  * @param {string} group   the target route group name (e.g. 'references')
  * @returns {string} that group's base path
@@ -28,7 +33,7 @@ export function groupBase(prefix, group) {
 }
 
 /**
- * Add `href = <target group base>/{permid}` to each resolved link object on a
+ * Add `href = <base><target group path>/{permid}` to each resolved link object on a
  * record, for every field named by the `links` config. Each link's base comes
  * from its own `target`, so one record may carry links into different groups.
  * Mutates and returns the record. Safe for a `null` single-valued link, an empty
@@ -38,18 +43,19 @@ export function groupBase(prefix, group) {
  * @param {T} record
  * @param {Record<string, import('./resource-tables.js').LinkDeclaration>} [links]
  * @param {string} prefix  the citing route group's `fastify.prefix`
+ * @param {string} base    the app's public base URL
  * @returns {T}
  */
-export function hydrateLinkHrefs(record, links, prefix) {
+export function hydrateLinkHrefs(record, links, prefix, base) {
   if (!record || !links) return record;
   for (const [as, link] of Object.entries(links)) {
     const value = record[as];
     if (value == null) continue;
-    const base = groupBase(prefix, link.target);
+    const url = base + groupBase(prefix, link.target);
     if (Array.isArray(value)) {
-      for (const item of value) addHref(item, base);
+      for (const item of value) addHref(item, url);
     } else {
-      addHref(value, base);
+      addHref(value, url);
     }
   }
   return record;
@@ -66,24 +72,25 @@ export function hydrateLinkHrefs(record, links, prefix) {
  * @param {T} record
  * @param {object} source  annotated payload source
  * @param {string} prefix  the citing route group's `fastify.prefix`
+ * @param {string} base    the app's public base URL
  * @returns {T}
  */
-export function hydrateSourceLinks(record, source, prefix) {
+export function hydrateSourceLinks(record, source, prefix, base) {
   if (!record) return record;
   for (const [name, prop] of Object.entries(source.properties ?? {})) {
     const value = record[name];
     if (prop['x-link']) {
-      addHref(value, groupBase(prefix, prop['x-link'].target));
+      addHref(value, base + groupBase(prefix, prop['x-link'].target));
     } else if (prop.items?.['x-link'] && Array.isArray(value)) {
-      const base = groupBase(prefix, prop.items['x-link'].target);
-      for (const item of value) addHref(item, base);
+      const url = base + groupBase(prefix, prop.items['x-link'].target);
+      for (const item of value) addHref(item, url);
     }
   }
   return record;
 }
 
-function addHref(link, base) {
-  if (link && link.permid) link.href = `${base}/${link.permid}`;
+function addHref(link, groupUrl) {
+  if (link && link.permid) link.href = `${groupUrl}/${link.permid}`;
 }
 
 /**
@@ -106,14 +113,15 @@ function addHref(link, base) {
  * @template T
  * @param {T} record
  * @param {string} prefix  the citing route group's `fastify.prefix`
+ * @param {string} base    the app's public base URL
  * @param {string} [field] the chain field name
  * @returns {T}
  */
-export function hydrateChainHrefs(record, prefix, field = 'containingTaxa') {
+export function hydrateChainHrefs(record, prefix, base, field = 'containingTaxa') {
   if (!record) return record;
 
   for (let node = record[field]; node; node = node[field]) {
-    addHref(node, prefix);
+    addHref(node, base + prefix);
   }
   return record;
 }

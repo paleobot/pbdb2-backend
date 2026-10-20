@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { build } from '../src/app.js';
+import { build, DEFAULT_PUBLIC_BASE_URL as BASE } from '../src/app.js';
 import { makeTaxaRepository } from '../src/lib/taxa-repository.js';
 
 /**
@@ -54,6 +54,18 @@ function fakeTaxaPg({ taxa = [TAXON], ancestors = ANCESTORS } = {}) {
   };
 }
 
+test('descriptor links and the chain start with the configured base', async (t) => {
+  const base = 'https://pbdb2.example.org/base';
+  const app = build({ pg: fakeTaxaPg(), publicBaseUrl: base });
+  t.after(() => app.close());
+
+  const { data } = (await app.inject({ method: 'GET', url: `/api/v1/taxa/${OWN_CONCEPT}` })).json();
+  assert.equal(data.authority.href, `${base}/api/v1/authorities/aut-1`);
+  assert.equal(data.accepted.href, `${base}/api/v1/taxa/${OWN_CONCEPT}`);
+  assert.equal(data.containingTaxa.href, `${base}/api/v1/taxa/${PARENT}`);
+  assert.equal(data.containingTaxa.containingTaxa.href, `${base}/api/v1/taxa/${GRANDPARENT}`);
+});
+
 test('taxa single read returns the representation with a nested chain', async (t) => {
   const app = build({ pg: fakeTaxaPg() });
   t.after(() => app.close());
@@ -69,13 +81,13 @@ test('taxa single read returns the representation with a nested chain', async (t
   assert.equal(data.nomenclaturalStatus, null);
 
   // Links carry their own group's href; the chain points back into taxa.
-  assert.equal(data.authority.href, '/api/v1/authorities/aut-1');
-  assert.equal(data.accepted.href, `/api/v1/taxa/${OWN_CONCEPT}`);
+  assert.equal(data.authority.href, `${BASE}/api/v1/authorities/aut-1`);
+  assert.equal(data.accepted.href, `${BASE}/api/v1/taxa/${OWN_CONCEPT}`);
 
   // Outermost chain entry is the IMMEDIATE container, nesting root-ward.
   assert.equal(data.containingTaxa.name, 'Calymene');
   assert.equal(data.containingTaxa.rank, 'genus');
-  assert.equal(data.containingTaxa.href, `/api/v1/taxa/${PARENT}`);
+  assert.equal(data.containingTaxa.href, `${BASE}/api/v1/taxa/${PARENT}`);
   assert.equal(data.containingTaxa.containingTaxa.name, 'Trilobita');
   assert.equal(data.containingTaxa.containingTaxa.containingTaxa, null, 'root ends the chain');
 });
@@ -176,7 +188,7 @@ test('the list omits the chain by default and includes it on request', async (t)
     await app.inject({ method: 'GET', url: '/api/v1/taxa?includeContainingTaxa=true' })
   ).json();
   assert.equal(expanded.data[0].containingTaxa.name, 'Calymene');
-  assert.equal(expanded.data[0].containingTaxa.href, `/api/v1/taxa/${PARENT}`);
+  assert.equal(expanded.data[0].containingTaxa.href, `${BASE}/api/v1/taxa/${PARENT}`);
 });
 
 test('includeContainingTaxa=false is accepted and omits the chain', async (t) => {

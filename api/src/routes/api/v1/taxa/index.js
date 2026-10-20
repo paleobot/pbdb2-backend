@@ -34,7 +34,11 @@ export default async function taxa(fastify) {
   // persistence layer emits pure `{ label, permid }` objects with no HTTP
   // knowledge. The chain points back into this same group.
   const hydrate = (record) =>
-    hydrateChainHrefs(hydrateLinkHrefs(record, descriptor.links, fastify.prefix), fastify.prefix);
+    hydrateChainHrefs(
+      hydrateLinkHrefs(record, descriptor.links, fastify.prefix, fastify.publicBaseUrl),
+      fastify.prefix,
+      fastify.publicBaseUrl,
+    );
 
   // Throws synchronously, so the shared handlers' `stub()` call surfaces as a
   // 503 through the normal error path rather than resolving to a stub record.

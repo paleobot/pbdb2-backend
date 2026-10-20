@@ -167,7 +167,7 @@ value) or whose `items` carry it (adding `href` to each item of the array).
 
 - **WHEN** a collection with two additional references is read
 - **THEN** each `additionalReferences` item carries `href` equal to
-  `/api/v1/references/{permid}`
+  `<base>/api/v1/references/{permid}`, where `<base>` is the public base URL
 
 ### Requirement: Authority reads embed their reference
 
@@ -179,7 +179,7 @@ declared in the authority payload source as
 - `title` is the referenced `refs` row's `reference->>'title'`, and the key is left
   out when that is NULL;
 - `permid` is that row's `permid`;
-- `href` is `/api/v1/references/{permid}`.
+- `href` is `<base>/api/v1/references/{permid}`, where `<base>` is the public base URL.
 
 When the referenced reference is soft-removed, `reference` SHALL be `null`.
 Authorities SHALL declare no descriptor `links`.
@@ -190,7 +190,7 @@ Authorities SHALL declare no descriptor `links`.
 - **THEN** `data.reference` is `{ title, permid, href }`
 - **AND** `title` is the referenced row's `reference->>'title'`
 - **AND** `permid` is the referenced lineage's `permid`
-- **AND** `href` is `/api/v1/references/{permid}`
+- **AND** `href` is `<base>/api/v1/references/{permid}`
 
 #### Scenario: Authority list items include their reference
 
@@ -280,17 +280,19 @@ collection reference model (`docs/api-design-backlog.md`).
 Enriched links SHALL be embedded as domain fields within `data` (not within the
 envelope `links`), and each link object SHALL carry an `href` pointing at the
 target lineage's read URL so the same object is navigable in both single reads
-and list items. For links targeting the `references` group that URL is
-`/api/v1/references/{permid}`. The `href` SHALL be hydrated at the route/envelope
-boundary from the resolved `permid`; the persistence layer SHALL emit only the
-label and `permid` and SHALL NOT construct URLs. Hydration SHALL derive `href`
+and list items. That URL SHALL be absolute: the public base URL
+(`api-foundation`) followed by the target's path. For links targeting the
+`references` group it is `<base>/api/v1/references/{permid}`. The `href` SHALL be
+hydrated at the route/envelope boundary from the resolved `permid`; the
+persistence layer SHALL emit only the label and `permid` and SHALL NOT construct
+URLs. Hydration SHALL derive `href`
 only from link objects already filtered for soft-removal, so no `href` can point
 at a suppressed resource.
 
 #### Scenario: Reference objects carry a resolvable href
 
 - **WHEN** any enriched reference object is returned
-- **THEN** it includes `href` equal to `/api/v1/references/{permid}` for its
+- **THEN** it includes `href` equal to `<base>/api/v1/references/{permid}` for its
   `permid`
 
 #### Scenario: Persistence layer is HTTP-agnostic

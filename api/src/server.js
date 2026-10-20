@@ -25,7 +25,18 @@ if (!config.pg.configured) {
   process.exit(1);
 }
 
-const app = build({ logger: true });
+// Outside development a missing base would send `localhost` links to real
+// clients, so it must be set explicitly there.
+if (!process.env.PUBLIC_BASE_URL && config.nodeEnv !== 'development') {
+  console.error(
+    `Cannot start: PUBLIC_BASE_URL is required when NODE_ENV is ${config.nodeEnv}. ` +
+      'Set it in .env (see .env.example).',
+  );
+  process.exit(1);
+}
+
+const app = build({ logger: true, publicBaseUrl: config.publicBaseUrl });
+app.log.info(`Links use public base URL ${app.publicBaseUrl}`);
 
 try {
   const address = await app.listen({ host: config.host, port: config.port });

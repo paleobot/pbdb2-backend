@@ -13,8 +13,9 @@ or read from `migrations/` (`tests/repository-layout.test.js` enforces it).
 
 The backend database is PostgreSQL, JSONB-heavy: each resource row stores its domain content as a JSONB payload
 alongside relational metadata, a stable `permid`, and an immutable version chain
-(`preceded_by_id` / `succeeded_by_id`) with soft deletion (`removed`). This API
-does not yet talk to that database — handlers currently return stubbed data.
+(`preceded_by_id` / `succeeded_by_id`) with soft deletion (`removed`). The API
+reads that database; writes are still stubbed, and without `PG_*` configured
+`build()` falls back to stub reads (the server refuses to start).
 
 ## Stack & conventions
 
@@ -36,7 +37,9 @@ Run from the repository root (`npm install` there installs every workspace;
 there is no `api/package-lock.json`):
 
 - `npm start -w api` — run the server (`src/server.js`). Honors `HOST`, `PORT`,
-  `NODE_ENV` (defaults: `0.0.0.0`, `3000`, `development`).
+  `NODE_ENV` (defaults: `0.0.0.0`, `3000`, `development`) and `PUBLIC_BASE_URL`
+  (default `http://localhost:$PORT`; required when `NODE_ENV` is not
+  `development`).
 - `npm test -w api` — the API's unit tests (`node --test`, no database).
   The root `npm test` runs them along with every other area's tests.
 - `npm run test:integration` — the API's integration suite against an
@@ -76,6 +79,14 @@ docs/                   design notes (e.g. response-envelope rationale)
   `plugins/envelope.js`. Single resource → `data` is an object; list → `data` is
   an array with counts in `meta`. The rationale and the comparison against the
   legacy `data1.2` envelope are in `docs/api-response-envelope-comparison.md`.
+- **Absolute links:** every URL in a response body (`links.self`, `next`/`prev`,
+  each `href`, discovery links) is the public base URL followed by the path.
+  `build({ publicBaseUrl })` validates it and decorates `fastify.publicBaseUrl`;
+  the default is the fixed `DEFAULT_PUBLIC_BASE_URL` (`http://localhost:3000`),
+  never the environment, so tests assert against that constant. `server.js`
+  passes the configured value. The base is never taken from `Host` or
+  `X-Forwarded-*`. Paths are still built as paths (`groupBase()`) and the base is
+  prefixed where each link is written.
 - **Versioning:** `/api/v1` is derived from the `routes/api/v1/` directory via
   `@fastify/autoload`. A future `v2` is a new sibling directory, not a rewrite.
 - **Auth seam:** write verbs (POST/PUT/PATCH/DELETE) attach the

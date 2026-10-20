@@ -324,18 +324,15 @@ to retire, and each gives the response schema a shape that exists only when it i
 
 ## Full URLs in links
 
-**Deferred; recommendation recorded.** Every link the API emits is a root-relative path: `href` values
-(`/api/v1/references/{permid}`), and the envelope's `links.self`, `next` and `prev`. Full URLs
-(`https://…/api/v1/…`) would make links clickable in browser JSON viewers, let scripts fetch an `href`
-as is, and keep links working in saved responses.
+**Done (`absolute-link-urls`, 2026-10-20).** Every link the API emits is an absolute URL: the
+configured `PUBLIC_BASE_URL` followed by the path. That covers each hydrated `href`, the envelope's
+`links.self`, `next` and `prev`, and the discovery links. The base is configured, never derived
+from `Host` or `X-Forwarded-*`, and the server refuses to start outside development without it.
+`groupBase()` (`api/src/lib/link-hydration.js`) still builds paths; the base is prefixed where each
+link is written.
 
-Recommended: a configured `PUBLIC_BASE_URL` (with a local-dev default) rather than deriving the base
-from `Host` and `X-Forwarded-*`, which needs `trustProxy` set correctly and echoes client headers.
-Do it as one API-wide change covering the envelope, the pagination links and every hydrated `href`,
-so that no response mixes paths and URLs. `groupBase()` (`api/src/lib/link-hydration.js`) is where
-hydrated `href` bases are built.
-
-*Reasoning:* discussion of 2026-10-06, during `authority-reads-from-payload-schemas` (design D6).
+*Reasoning:* discussion of 2026-10-06, during `authority-reads-from-payload-schemas` (design D6);
+`openspec/changes/absolute-link-urls/design.md`.
 
 ## Serving the schemas to clients
 

@@ -80,9 +80,10 @@ export function decodeCursor(token) {
  * @param {{ records: Array<{ permid: string }>, hasMore: boolean }} page
  * @param {{ permid: string, direction: 'next'|'prev' }} [cursor]
  *   the cursor this request travelled in on, if any
+ * @param {string} base  the app's public base URL, which every link starts with
  * @returns {{ next: string|null, prev: string|null }}
  */
-export function pageLinks(url, { records, hasMore }, cursor) {
+export function pageLinks(url, { records, hasMore }, cursor, base) {
   if (records.length === 0) return { next: null, prev: null };
 
   const backward = cursor?.direction === BACKWARD;
@@ -90,15 +91,15 @@ export function pageLinks(url, { records, hasMore }, cursor) {
   const hasPrev = backward ? hasMore : Boolean(cursor);
 
   return {
-    next: hasNext ? withCursor(url, records[records.length - 1].permid, FORWARD) : null,
-    prev: hasPrev ? withCursor(url, records[0].permid, BACKWARD) : null,
+    next: hasNext ? withCursor(url, records[records.length - 1].permid, FORWARD, base) : null,
+    prev: hasPrev ? withCursor(url, records[0].permid, BACKWARD, base) : null,
   };
 }
 
-function withCursor(url, permid, direction) {
-  // The base is required by the URL parser and discarded: these links are
-  // path-relative, matching `links.self`.
+function withCursor(url, permid, direction, base) {
+  // The parser's origin is a placeholder and discarded: the link is the public
+  // base followed by the request's path and query, matching `links.self`.
   const parsed = new URL(url, 'http://pagination.invalid');
   parsed.searchParams.set('cursor', encodeCursor({ permid, direction }));
-  return `${parsed.pathname}${parsed.search}`;
+  return `${base}${parsed.pathname}${parsed.search}`;
 }

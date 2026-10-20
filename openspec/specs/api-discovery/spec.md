@@ -14,7 +14,8 @@ discovery in sync with the routes that actually exist.
 The system SHALL serve an index/discovery document at each API base path — `/`,
 `/api`, and `/api/v1` — using the standard `{ data, meta, links }` envelope.
 `data` SHALL describe the node, `meta.type` SHALL be `index`, and `links` SHALL
-include `self` plus one entry per immediate child path.
+include `self` plus one entry per immediate child path, each an absolute URL: the
+public base URL (`api-foundation`) followed by the path.
 
 #### Scenario: Root lists its children
 
@@ -22,7 +23,8 @@ include `self` plus one entry per immediate child path.
 - **THEN** the system responds with HTTP 200
 - **AND** the body uses the `{ data, meta, links }` envelope with `meta.type` of
   `index`
-- **AND** `links` includes `self` and a link to `/api`
+- **AND** `links` includes `self` as `<base>/` and a link to `/api` as `<base>/api`,
+  where `<base>` is the public base URL
 
 #### Scenario: Version root lists its resources
 

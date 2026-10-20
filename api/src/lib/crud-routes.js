@@ -47,7 +47,7 @@ export function registerCrudRoutes(
   // link's own target group, not hard-coded. A group with no source and no
   // `hydrate` of its own (specimens, a stub) has no links to hydrate.
   const hydrate = customHydrate ?? (source
-    ? (record) => hydrateSourceLinks(record, source, fastify.prefix)
+    ? (record) => hydrateSourceLinks(record, source, fastify.prefix, fastify.publicBaseUrl)
     : (record) => record);
 
   fastify.get('/', listReadHandler(fastify, { type, stub, repository, hydrate, expansions }));
@@ -202,7 +202,7 @@ export function listReadHandler(fastify, { type, stub, repository, hydrate, expa
     page.records.forEach(hydrate);
     return reply.sendList(page.records, {
       meta: { type },
-      links: pageLinks(request.url, page, filters.page.cursor),
+      links: pageLinks(request.url, page, filters.page.cursor, fastify.publicBaseUrl),
     });
   };
 }

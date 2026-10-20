@@ -48,7 +48,8 @@ export default async function schemas(fastify) {
   const write = { preHandler: fastify.authenticate };
   const repository = repositoryForResource(fastify, 'schemas');
   const { source } = descriptorFor('schemas');
-  const hydrate = (record) => hydrateSourceLinks(record, source, fastify.prefix);
+  const hydrate = (record) =>
+    hydrateSourceLinks(record, source, fastify.prefix, fastify.publicBaseUrl);
 
   // List — flat heads through the shared seam (the tree shape is per-read)
   fastify.get(

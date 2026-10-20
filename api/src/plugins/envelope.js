@@ -5,6 +5,9 @@ import fp from 'fastify-plugin';
  * `{ data, meta, links }`. Centralizing it here is the single source of truth
  * for the shape, so it never drifts between resources.
  *
+ * Every `links.self` is absolute: the app's public base URL (`build()`'s
+ * `publicBaseUrl`) followed by the request's path and query as received.
+ *
  * Rationale and the comparison against the legacy data1.2 envelope live in
  * docs/api-response-envelope-comparison.md.
  */
@@ -24,7 +27,7 @@ export default fp(async (fastify) => {
         ...meta,
       },
       links: {
-        self: this.request.url,
+        self: this.server.publicBaseUrl + this.request.url,
         ...links,
       },
     });
@@ -45,7 +48,7 @@ export default fp(async (fastify) => {
         ...meta,
       },
       links: {
-        self: this.request.url,
+        self: this.server.publicBaseUrl + this.request.url,
         next: null,
         prev: null,
         ...links,
@@ -64,7 +67,7 @@ export default fp(async (fastify) => {
       data,
       meta: { type: 'index' },
       links: {
-        self: this.request.url,
+        self: this.server.publicBaseUrl + this.request.url,
         ...links,
       },
     });

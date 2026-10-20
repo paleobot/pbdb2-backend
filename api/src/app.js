@@ -4,7 +4,16 @@ import { fileURLToPath } from 'node:url';
 import Fastify from 'fastify';
 import autoload from '@fastify/autoload';
 
+import { normalizePublicBaseUrl } from './config.js';
+
 const __dirname = dirname(fileURLToPath(import.meta.url));
+
+/**
+ * The public base URL `build()` uses when none is passed. Fixed rather than read
+ * from the environment, so tests see the same links whatever `.env` holds;
+ * `server.js` passes the configured one.
+ */
+export const DEFAULT_PUBLIC_BASE_URL = 'http://localhost:3000';
 
 /**
  * Build a fully configured Fastify instance WITHOUT listening.
@@ -21,7 +30,12 @@ export function build(opts = {}) {
   // `pg` is a test seam, not a Fastify option: `build({ pg })` injects a fake
   // postgres client so route logic can be driven with no database. The postgres
   // plugin sees the decorator already exists and skips connecting.
-  const { pg, ...fastifyOpts } = opts;
+  //
+  // `publicBaseUrl` is the base every link in a response starts with
+  // (`links.self`, `next`/`prev`, `href`, discovery). It is validated here, so a
+  // bad value throws before the app exists.
+  const { pg, publicBaseUrl = DEFAULT_PUBLIC_BASE_URL, ...fastifyOpts } = opts;
+  const base = normalizePublicBaseUrl(publicBaseUrl);
 
   const app = Fastify({
     logger: false,
@@ -30,6 +44,7 @@ export function build(opts = {}) {
     ...fastifyOpts,
   });
 
+  app.decorate('publicBaseUrl', base);
   if (pg) app.decorate('pg', pg);
 
   // Cross-cutting plugins first (each is fastify-plugin wrapped, so its

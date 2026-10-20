@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { build } from '../src/app.js';
+import { build, DEFAULT_PUBLIC_BASE_URL as BASE } from '../src/app.js';
 import { authoritySource } from '../../payloadSchemas/authority.schema.js';
 import { collectionSource } from '../../payloadSchemas/collection.schema.js';
 import { referenceSource } from '../../payloadSchemas/reference.schema.js';
@@ -73,7 +73,7 @@ test('single read is the merged payload with a hydrated reference link', async (
     descriptors: ['Green'],
     year: '1974',
     publishedInReference: true,
-    reference: { permid: 'ref-7', title: 'Fossil leaves', href: '/api/v1/references/ref-7' },
+    reference: { permid: 'ref-7', title: 'Fossil leaves', href: `${BASE}/api/v1/references/ref-7` },
   });
 
   // The head query selects the column merge needs, with no link sub-select; one
@@ -94,8 +94,8 @@ test('list items honour the contract: titled, untitled and removed references', 
   const { data } = (await app.inject({ method: 'GET', url: '/api/v1/authorities' })).json();
   assertContract(data);
   assert.deepEqual(data.map((d) => d.reference), [
-    { permid: 'ref-7', title: 'Fossil leaves', href: '/api/v1/references/ref-7' },
-    { permid: 'ref-9', href: '/api/v1/references/ref-9' },
+    { permid: 'ref-7', title: 'Fossil leaves', href: `${BASE}/api/v1/references/ref-7` },
+    { permid: 'ref-9', href: `${BASE}/api/v1/references/ref-9` },
     null,
   ]);
   // One lookup for the page, restricted to the ids the page cites.
@@ -130,7 +130,7 @@ test('stub read honours the contract (no DB configured)', async (t) => {
 
   const { data } = (await app.inject({ method: 'GET', url: '/api/v1/authorities/aut-x' })).json();
   assertContract(data);
-  assert.equal(data.reference.href, '/api/v1/references/ref-00000000');
+  assert.equal(data.reference.href, `${BASE}/api/v1/references/ref-00000000`);
   const list = (await app.inject({ method: 'GET', url: '/api/v1/authorities' })).json().data;
   assertContract(list);
 });
@@ -189,7 +189,7 @@ function collectionsPg() {
   };
 }
 
-const ref = (permid, title) => ({ permid, ...(title ? { title } : {}), href: `/api/v1/references/${permid}` });
+const ref = (permid, title) => ({ permid, ...(title ? { title } : {}), href: `${BASE}/api/v1/references/${permid}` });
 
 test('collection single read: coordinates, a primary repeated among the additional references', async (t) => {
   const pg = collectionsPg();
@@ -259,7 +259,7 @@ test('collection stub read honours the contract (no DB configured)', async (t) =
 
   const { data } = (await app.inject({ method: 'GET', url: '/api/v1/collections/col-x' })).json();
   assertCollectionContract(data);
-  assert.equal(data.primaryReference.href, '/api/v1/references/ref-00000000');
+  assert.equal(data.primaryReference.href, `${BASE}/api/v1/references/ref-00000000`);
   assert.equal('country' in data || 'state' in data, false);
   assertCollectionContract((await app.inject({ method: 'GET', url: '/api/v1/collections' })).json().data);
 });

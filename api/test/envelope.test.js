@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { build } from '../src/app.js';
+import { build, DEFAULT_PUBLIC_BASE_URL as BASE } from '../src/app.js';
 
 test('single read returns the { data, meta, links } envelope', async (t) => {
   const app = build();
@@ -20,7 +20,7 @@ test('single read returns the { data, meta, links } envelope', async (t) => {
   assert.deepEqual(body.meta.version, { supersedes: null, supersededBy: null });
 
   // links + self
-  assert.equal(body.links.self, '/api/v1/references/ref-123');
+  assert.equal(body.links.self, `${BASE}/api/v1/references/ref-123`);
 });
 
 test('list read returns an array with counts and reserved pagination slots', async (t) => {

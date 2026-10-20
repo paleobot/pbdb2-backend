@@ -48,7 +48,9 @@ A single, consistent structure for every endpoint:
   soft-delete status, version lineage, provenance, and (for lists) result
   counts and timing.
 - **`links`** — URLs: the record's own address (`self`), related resources, the
-  version history, and pagination (`next` / `prev`) for lists.
+  version history, and pagination (`next` / `prev`) for lists. Every URL is
+  absolute, starting with the configured `PUBLIC_BASE_URL` (`absolute-link-urls`,
+  2026-10-20); the examples use `https://api.example.org`.
 
 ### Single record
 
@@ -70,10 +72,10 @@ A single, consistent structure for every endpoint:
     "authorizer": "7"
   },
   "links": {
-    "self": "/api/v1/collections/5f3c8e9a-…",
-    "primaryReference": "/api/v1/references/9a1f-…",
-    "earlyInterval": "/api/v1/intervals/…",
-    "history": "/api/v1/collections/5f3c8e9a-…/versions"
+    "self": "https://api.example.org/api/v1/collections/5f3c8e9a-…",
+    "primaryReference": "https://api.example.org/api/v1/references/9a1f-…",
+    "earlyInterval": "https://api.example.org/api/v1/intervals/…",
+    "history": "https://api.example.org/api/v1/collections/5f3c8e9a-…/versions"
   }
 }
 ```
@@ -91,8 +93,8 @@ A single, consistent structure for every endpoint:
     "elapsed_ms": 18
   },
   "links": {
-    "self": "/api/v1/collections?…",
-    "next": "/api/v1/collections?…",
+    "self": "https://api.example.org/api/v1/collections?…",
+    "next": "https://api.example.org/api/v1/collections?…",
     "prev": null
   }
 }

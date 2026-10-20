@@ -332,8 +332,9 @@ Settled 2026-10-06, in `authority-reads-from-payload-schemas` (design.md has the
    far.
 3. **Under B:** no longer applies.
 4. **Pilot:** authorities first.
-5. **`href`:** plain root-relative paths added by the API, as before. Full URLs are deferred
-   (`docs/api-design-backlog.md`, "Full URLs in links"), and so are Hyper-Schema templates.
+5. **`href`:** added by the API, as before. Plain root-relative paths at first; absolute URLs
+   from the configured `PUBLIC_BASE_URL` since `absolute-link-urls` (2026-10-20), which made every
+   link in a response absolute. Hyper-Schema templates stay deferred.
 6. **Change layout:** one change for the annotations and the reads. The `referenceID` → `permid`
    rename went first, as its own change.
 

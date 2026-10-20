@@ -1,7 +1,7 @@
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { build } from '../../src/app.js';
+import { build, DEFAULT_PUBLIC_BASE_URL as BASE } from '../../src/app.js';
 import { makeReadRepository } from '../../src/lib/repository.js';
 import { authoritySource } from '../../../payloadSchemas/authority.schema.js';
 import { collectionSource } from '../../../payloadSchemas/collection.schema.js';
@@ -183,7 +183,7 @@ test('schema read: merged head, a repeated primary, and a merged tree of current
 
   const { data } = (await app.inject({ method: 'GET', url: `/api/v1/schemas/${schema.permid}` })).json();
   assertSchemaTreeContract(data);
-  const link = { title: 'Backing ref', permid: ref.permid, href: `/api/v1/references/${ref.permid}` };
+  const link = { title: 'Backing ref', permid: ref.permid, href: `${BASE}/api/v1/references/${ref.permid}` };
   assert.deepEqual(data.primaryReference, link);
   assert.deepEqual(data.additionalReferences, [link], 'the primary repeats as stored');
 
@@ -232,7 +232,7 @@ test('re-versioned schema keeps its tree and child rows (FKs swung to the new he
   const { data } = (await app.inject({ method: 'GET', url: `/api/v1/schemas/${v1.permid}` })).json();
   assertSchemaTreeContract(data);
   assert.equal(data.title, 'v2', 'reads the new head');
-  assert.deepEqual(data.additionalReferences, [{ permid: add.permid, href: `/api/v1/references/${add.permid}` }], 'an untitled reference has no title key');
+  assert.deepEqual(data.additionalReferences, [{ permid: add.permid, href: `${BASE}/api/v1/references/${add.permid}` }], 'an untitled reference has no title key');
   assert.deepEqual(data.characters.map((c) => c.permid), [char.permid]);
 });
 
@@ -301,7 +301,7 @@ test('authority routes honour the out contract over real PostgreSQL, with hrefs'
 
   const single = (await app.inject({ method: 'GET', url: `/api/v1/authorities/${live}` })).json().data;
   assertAuthorityContract(single);
-  assert.deepEqual(single.reference, { title: 'Route ref', permid: titled.permid, href: `/api/v1/references/${titled.permid}` });
+  assert.deepEqual(single.reference, { title: 'Route ref', permid: titled.permid, href: `${BASE}/api/v1/references/${titled.permid}` });
 
   const list = (await app.inject({ method: 'GET', url: `/api/v1/authorities?ids=${live},${orphaned}` })).json().data;
   for (const item of list) assertAuthorityContract(item);
@@ -387,8 +387,8 @@ test('collection read merges coordinates and embeds references, a repeated prima
   t.after(() => app.close());
   const { data } = (await app.inject({ method: 'GET', url: `/api/v1/collections/${collectionPermid}` })).json();
   assertCollectionContract(data);
-  assert.equal(data.primaryReference.href, `/api/v1/references/${primaryPermid}`);
-  assert.deepEqual(data.additionalReferences.map((r) => r.href), [primaryPermid, add1Permid, add2Permid].map((p) => `/api/v1/references/${p}`));
+  assert.equal(data.primaryReference.href, `${BASE}/api/v1/references/${primaryPermid}`);
+  assert.deepEqual(data.additionalReferences.map((r) => r.href), [primaryPermid, add1Permid, add2Permid].map((p) => `${BASE}/api/v1/references/${p}`));
   const list = (await app.inject({ method: 'GET', url: `/api/v1/collections?ids=${collectionPermid}` })).json().data;
   assert.equal(list.length, 1);
   assertCollectionContract(list[0]);

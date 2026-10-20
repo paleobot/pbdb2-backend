@@ -83,6 +83,22 @@ test('first page: bounded by the default limit, ordered by permid, no prev link'
   assert.equal(body.meta.returned, DEFAULT_LIMIT);
 });
 
+test('pagination links start with the configured base and can be followed', async (t) => {
+  const base = 'https://pbdb2.example.org/base';
+  const app = build({ pg: fakeKeysetPg(), publicBaseUrl: base });
+  t.after(() => app.close());
+
+  const first = (await app.inject({ method: 'GET', url: '/api/v1/references?limit=4' })).json();
+  assert.ok(first.links.next.startsWith(`${base}/api/v1/references?`), first.links.next);
+  assert.match(first.links.next, /limit=4/);
+
+  // inject() takes the path; a client would request the URL as is.
+  const path = (url) => url.slice(base.length);
+  const second = (await app.inject({ method: 'GET', url: path(first.links.next) })).json();
+  assert.ok(second.links.prev.startsWith(`${base}/api/v1/references?`), second.links.prev);
+  assert.notDeepEqual(permids(second), permids(first));
+});
+
 test('forward paging walks every head exactly once, in order, then stops', async (t) => {
   const app = build({ pg: fakeKeysetPg() });
   t.after(() => app.close());

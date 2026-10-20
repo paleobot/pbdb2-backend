@@ -12,12 +12,41 @@ const BACKEND_ROOT = fileURLToPath(new URL('../../', import.meta.url));
  * can swap in schema-validated config if the surface grows.
  */
 export function loadConfig(env = process.env) {
+  const port = Number(env.PORT ?? 3000);
   return {
     host: env.HOST ?? '0.0.0.0',
-    port: Number(env.PORT ?? 3000),
+    port,
     nodeEnv: env.NODE_ENV ?? 'development',
+    publicBaseUrl: env.PUBLIC_BASE_URL || `http://localhost:${port}`,
     pg: loadPgConfig(env),
   };
+}
+
+/**
+ * Validate and normalize the public base URL that every link in a response
+ * starts with. It must be an absolute http(s) URL with no query, fragment or
+ * credentials; a path is allowed, for a proxy that mounts the API under a
+ * prefix and strips it before forwarding. The trailing `/` is removed, so an
+ * absolute link is plain `base + path` for the root-relative paths the API
+ * builds. Throws on anything else, so a misconfigured server fails at startup.
+ *
+ * @param {string} value
+ * @returns {string} the base without a trailing slash
+ */
+export function normalizePublicBaseUrl(value) {
+  let url;
+  try {
+    url = new URL(value);
+  } catch {
+    throw new Error(`PUBLIC_BASE_URL must be an absolute URL, got ${JSON.stringify(value)}`);
+  }
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+    throw new Error(`PUBLIC_BASE_URL must be http: or https:, got ${JSON.stringify(value)}`);
+  }
+  if (url.search || url.hash || url.username || url.password || /[?#]/.test(value)) {
+    throw new Error(`PUBLIC_BASE_URL must carry no query, fragment or credentials, got ${JSON.stringify(value)}`);
+  }
+  return `${url.origin}${url.pathname}`.replace(/\/+$/, '');
 }
 
 /**
