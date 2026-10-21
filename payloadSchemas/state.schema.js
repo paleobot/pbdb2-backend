@@ -46,7 +46,7 @@ const stateProperties = {
 };
 
 export const stateSource = {
-	$schema: "https://json-schema.org/draft/2019-09/schema",
+	$schema: "https://json-schema.org/draft/2020-12/schema",
 	$id: "https://pbdb2.example.com/schemas/state.json",
 	title: "State",
 	description: "A state payload in the PBDB database",

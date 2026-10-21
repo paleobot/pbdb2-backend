@@ -103,7 +103,7 @@ const schemaProperties = {
 };
 
 export const schemaSource = {
-	$schema: "https://json-schema.org/draft/2019-09/schema",
+	$schema: "https://json-schema.org/draft/2020-12/schema",
 	$id: "https://pbdb2.example.com/schemas/schema.json",
 	title: "Schema",
 	description: "A schema payload in the PBDB database",

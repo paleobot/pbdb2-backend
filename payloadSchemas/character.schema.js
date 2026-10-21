@@ -38,7 +38,7 @@ const characterProperties = {
 };
 
 export const characterSource = {
-	$schema: "https://json-schema.org/draft/2019-09/schema",
+	$schema: "https://json-schema.org/draft/2020-12/schema",
 	$id: "https://pbdb2.example.com/schemas/character.json",
 	title: "Character",
 	description: "A character payload in the PBDB database",

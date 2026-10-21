@@ -9,7 +9,7 @@ enforces the boundary. The rule is one-way: migrations may import from `payloadS
 ### Requirement: `payloadSchemas/` depends on nothing outside itself
 Every JavaScript file under `payloadSchemas/`, including its tests, SHALL import and read only:
 - files under `payloadSchemas/`;
-- npm packages (bare specifiers such as `ajv/dist/2019.js`, `pg`, `dotenv`);
+- npm packages (bare specifiers such as `ajv/dist/2020.js`, `pg`, `dotenv`);
 - Node built-ins (`node:` specifiers);
 - the repository root's `.env`, and only from the tests-local database helper, as
   `repository-layout` requires. `.env` is local configuration, not code, so reading it does not make
@@ -45,7 +45,7 @@ rule.
 - **THEN** the boundary guard test fails, naming that file and the path
 
 #### Scenario: Package and built-in imports pass
-- **WHEN** `payloadSchemas/lib/ajv.js` imports `ajv/dist/2019.js` and a test imports `node:test`
+- **WHEN** `payloadSchemas/lib/ajv.js` imports `ajv/dist/2020.js` and a test imports `node:test`
 - **THEN** the guard test passes those specifiers
 
 #### Scenario: Migrations importing payloadSchemas is allowed

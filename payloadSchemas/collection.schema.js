@@ -457,7 +457,7 @@ collectionProperties.additionalReferences = {
 };
 
 export const collectionSource = {
-    $schema: "https://json-schema.org/draft/2019-09/schema",
+    $schema: "https://json-schema.org/draft/2020-12/schema",
     $id: "https://pbdb2.example.com/schemas/collection.json",
     title: "Collection",
     description: "A collection payload in the PBDB database",

@@ -64,7 +64,7 @@ const authorityProperties = {
 };
 
 export const authoritySource = {
-	$schema: "https://json-schema.org/draft/2019-09/schema",
+	$schema: "https://json-schema.org/draft/2020-12/schema",
 	$id: "https://pbdb2.example.com/schemas/authority.json",
 	title: "Authority",
 	description: "An authority payload in the PBDB database",

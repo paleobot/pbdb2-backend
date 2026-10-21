@@ -1,12 +1,11 @@
 // Second-hand attribution rule, shared across the opinions migration. Ported from
 // migrate-assignment-opinions.js / migrate-synonymy-opinions.js; reuses the
 // authorities migration's citation/descriptor builders rather than re-deriving them.
-import Ajv from 'ajv/dist/2019.js';
+import { createAjv } from '../../../payloadSchemas/lib/ajv.js';
 import { opinionAttributionSchema } from '../../../payloadSchemas/opinionAttribution.schema.js';
 import { buildCitationFromFields, buildDescriptorsFromFields } from './authorities-builders.js';
 
-const ajv = new Ajv({ allErrors: true, strict: false });
-const validateAttribution = ajv.compile(opinionAttributionSchema);
+const validateAttribution = createAjv().compile(opinionAttributionSchema);
 
 // opinions.pubyr is an optional string; empty/blank/'0' -> null.
 export function parseYear(year) {

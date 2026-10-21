@@ -25,16 +25,16 @@ Shape follows the authorities migration convention defined in the Decisions sect
 */
 
 export const opinionAttributionSchema = {
-    $schema: "https://json-schema.org/draft/2019-09/schema",
+    $schema: "https://json-schema.org/draft/2020-12/schema",
     $id: "https://pbdb2.example.com/schemas/opinionAttribution.json",
     title: "Opinion attribution",
     description: "Who a second-hand taxonomic opinion is attributed to, when that differs from the authors of the reference reporting it. Omitted entirely when the reference is itself the source.",
     type: "object",
-    unevaluatedProperties: false, //new with Draft 2019-09
+    unevaluatedProperties: false, // introduced in draft 2019-09; this schema is 2020-12
     properties: {
         attribution: {
             type: "object",
-            unevaluatedProperties: false, //new with Draft 2019-09
+            unevaluatedProperties: false, // introduced in draft 2019-09; this schema is 2020-12
             required: [
                 "citation"
             ],

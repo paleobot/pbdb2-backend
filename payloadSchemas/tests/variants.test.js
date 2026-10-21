@@ -6,7 +6,7 @@ import { createAjv } from '../lib/ajv.js';
 import { link } from '../lib/links.js';
 
 const source = () => ({
-  $schema: 'https://json-schema.org/draft/2019-09/schema',
+  $schema: 'https://json-schema.org/draft/2020-12/schema',
   $id: 'https://pbdb2.example.com/schemas/thing.json',
   type: 'object',
   properties: {
@@ -57,7 +57,7 @@ test('nested readOnly: kept in db and out, dropped and pruned from required in i
 
 // A source with one link property, as authority.reference is declared.
 const linkSource = () => ({
-  $schema: 'https://json-schema.org/draft/2019-09/schema',
+  $schema: 'https://json-schema.org/draft/2020-12/schema',
   $id: 'https://pbdb2.example.com/schemas/cites.json',
   type: 'object',
   properties: {

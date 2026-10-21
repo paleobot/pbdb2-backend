@@ -1,13 +1,12 @@
 import { mariadb, pg, closeAll } from '../lib/db.js';
 import { uuidv7 } from '../lib/uuidv7.js';
-import Ajv from 'ajv/dist/2019.js';
+import { createAjv } from '../../../payloadSchemas/lib/ajv.js';
 import { opinionAttributionSchema } from '../../../payloadSchemas/opinionAttribution.schema.js';
 
 const INSERT_BATCH_SIZE = 1000;
 const LOG_SAMPLE_LIMIT = 20;
 
-const ajv = new Ajv({ allErrors: true, strict: false });
-const validate = ajv.compile(opinionAttributionSchema);
+const validate = createAjv().compile(opinionAttributionSchema);
 
 // ---------- Pure transforms ----------
 

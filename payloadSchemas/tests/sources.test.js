@@ -12,6 +12,7 @@ import * as authorityModule from '../authority.schema.js';
 import * as schemaModule from '../schema.schema.js';
 import * as characterModule from '../character.schema.js';
 import * as stateModule from '../state.schema.js';
+import { opinionAttributionSchema } from '../opinionAttribution.schema.js';
 import { applyEnums } from '../lib/enums.js';
 import { deriveVariant, VARIANTS } from '../lib/variants.js';
 import { createAjv } from '../lib/ajv.js';
@@ -53,6 +54,16 @@ test('modules export only the annotated source', () => {
 
 test('every variant of every entity compiles in strict mode', () => {
   for (const entity of Object.keys(sources)) for (const v of VARIANTS) assert.ok(compile(entity, v), `${entity}.${v}`);
+});
+
+// One draft everywhere: the one createAjv() compiles and OpenAPI 3.1 applies.
+test('every schema and every variant declares draft 2020-12', () => {
+  const DRAFT = 'https://json-schema.org/draft/2020-12/schema';
+  assert.equal(opinionAttributionSchema.$schema, DRAFT, 'opinionAttribution');
+  for (const [entity, source] of Object.entries(sources)) {
+    assert.equal(source.$schema, DRAFT, entity);
+    for (const v of VARIANTS) assert.equal(deriveVariant(source, v).$schema, DRAFT, `${entity}.${v}`);
+  }
 });
 
 const createCollection = (administrativeArea) => ({

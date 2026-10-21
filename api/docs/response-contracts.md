@@ -240,7 +240,7 @@ with either.
   - `submissionSchema`: the schema of what is sent to it, which could be `in-create` or
     `patch-guard`.
 - **Version:** the latest is draft 2019-09 (draft-handrews-json-schema-hyperschema-02), the draft
-  the payload schemas already use.
+  the payload schemas used until they moved to 2020-12 (`adopt-json-schema-2020-12`, 2026-10-21).
 - **Why it fits:**
   - The schema says "this value links to `references/{permid}`" and the client builds the URL.
     The storage layer never knows a path, and `href` values need not be in the payload at all.
