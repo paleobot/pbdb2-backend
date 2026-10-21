@@ -7,9 +7,7 @@ page sizes, opaque cursors over a total, stable `permid` ordering, and real
 `links.next` / `links.prev` navigation in the response envelope. Pagination
 composes with the existing list filters and replaces the unbounded list read,
 so no endpoint returns a whole table.
-
 ## Requirements
-
 ### Requirement: Keyset pagination on list endpoints
 
 The system SHALL paginate every list endpoint using a keyset (cursor) over a
@@ -143,15 +141,23 @@ response SHALL continue to report its partial-success accounting and SHALL carry
 
 ### Requirement: Page-scoped result counts
 
-The list envelope's `meta.found` and `meta.returned` SHALL describe the returned
-page, not the full result set. The system SHALL NOT compute a total count of
-matching records for a paginated request.
+The list envelope's `meta.returned` SHALL be the number of records in the
+returned page, not in the full result set. The system SHALL NOT compute a total
+count of matching records for a paginated request. `meta` SHALL NOT carry a
+second count equal to `returned` (the former `found`): a field name that suggests
+a total SHALL NOT hold a page count. A total, if added later behind an opt-in
+parameter, SHALL arrive under its own name and mean all matching records.
 
 #### Scenario: Counts describe the page
 
 - **WHEN** a paginated list request returns a page smaller than the full result
   set
-- **THEN** `meta.found` and `meta.returned` describe the records in that page
+- **THEN** `meta.returned` equals the number of records in that page
+
+#### Scenario: No found count
+
+- **WHEN** a client requests any list, including a multi-entity `ids` read
+- **THEN** `meta` has no `found` field
 
 ### Requirement: Stub resources accept pagination parameters
 
@@ -165,3 +171,4 @@ a single page with `null` pagination links.
   resource
 - **THEN** the system responds with HTTP 200
 - **AND** `links.next` and `links.prev` are both `null`
+

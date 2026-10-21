@@ -13,17 +13,17 @@ import fp from 'fastify-plugin';
  */
 export default fp(async (fastify) => {
   /**
-   * Single resource. `data` is an object identified by `permid`.
-   * Reserves `meta.version` and the relationship `links` slots even when their
-   * values are placeholders, so the shape is stable before DB integration.
+   * Single resource. `data` is an object identified by `permid`; `meta` is its
+   * `type`. No placeholders: a read serves only a current, non-removed head, so
+   * `removed` and `version` could only be constants. Version fields return with
+   * the `/versions` sub-resource. Relationships are inline links in `data`, not
+   * `links` entries.
    */
   fastify.decorateReply('sendData', function sendData(data, { type, meta = {}, links = {} } = {}) {
     return this.send({
       data,
       meta: {
         type,
-        removed: false,
-        version: { supersedes: null, supersededBy: null },
         ...meta,
       },
       links: {
@@ -34,16 +34,15 @@ export default fp(async (fastify) => {
   });
 
   /**
-   * Collection. `data` is an array; `meta` carries result counts and `links`
-   * reserves the pagination slots (`next` / `prev`). The pagination mechanism
-   * (cursor vs offset) is deferred — only the slots are fixed here.
+   * Collection. `data` is an array; `meta.returned` counts this page (counts are
+   * page-scoped: no total is computed). `links.next` / `prev` default to null;
+   * the list handler sets them where a further page exists.
    */
   fastify.decorateReply('sendList', function sendList(items, { meta = {}, links = {} } = {}) {
     const data = Array.isArray(items) ? items : [];
     return this.send({
       data,
       meta: {
-        found: data.length,
         returned: data.length,
         ...meta,
       },
@@ -57,8 +56,7 @@ export default fp(async (fastify) => {
   });
 
   /**
-   * Index / discovery document. Same envelope, but `meta.type` is `index` and
-   * the resource-specific `meta` fields (removed, version) are omitted — an
+   * Index / discovery document. Same envelope, but `meta.type` is `index`: an
    * index node describes a path, not a stored record. `links` enumerates the
    * node's children (the discovery plugin supplies them).
    */

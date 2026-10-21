@@ -283,7 +283,7 @@ test('taxa declares no field filters, so a taxon attribute is an unknown param',
   assert.match(res.json().error.message, /rank/);
 });
 
-test('meta carries the standard envelope fields, trivially true for taxa', async (t) => {
+test('meta carries the standard envelope fields: the type alone', async (t) => {
   const app = build({ pg: fakeTaxaPg() });
   t.after(() => app.close());
 
@@ -291,11 +291,9 @@ test('meta carries the standard envelope fields, trivially true for taxa', async
     await app.inject({ method: 'GET', url: `/api/v1/taxa/${OWN_CONCEPT}` })
   ).json();
 
-  // Kept uniform deliberately: a taxon genuinely has no successor and is not
-  // removed, so a generic client reading meta.version works here too. See the
-  // change's design.md.
-  assert.equal(meta.removed, false);
-  assert.deepEqual(meta.version, { supersedes: null, supersededBy: null });
+  // Uniform with every other resource: no single read carries removed/version
+  // placeholders (tidy-response-shape), and for taxa they could never apply.
+  assert.deepEqual(meta, { type: 'taxon' });
 });
 
 test('the repository is a plain module, usable without the route layer', async () => {

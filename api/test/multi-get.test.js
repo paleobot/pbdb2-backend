@@ -51,7 +51,8 @@ test('multi-get returns exactly the requested subset, missing empty', async (t) 
     ['ref-1', 'ref-2'],
   );
   assert.equal(body.meta.requested, 2);
-  assert.equal(body.meta.found, 2);
+  assert.equal(body.meta.returned, 2);
+  assert.equal('found' in body.meta, false, 'returned is the only count');
   assert.deepEqual(body.meta.missing, []);
 
   // The requested set is bound as $1, under the head filter.
@@ -78,7 +79,8 @@ test('multi-get partial success: unknown ids land in meta.missing, others return
     ['ref-1', 'ref-3'],
   );
   assert.equal(body.meta.requested, 3);
-  assert.equal(body.meta.found, 2);
+  assert.equal(body.meta.returned, 2);
+  assert.equal('found' in body.meta, false, 'returned is the only count');
   assert.deepEqual(body.meta.missing, ['ghost']);
 });
 

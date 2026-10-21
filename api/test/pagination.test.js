@@ -79,8 +79,8 @@ test('first page: bounded by the default limit, ordered by permid, no prev link'
   assert.equal(body.links.prev, null, 'the first page has no prev');
   assert.ok(body.links.next, 'a further page is offered');
   // Counts describe the page, not the full result set.
-  assert.equal(body.meta.found, DEFAULT_LIMIT);
   assert.equal(body.meta.returned, DEFAULT_LIMIT);
+  assert.equal('found' in body.meta, false, 'counts are page-scoped; no second count');
 });
 
 test('pagination links start with the configured base and can be followed', async (t) => {
@@ -207,17 +207,17 @@ test('pagination composes with a field filter, and next preserves it', async (t)
   t.after(() => app.close());
 
   const body = (
-    await app.inject({ method: 'GET', url: '/api/v1/references?publication_type=standalone%20book&limit=3' })
+    await app.inject({ method: 'GET', url: '/api/v1/references?publicationType=standalone%20book&limit=3' })
   ).json();
   assert.deepEqual(permids(body), ['ref-01', 'ref-03', 'ref-05'], 'only matching heads');
   // URLSearchParams writes the space as '+'; the loop below follows it, so the
   // server must read it back as 'standalone book'.
-  assert.match(body.links.next, /publication_type=standalone\+book/, 'the filter survives into next');
+  assert.match(body.links.next, /publicationType=standalone\+book/, 'the filter survives into next');
   assert.match(body.links.next, /limit=3/, 'so does the page size');
 
   // Paging through yields exactly the filtered set.
   const seen = [];
-  let url = '/api/v1/references?publication_type=standalone%20book&limit=3';
+  let url = '/api/v1/references?publicationType=standalone%20book&limit=3';
   while (url) {
     const page = (await app.inject({ method: 'GET', url })).json();
     seen.push(...permids(page));

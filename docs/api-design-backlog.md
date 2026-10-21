@@ -334,6 +334,20 @@ link is written.
 *Reasoning:* discussion of 2026-10-06, during `authority-reads-from-payload-schemas` (design D6);
 `openspec/changes/absolute-link-urls/design.md`.
 
+## Version history (`/versions`)
+
+**Open; needs a public version identifier first.** Reads serve only a lineage's current,
+non-removed head, so `tidy-response-shape` (2026-10-21) removed `meta.removed` and
+`meta.version` from single reads: neither could hold anything but a constant. They return, with
+real values, alongside a `/versions` sub-resource listing a lineage's versions. That cannot be
+designed until a version has a public identifier: every version of a lineage shares its `permid`
+(`db/02-core.sql`), and the only thing that tells versions apart is `preceded_by_id`, an internal
+id the API never exposes. Candidates: a version number counted along the chain, a server-minted
+version permid, or the row's creation timestamp. Not applicable to `taxa`, which has no version
+chain.
+
+*Reasoning:* `openspec/changes/tidy-response-shape/design.md` D3.
+
 ## Serving the schemas to clients
 
 **Proposed.** The API could serve the derived variants as JSON Schema documents, for example

@@ -45,12 +45,20 @@ A single, consistent structure for every endpoint:
 - **`data`** — the resource itself (an object for a single record; an array for
   a collection). This is the typed domain payload and nothing else.
 - **`meta`** — everything *about* the record that isn't the record: its type,
-  soft-delete status, version lineage, provenance, and (for lists) result
-  counts and timing.
-- **`links`** — URLs: the record's own address (`self`), related resources, the
-  version history, and pagination (`next` / `prev`) for lists. Every URL is
-  absolute, starting with the configured `PUBLIC_BASE_URL` (`absolute-link-urls`,
-  2026-10-20); the examples use `https://api.example.org`.
+  provenance, and (for lists) result counts and timing.
+- **`links`** — URLs: the record's own address (`self`), and pagination
+  (`next` / `prev`) for lists. Every URL is absolute, starting with the
+  configured `PUBLIC_BASE_URL` (`absolute-link-urls`, 2026-10-20); the examples
+  use `https://api.example.org`.
+
+Two things in this section's first draft have since changed
+(`tidy-response-shape`, 2026-10-21). Related resources are inline links in
+`data` (`{ permid, title, href }`; decision A in `response-contracts.md`), not
+entries in `links`. And the envelope carries no placeholders: soft-delete status
+and version lineage (`meta.removed`, `meta.version`, a `history` link) return
+with the `/versions` sub-resource, since a read serves only a current,
+non-removed head. List counts are page-scoped, so `meta.returned` is the only
+count.
 
 ### Single record
 
@@ -62,20 +70,20 @@ A single, consistent structure for every endpoint:
     "permid": "5f3c8e9a-…",
     "name": "Anza-Borrego",
     "country": "US",
-    "state": "California"
+    "state": "California",
+    "primaryReference": {
+      "permid": "9a1f-…",
+      "title": "…",
+      "href": "https://api.example.org/api/v1/references/9a1f-…"
+    }
   },
   "meta": {
     "type": "collection",
-    "removed": false,
-    "version": { "supersedes": "1b2d-…", "supersededBy": null },
     "enterer": "42",
     "authorizer": "7"
   },
   "links": {
-    "self": "https://api.example.org/api/v1/collections/5f3c8e9a-…",
-    "primaryReference": "https://api.example.org/api/v1/references/9a1f-…",
-    "earlyInterval": "https://api.example.org/api/v1/intervals/…",
-    "history": "https://api.example.org/api/v1/collections/5f3c8e9a-…/versions"
+    "self": "https://api.example.org/api/v1/collections/5f3c8e9a-…"
   }
 }
 ```
@@ -88,7 +96,6 @@ A single, consistent structure for every endpoint:
 {
   "data": [ { "permid": "5f3c8e9a-…", "name": "Anza-Borrego" }, { "…": "…" } ],
   "meta": {
-    "found": 1240,
     "returned": 100,
     "elapsed_ms": 18
   },

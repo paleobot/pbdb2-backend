@@ -15,12 +15,11 @@ test('single read returns the { data, meta, links } envelope', async (t) => {
   assert.equal(body.data.permid, 'ref-123');
   assert.equal('id' in body.data, false, 'internal id must not be exposed');
 
-  // meta + reserved version slot
-  assert.equal(body.meta.type, 'reference');
-  assert.deepEqual(body.meta.version, { supersedes: null, supersededBy: null });
+  // meta is the type alone: no removed/version placeholders
+  assert.deepEqual(body.meta, { type: 'reference' });
 
-  // links + self
-  assert.equal(body.links.self, `${BASE}/api/v1/references/ref-123`);
+  // links is self alone: relationships are inline links in data
+  assert.deepEqual(body.links, { self: `${BASE}/api/v1/references/ref-123` });
 });
 
 test('list read returns an array with counts and reserved pagination slots', async (t) => {
@@ -32,8 +31,8 @@ test('list read returns an array with counts and reserved pagination slots', asy
 
   const body = res.json();
   assert.ok(Array.isArray(body.data));
-  assert.equal(typeof body.meta.found, 'number');
   assert.equal(typeof body.meta.returned, 'number');
+  assert.equal('found' in body.meta, false, 'counts are page-scoped; no second count');
   assert.equal('next' in body.links, true);
   assert.equal('prev' in body.links, true);
 });

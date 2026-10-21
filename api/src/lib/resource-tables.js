@@ -123,7 +123,7 @@ export const RESOURCE_DESCRIPTORS = {
     table: 'refs',
     jsonbColumn: 'reference',
     source: referenceSource,
-    filters: { publication_type: { jsonPath: 'publicationType', op: 'eq' } },
+    filters: { publicationType: { jsonPath: 'publicationType', op: 'eq' } },
   },
   authorities: {
     table: 'authorities',

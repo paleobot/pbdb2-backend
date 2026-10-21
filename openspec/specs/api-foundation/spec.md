@@ -5,9 +5,7 @@
 The Fastify application skeleton for the PBDB2 API: how the app is constructed
 and served, the versioned base path, the shared `{ data, meta, links }`
 response envelope, and consistent HTTP error responses.
-
 ## Requirements
-
 ### Requirement: Application factory separate from server entry
 
 The system SHALL expose a `build()` factory that constructs and returns a fully
@@ -61,9 +59,17 @@ The system SHALL return every successful response using a consistent envelope of
 `data`, `meta`, and `links`. For a single resource, `data` SHALL be an object;
 for a collection, `data` SHALL be an array and `meta` SHALL carry result counts
 describing the returned page. The public identity of a resource SHALL be its
-`permid`, and internal database identifiers SHALL NOT be exposed. The envelope
-SHALL reserve `meta.version` and `links` relationship entries even when their
-values are placeholders.
+`permid`, and internal database identifiers SHALL NOT be exposed.
+
+The envelope SHALL NOT carry placeholder fields: a field whose value cannot vary
+under the current design SHALL be absent rather than reserved. A single
+resource's `meta` SHALL therefore be `{ type }`, with no `removed` and no
+`version`: a read serves only a current, non-removed head, so neither could hold
+anything but a constant, and versions share their lineage's `permid`, so no
+public identifier exists for a previous version. Version fields return, with
+real values, alongside the version-history sub-resource. A single resource's
+`links` SHALL be `{ self }`; relationships to other resources are inline links in
+`data` (`reference-enrichment`), not entries in `links`.
 
 The list pagination slots (`links.next`, `links.prev`) SHALL carry real values:
 a URL when a further page exists in that direction, and `null` when it does not.
@@ -79,6 +85,13 @@ cursor pagination depends on it to avoid skipping or repeating records.
 - **THEN** the response body contains `data`, `meta`, and `links`
 - **AND** `data` is an object identified by a `permid`
 - **AND** no internal serial identifier is present
+
+#### Scenario: Single resource meta carries only its type
+
+- **WHEN** a client successfully requests a single resource, including a taxon
+- **THEN** `meta` is exactly `{ type }`
+- **AND** `meta` has no `removed` and no `version`
+- **AND** `links` is exactly `{ self }`
 
 #### Scenario: Collection response shape
 
@@ -179,3 +192,4 @@ unchanged by the base.
 
 - **WHEN** a client requests `/api/v1`
 - **THEN** `links.self` and every child link begin with the base
+

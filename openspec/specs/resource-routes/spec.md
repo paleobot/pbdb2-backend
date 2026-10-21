@@ -212,9 +212,10 @@ requested resources that exist, even when some requested ids have no current,
 non-removed head. Missing ids SHALL NOT cause the request to fail.
 
 The response `meta` SHALL report `requested` (the count of distinct requested
-ids), `found`, `returned`, and `missing`. The `missing` field SHALL always be
-present as an array of the requested ids that were not found, and SHALL be an
-empty array when every requested id was found.
+ids), `returned`, and `missing`. The `missing` field SHALL always be present as
+an array of the requested ids that were not found, and SHALL be an empty array
+when every requested id was found. `meta` SHALL NOT report `found`, which would
+always equal `returned` (`list-pagination`).
 
 #### Scenario: Some requested ids are missing
 
@@ -223,6 +224,7 @@ empty array when every requested id was found.
 - **THEN** the system responds with HTTP 200
 - **AND** `data` contains only the found resources
 - **AND** `meta.missing` lists the requested ids that were not found
+- **AND** `meta.returned` equals `meta.requested` minus the number of missing ids
 
 #### Scenario: All requested ids found
 
@@ -283,8 +285,10 @@ is "found").
 
 The system SHALL support per-entity field filters on the list endpoint, declared
 per resource and matching a query-parameter value against a field within that
-resource's JSONB payload. The `references` group SHALL support a
-`publication_type` filter matching the payload's `publicationType` field. Field
+resource's JSONB payload. A field filter's query parameter SHALL be the name of
+the payload field it matches, so that parameters, expansions and response fields
+share one camelCase vocabulary. The `references` group SHALL support a
+`publicationType` filter matching the payload's `publicationType` field. Field
 filters SHALL compose with the multi-entity `ids` read and with one another,
 narrowing the same set of current, non-removed heads (logical AND).
 
@@ -293,7 +297,7 @@ that declares an `enum`, the filter's legal values SHALL be exactly that enum, a
 a value outside it SHALL be rejected with HTTP 400 in the standard error shape.
 The error message SHALL name the parameter and list the legal values in enum
 order. The comparison is exact, after trimming surrounding whitespace. The
-`references` `publication_type` filter takes its legal values from the reference
+`references` `publicationType` filter takes its legal values from the reference
 source's `publicationType` enum. A filter whose field has no such enum accepts any
 non-empty value.
 
@@ -313,15 +317,23 @@ signal is withheld rather than overloaded.
 #### Scenario: References filtered by publication type
 
 - **WHEN** a client sends GET to the `references` list endpoint with
-  `?publication_type=` naming a value
+  `?publicationType=` naming a value
 - **THEN** the system responds with HTTP 200
 - **AND** `data` contains only the current heads whose `publicationType` equals
   that value
 
+#### Scenario: The former snake_case name is unrecognized
+
+- **WHEN** a client sends GET to `references` with `?publication_type=` naming a
+  legal value
+- **THEN** the system responds with HTTP 400 in the standard error shape
+- **AND** the message names `publication_type` as unrecognized and lists
+  `publicationType` among the accepted parameters
+
 #### Scenario: Field filter composes with ids
 
 - **WHEN** a client sends GET to `references` with both `?ids=` and
-  `?publication_type=`
+  `?publicationType=`
 - **THEN** `data` contains only the requested ids that also match the
   publication type
 - **AND** the `ids` partial-success accounting (`meta.requested` /
@@ -329,33 +341,33 @@ signal is withheld rather than overloaded.
 
 #### Scenario: Field filter with no match
 
-- **WHEN** a client sends `?publication_type=` with a legal value no current head has
+- **WHEN** a client sends `?publicationType=` with a legal value no current head has
 - **THEN** the system responds with HTTP 200 and an empty `data` array
 - **AND** no `meta.missing` accounting is produced
 
 #### Scenario: Empty field-filter value is a 400
 
-- **WHEN** a client sends `?publication_type=` with no value
+- **WHEN** a client sends `?publicationType=` with no value
 - **THEN** the system responds with HTTP 400 in the standard error shape
 
 #### Scenario: Field-filter value outside the enum is a 400
 
-- **WHEN** a client sends `?publication_type=book`, which is not one of the
+- **WHEN** a client sends `?publicationType=book`, which is not one of the
   reference source's publication types
 - **THEN** the system responds with HTTP 400 in the standard error shape
-- **AND** the message names `publication_type` and lists the legal values,
+- **AND** the message names `publicationType` and lists the legal values,
   including `standalone book`
 
 #### Scenario: Enum check applies to the ids read
 
-- **WHEN** a client sends `?ids=` together with a `publication_type` value outside
+- **WHEN** a client sends `?ids=` together with a `publicationType` value outside
   the enum
 - **THEN** the system responds with HTTP 400, as it would on a plain list
 
 #### Scenario: Legal values come from the source
 
 - **WHEN** the `references` repository is built
-- **THEN** its `publication_type` filter's legal values equal
+- **THEN** its `publicationType` filter's legal values equal
   `referenceSource.properties.publicationType.enum`, in order
 
 ### Requirement: List endpoints accept pagination parameters

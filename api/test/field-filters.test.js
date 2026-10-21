@@ -5,7 +5,7 @@ import { build } from '../src/app.js';
 import { DEFAULT_LIMIT } from '../src/lib/list-filters.js';
 
 /**
- * Per-entity field filters on `references` (publication_type). The fake pg
+ * Per-entity field filters on `references` (publicationType). The fake pg
  * actually applies whatever predicates the generated SQL declares — parsing the
  * `permid = ANY($n)` and `->>'publicationType' = $n` clauses out of the query
  * text and binding from `values` — so these exercise the full define → validate
@@ -44,12 +44,12 @@ const REFS = {
   'ref-3': { title: 'C', publicationType: 'standalone book' },
 };
 
-test('references filtered by publication_type returns only matching heads', async (t) => {
+test('references filtered by publicationType returns only matching heads', async (t) => {
   const pg = fakeRefsPg(REFS);
   const app = build({ pg });
   t.after(() => app.close());
 
-  const res = await app.inject({ method: 'GET', url: '/api/v1/references?publication_type=standalone%20book' });
+  const res = await app.inject({ method: 'GET', url: '/api/v1/references?publicationType=standalone%20book' });
   assert.equal(res.statusCode, 200);
 
   const body = res.json();
@@ -74,7 +74,7 @@ test('field filter composes with ids in a single WHERE', async (t) => {
   // out; ref-3 (standalone book, not in ids) excluded.
   const res = await app.inject({
     method: 'GET',
-    url: '/api/v1/references?ids=ref-1,ref-2&publication_type=standalone%20book',
+    url: '/api/v1/references?ids=ref-1,ref-2&publicationType=standalone%20book',
   });
   assert.equal(res.statusCode, 200);
 
@@ -104,13 +104,13 @@ test('a legal field-filter value with no match is an empty 200 with no missing a
   // `unpublished` is a publication type, but no fixture has it.
   const res = await app.inject({
     method: 'GET',
-    url: '/api/v1/references?publication_type=unpublished',
+    url: '/api/v1/references?publicationType=unpublished',
   });
   assert.equal(res.statusCode, 200);
 
   const body = res.json();
   assert.deepEqual(body.data, []);
-  assert.equal(body.meta.found, 0);
+  assert.equal(body.meta.returned, 0);
   assert.equal(body.meta.missing, undefined, 'field filters produce no missing accounting');
 });
 
@@ -121,11 +121,11 @@ test('a field-filter value outside the source enum is a 400 listing the legal va
 
   // `book` is not a publication type (`standalone book` is), so it could match
   // no stored reference: an empty 200 would read as "no books".
-  const res = await app.inject({ method: 'GET', url: '/api/v1/references?publication_type=book' });
+  const res = await app.inject({ method: 'GET', url: '/api/v1/references?publicationType=book' });
   assert.equal(res.statusCode, 400);
   const { error } = res.json();
   assert.equal(error.statusCode, 400);
-  assert.match(error.message, /`publication_type` must be one of: /);
+  assert.match(error.message, /`publicationType` must be one of: /);
   assert.match(error.message, /standalone book/);
   assert.equal(pg.calls.length, 0, 'rejected before any query');
 });
@@ -137,20 +137,35 @@ test('the enum check applies to an ids read too', async (t) => {
 
   const res = await app.inject({
     method: 'GET',
-    url: '/api/v1/references?ids=ref-1,ref-2&publication_type=book',
+    url: '/api/v1/references?ids=ref-1,ref-2&publicationType=book',
   });
   assert.equal(res.statusCode, 400);
-  assert.match(res.json().error.message, /`publication_type` must be one of: /);
+  assert.match(res.json().error.message, /`publicationType` must be one of: /);
 });
 
-test('empty publication_type value is a 400', async (t) => {
+test('empty publicationType value is a 400', async (t) => {
   const pg = fakeRefsPg(REFS);
   const app = build({ pg });
   t.after(() => app.close());
 
-  const res = await app.inject({ method: 'GET', url: '/api/v1/references?publication_type=' });
+  const res = await app.inject({ method: 'GET', url: '/api/v1/references?publicationType=' });
   assert.equal(res.statusCode, 400);
   assert.equal(res.json().error.statusCode, 400);
+});
+
+test('the former snake_case filter name is an unrecognized param', async (t) => {
+  // A filter is named like the field it matches. A stale client sending the
+  // old name gets a 400 pointing at the new one, never an unfiltered list.
+  const pg = fakeRefsPg(REFS);
+  const app = build({ pg });
+  t.after(() => app.close());
+
+  const res = await app.inject({ method: 'GET', url: '/api/v1/references?publication_type=standalone%20book' });
+  assert.equal(res.statusCode, 400);
+  const { message } = res.json().error;
+  assert.match(message, /Unrecognized query parameter: `publication_type`/);
+  assert.match(message, /accepts .*`publicationType`/);
+  assert.equal(pg.calls.length, 0, 'rejected before any query');
 });
 
 test('unknown query param is rejected with a 400 naming it', async (t) => {
@@ -186,7 +201,7 @@ test('a declared filter is still accepted after the strictness change', async (t
 
   const res = await app.inject({
     method: 'GET',
-    url: '/api/v1/references?publication_type=journal%20article',
+    url: '/api/v1/references?publicationType=journal%20article',
   });
   assert.equal(res.statusCode, 200);
   assert.ok(pg.calls.some((c) => /->>'/.test(c.text)), 'the declared filter reached SQL');

@@ -74,7 +74,7 @@ test('DB-backed list returns the mapped heads with counts', async (t) => {
   const body = res.json();
   assert.ok(Array.isArray(body.data));
   assert.equal(body.data.length, 2);
-  assert.equal(body.meta.found, 2);
+  assert.equal(body.meta.returned, 2);
   assert.deepEqual(
     body.data.map((d) => d.permid),
     ['ref-1', 'ref-2'],
@@ -224,7 +224,7 @@ test('stub reads expose the enriched reference shape with href (no DB configured
 
 test('a filter on a source enum carries that enum as its legal values', () => {
   const repo = makeReadRepository({ pg: fakePg(() => ({ rows: [] })), ...descriptorFor('references') });
-  assert.deepEqual(repo.filters.publication_type, {
+  assert.deepEqual(repo.filters.publicationType, {
     jsonPath: 'publicationType',
     op: 'eq',
     values: referenceSource.properties.publicationType.enum,

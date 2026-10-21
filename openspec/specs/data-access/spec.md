@@ -154,10 +154,10 @@ reads load no codec context. `specimens` has no backing table and stays stubbed.
 - **AND** each record is the stored payload with `permid` from its column
 - **AND** no `id` or version-chain column appears in it
 
-#### Scenario: The publication_type filter is unchanged
+#### Scenario: The publicationType filter matches its payload field
 
-- **WHEN** references are listed with `publication_type=book`
-- **THEN** the head query matches `reference->>'publicationType'` against the bound value, as before
+- **WHEN** references are listed with the `publicationType` filter set to `book`
+- **THEN** the head query matches `reference->>'publicationType'` against the bound value
 
 #### Scenario: A schema is merged with its child rows
 
