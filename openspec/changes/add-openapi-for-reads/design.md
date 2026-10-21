@@ -9,10 +9,12 @@ response's shape; `OPTIONS` is a 404. The user's priority: knowing the **filters
 No route declares a Fastify `schema` today. Query validation is all hand-written in
 `collectListFilters` (`src/lib/list-filters.js`). Response shapes are described by each source's
 `out` variant (`payloadSchemas/lib/variants.js`), which `test/source-reads.test.js` validates real
-responses against, using the payload schemas' own `createAjv()` (Ajv2019, `strictRequired: false`).
+responses against, using the payload schemas' own `createAjv()` (`strictRequired: false`).
 
-Draft versions in play: Fastify's default Ajv is **draft-07**. The payload schemas declare
-**2019-09**. OpenAPI 3.1 uses **2020-12**.
+Both prerequisites have landed (2026-10-21): `tidy-response-shape` (`c13a22b`: no `meta.found`, no
+`meta.removed`/`meta.version`, the filter is `publicationType`) and `adopt-json-schema-2020-12`
+(`e16d318`: every schema and `createAjv()` are draft 2020-12, OpenAPI 3.1's dialect). Fastify's own
+default Ajv is still draft-07, which D7 replaces.
 
 ## Goals / Non-Goals
 
@@ -161,16 +163,14 @@ Fastify's default Ajv is draft-07, which lacks `unevaluatedProperties` and `depe
 `setValidatorCompiler` replaces it with the backend's own factory, so the annotation keywords and
 strict mode are registered in one place. `createAjv()` gains an options argument (a
 `payload-schema-variants` change): querystrings and params get
-`{ coerceTypes: 'array', removeAdditional: false, useDefaults: false }` (D1), since every query value
-arrives as a string. Request bodies, when writes come, get an instance with **no** coercion: Fastify's
+`{ coerceTypes: true, removeAdditional: false, useDefaults: false }` (D1), since every query value
+arrives as a string. `coerceTypes: true`, not `'array'`: a repeated parameter (`limit=5&limit=6`)
+arrives as an array and must be a 400, not unwrapped (D11). Request bodies, when writes come, get an instance with **no** coercion: Fastify's
 default `coerceTypes` applies to bodies too and would turn a body's `"12"` into `12`, hiding a client
 bug. The compiler picks the instance by the `httpPart` it is given.
 
-Draft: `adopt-json-schema-2020-12` lands first and moves the whole backend (sources, `createAjv()`,
-the migrations' own validators) to 2020-12, OpenAPI 3.1's dialect, so the draft tests run under is
-the draft the document publishes. There is no functional difference for the keywords in use; the
-gain is that the two can no longer drift apart unchecked. Probe: Ajv2020 refuses today's variants
-only because they declare 2019-09 in `$schema`.
+Draft: settled by `adopt-json-schema-2020-12` (landed): the whole backend is 2020-12, so the
+draft tests run under is the draft the document publishes.
 
 ### D8. `@fastify/swagger` generates the document; Swagger UI shows it
 
@@ -239,10 +239,11 @@ a **follow-up**, content work rather than mechanism.
 appear only there, because the description belongs to a version; `/` and `/api` are unchanged (two
 hops from the root, and "the current version" needs no definition while only v1 exists).
 
-Discovery skips every route marked `schema.hide` (the mark `@fastify/swagger-ui` already sets on its
-own routes, and the one `@fastify/swagger` uses to leave a route out of the document). One rule:
-**a route hidden from the documentation is also absent from discovery**, so `docs` and
-`openapi.json` are linked by relation, not listed as resources. As a consequence, **`specimens`
+Discovery ignores every route marked `schema.hide` (the mark `@fastify/swagger-ui` already sets on
+its own routes, and the one `@fastify/swagger` uses to leave a route out of the document). One rule:
+**a route hidden from the documentation is also absent from discovery**. A path segment is listed
+when any non-hidden route lies under it (D12), so `docs` and `openapi.json` are linked by relation,
+not listed as resources. As a consequence, **`specimens`
 leaves the `/api/v1` index** while it is a stub (D4), for D4's reason: listing it invites exploring
 fake data. It returns when its reads are real. `api-discovery` changes accordingly (its scenario
 lists specimens).
@@ -253,6 +254,58 @@ header) is not added: noise on every response for what the index already provide
 
 *Alternatives:* a second, discovery-only flag that would keep specimens listed (two concepts for
 one idea); the new links also at `/` (needs a notion of the current version).
+
+### D11. Query values are normalized before validation; messages are kept
+
+A probe of Ajv2020 with D7's options (2026-10-21) showed where plain coercion would loosen rules
+that are deliberate today:
+- `integer` coercion goes through `Number`, so `limit=1e3`, `0x10` and `1.0` were **accepted**
+  (as 1000, 16, 1). `collectPage` rejects them on purpose ("a bare integer only").
+- Enum matching is exact, so `publicationType=%20standalone%20book%20` was **rejected**, while
+  `resource-routes` requires comparison "after trimming surrounding whitespace".
+- An empty value passes a filter with no enum.
+
+So a `preValidation` hook, which runs before Fastify validates, **trims every query value**, and
+**requires a bare digit string for every parameter the schema types as `integer`**. The schema keeps
+`limit` as `{ type: 'integer', minimum: 1, maximum: 1000 }`, which is what the document shows and Ajv
+checks after coercion. Field filters carry `minLength: 1`; `ids` carries a non-blank `pattern`.
+
+**One value per parameter:** a repeated parameter is a 400. Today `?ids=a&ids=b` happens to work
+(`String(['a','b'])` is `"a,b"`); that is an accident, not a contract, and the document describes
+one comma-separated value.
+
+**Messages are unchanged.** The schema error formatter (Fastify's `schemaErrorFormatter`) maps each
+Ajv error to the message the hand code gives today, returned as `httpErrors.badRequest`, so the
+error shape and name (`BadRequestError`) are unchanged too:
+- `additionalProperties` → "Unrecognized query parameter(s): `…`. This resource accepts `…`"
+  (all unknown names, from `allErrors`; the accepted list from the schema's `properties`);
+- `enum` → "`<param>` must be one of: <values in order>";
+- `minLength` / blank `pattern` → "`<param>` must have a value"; for `ids`, "`ids` must contain at
+  least one id";
+- `type`/`minimum` on an integer, or the hook's bare-digit check → "`limit` must be a positive
+  integer"; `maximum` → "`limit` accepts at most 1000";
+- `type: boolean` → "`<param>` must be exactly `true` or `false`";
+- the `ids` exclusivity rule (`dependentSchemas`) → "`ids` cannot be combined with `limit`/`cursor`:
+  a multi-entity read is a single page", naming the parameters actually sent.
+
+What stays in `collectListFilters`: cursor decoding, the 100-distinct-ids cap (after splitting,
+trimming and de-duplicating), and the default `limit`. The existing tests that assert messages are
+the guard that nothing changed.
+
+### D12. Only real GET operations are documented
+
+The document describes what a client can rely on. So these routes carry `schema.hide`:
+- the stub write routes (POST/PUT/PATCH/DELETE on the uniform groups and `schemas`), which return
+  fake data and do not touch the database;
+- `taxa`'s 405 write routes;
+- every `specimens` route (D4);
+- the description's own routes (`openapi.json`, the viewer).
+
+Discovery lists a path segment when **any** non-hidden route lies under it (D10). Hiding a write
+route therefore does not remove its resource, whose GET is visible, and hiding every `specimens`
+route removes `specimens`. The discovery routes themselves (`/`, `/api`, `/api/v1`) are documented,
+as index documents. When writes become real, their routes are unhidden with request schemas from
+`in-create` / `patch-guard`.
 
 ## Risks / Trade-offs
 

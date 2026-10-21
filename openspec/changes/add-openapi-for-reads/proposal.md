@@ -25,8 +25,9 @@ the variants now describe the contract the API keeps.
 - An OpenAPI 3.1 document generated from the route schemas is served, with internal storage
   annotations (`x-storage`, `x-enumFrom`, codecs) stripped.
 - The discovery documents point at it (`describedby`).
-- Scope is GET only. Request bodies for writes come later, from the `in-create` and `patch-guard`
-  variants.
+- Scope is GET only. The stub write routes, `taxa`'s 405s and `specimens` (a stub) are hidden from
+  the document, which describes only what a client can rely on. Request bodies for writes come
+  later, from the `in-create` and `patch-guard` variants.
 
 ## Capabilities
 
