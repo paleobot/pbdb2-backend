@@ -6,7 +6,7 @@ To run full migration on clean db:
 
 --createdb initializes an EMPTY database from the DDL (db/0*.sql at the repository root); it
 cannot reset a populated one, hence the drop and create. A full run takes about
-3 minutes.
+9 minutes, 6 of them in the taxa step.
 
 .env (one file at the repository root, from .env.example) must hold
 PG_HOST/PG_USER/PG_PASSWORD/PG_DATABASE, MARIADB_HOST/MARIADB_USER/
@@ -28,6 +28,7 @@ table in openspec/specs/migration-runner/spec.md):
      8  opinions            src/opinions-migration/migrate-opinions.js
      9  collections         src/collections-migration/migrate-collections.js
     10  specimens           src/specimens-migration/migrate-specimens.js
+    11  taxa                src/rebuild-taxa.js
 
 After the last selected step, the runner audits stored payloads
 (src/audit-payloads.js) for the audited entities those steps wrote: persons,
@@ -38,6 +39,11 @@ audit. To audit the whole database outside a run:
     node src/audit-payloads.js --round-trip    # plus merge/split round trip
 The latest report is written to src/audit-payloads.log. Each runner invocation
 is appended to src/run-migrations.log.
+
+The taxa step is not a migration: it calls rebuild_taxa_full() (db/03-taxa.sql)
+to build taxa_linnaean, taxa_clades, taxa_attachments and taxa from the opinion
+tables. To rebuild them later, after the opinions change, call
+rebuild_taxa_full() directly; the runner's step requires an empty taxa table.
 
 To run one step, or to resume from one:
     node src/run-migrations.js --only specimens

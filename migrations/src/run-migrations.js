@@ -1,13 +1,14 @@
-// Runs the ten migrations in a frozen order and asserts the database state that
-// order exists to produce. The order is not a convenience: every step below reads
-// from PostgreSQL what an earlier step wrote, and five of the ten duplicate their
-// rows outright on a second run. See openspec/specs/migration-runner/spec.md.
+// Runs the ten migrations, then the taxa rebuild, in a frozen order and asserts the
+// database state that order exists to produce. The order is not a convenience: every
+// step below reads from PostgreSQL what an earlier step wrote, and five of the ten
+// migrations duplicate their rows outright on a second run. See
+// openspec/specs/migration-runner/spec.md.
 //
 //   node src/run-migrations.js [--createdb] [--from <step>] [--only <step>] [--list]
 //
-// Steps are spawned as child processes, never imported: five of the nine entry
+// Steps are spawned as child processes, never imported: six of the eleven entry
 // points call main() unconditionally at module load, so importing one to inspect it
-// would run the migration as a side effect.
+// would run the step as a side effect.
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
@@ -74,7 +75,7 @@ const someHave = (table, expr, label) => ({
 //   persons ──┬─▶ pbot-persons ──┐
 //             │                  ├─▶ pbot-refs ──▶ pbot-schemas
 //             └─▶ refs ──────────┤
-//                                ├─▶ authorities ─▶ authority-opinions ─▶ opinions
+//                                ├─▶ authorities ─▶ authority-opinions ─▶ opinions ─▶ taxa
 //                                ├─▶ collections ──────────────┐
 //                                └─▶ (name_opinions) ──────────┴─▶ specimens
 //
@@ -211,6 +212,22 @@ const STEPS = [
       nonEmpty('collections'),
       nonEmpty('name_opinions'),
       someHave('refs', OLDPBDB_ID.refs, 'legacyIDs.oldpbdbID'),
+    ],
+  },
+  {
+    name: 'taxa',
+    script: 'src/rebuild-taxa.js',
+    env: ['PG'],
+    inputs: [],
+    writes: ['taxa_linnaean', 'taxa_clades', 'taxa_attachments', 'taxa'],
+    firstWriterOf: ['taxa_linnaean', 'taxa_clades', 'taxa_attachments', 'taxa'],
+    // A derivation over the opinion ledgers rather than a migration: it reads only
+    // what the authority-opinions and opinions steps wrote.
+    preconditions: () => [
+      empty('taxa'),
+      nonEmpty('name_opinions'),
+      nonEmpty('assignment_opinions'),
+      nonEmpty('validity_opinions'),
     ],
   },
 ];
@@ -474,7 +491,7 @@ async function countTables(pg, tables) {
   return counts;
 }
 
-// Spawned, never imported: five of the nine entry points call main() at module load,
+// Spawned, never imported: six of the eleven entry points call main() at module load,
 // so importing one would run the migration as a side effect of the import.
 function spawnStep(step, args = []) {
   return new Promise((resolve, reject) => {
