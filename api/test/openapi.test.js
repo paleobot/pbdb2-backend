@@ -37,10 +37,9 @@ test('its paths are exactly the GET operations discovery reaches, single reads i
   const reached = new Set();
   const walk = async (path) => {
     reached.add(path);
-    const { links } = (await app.inject({ method: 'GET', url: path })).json();
-    for (const [rel, url] of Object.entries(links)) {
-      if (rel === 'self' || rel === 'describedby' || rel === 'docs') continue;
-      const child = new URL(url).pathname;
+    const { data } = (await app.inject({ method: 'GET', url: path })).json();
+    for (const { href } of Object.values(data.resources)) {
+      const child = new URL(href).pathname;
       if (RESOURCES.includes(child.split('/').pop())) {
         reached.add(child).add(`${child}/{permid}`);
       } else {
@@ -119,14 +118,15 @@ test('the published schema tree is recursive and closed at every depth', () => {
   assert.throws(() => assertPublished('Schema', schema), /stray/);
 });
 
-test('the viewer is HTML, and the description is not listed as a resource', async () => {
+test('the viewer is HTML, and the description is linked by relation, not listed as a resource', async () => {
   const ui = await app.inject({ method: 'GET', url: '/api/v1/docs' });
   assert.equal(ui.statusCode, 200);
   assert.match(ui.headers['content-type'], /text\/html/);
 
-  const { links } = (await app.inject({ method: 'GET', url: '/api/v1' })).json();
-  assert.equal('openapi.json' in links, false);
-  assert.ok(links.describedby.endsWith('/api/v1/openapi.json'));
+  const { data, links } = (await app.inject({ method: 'GET', url: '/api/v1' })).json();
+  assert.equal('openapi.json' in data.resources || 'docs' in data.resources, false);
+  assert.ok(links['service-desc'].endsWith('/api/v1/openapi.json'));
+  assert.ok(links['service-doc'].endsWith('/api/v1/docs'));
 });
 
 test('a hidden route still answers as before', async () => {

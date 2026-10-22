@@ -60,7 +60,7 @@ src/
   lib/published-schemas.js  published response components (Collection, ReferenceLink, …)
   plugins/              autoloaded first (fastify-plugin wrapped, global)
     envelope.js         reply.sendData / reply.sendList → { data, meta, links }, + their schemas
-    discovery.js        /, /api, /api/v1 index documents, derived from the route table
+    discovery.js        /, /api, /api/v1 index documents: children in data.resources
     openapi.js          @fastify/swagger + swagger-ui: /api/v1/openapi.json, /api/v1/docs
     auth.js             stubbed fastify.authenticate (no-op preHandler)
     sensible.js         @fastify/sensible
@@ -154,7 +154,12 @@ docs/                   design notes (e.g. response-envelope rationale)
   rather than enumerated, links as `<Target>Link`). A route with `schema.hide`
   is left out of the document **and** of discovery: stub writes, taxa's 405s,
   every `specimens` route, and the description's own routes. `/api/v1` links
-  the description as `describedby` and `docs`.
+  the description by the RFC 8631 relations `service-desc` (the OpenAPI
+  document) and `service-doc` (the viewer).
+- **Index documents** (`plugins/discovery.js`): `/`, `/api` and `/api/v1` list
+  their children in `data.resources` as `{ <segment>: { href } }`, derived from
+  the route table. Their `links`, like every response's, holds only registered
+  link relations, never a child's name; `INDEX_ENVELOPE` is closed to enforce it.
 - **Tests:** `node:test` + `node:assert` driven through `app.inject()`. No
   test-runner dependency. Vitest is the agreed fallback if watch/coverage
   ergonomics later justify it.

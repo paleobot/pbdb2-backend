@@ -72,24 +72,45 @@ export function listEnvelope(itemSchema) {
   };
 }
 
-/** An index document: `data` describes the node, `links` its children by name. */
+/**
+ * An index document: `data` describes the node and lists its children in
+ * `resources`; `links` holds only registered link relations. Closed, so a
+ * child's name in `links` is outside the contract.
+ */
 export const INDEX_ENVELOPE = {
   description: 'An index document',
   type: 'object',
   properties: {
     data: {
       type: 'object',
-      properties: { name: { type: 'string' }, version: { type: 'string' }, description: { type: 'string' } },
-      required: ['name', 'description'],
+      properties: {
+        name: { type: 'string' },
+        version: { type: 'string' },
+        description: { type: 'string' },
+        resources: {
+          type: 'object',
+          description: "The node's children, by path segment",
+          additionalProperties: {
+            type: 'object',
+            properties: { href: url },
+            required: ['href'],
+            additionalProperties: false,
+          },
+        },
+      },
+      required: ['name', 'description', 'resources'],
       additionalProperties: false,
     },
     meta: { type: 'object', properties: { type: { const: 'index' } }, required: ['type'], additionalProperties: false },
     links: {
       type: 'object',
-      properties: { self: url },
+      properties: {
+        self: url,
+        'service-desc': { ...url, description: "The version's OpenAPI document (RFC 8631); `/api/v1` only" },
+        'service-doc': { ...url, description: "The version's human-readable documentation (RFC 8631); `/api/v1` only" },
+      },
       required: ['self'],
-      additionalProperties: url,
-      description: '`self`, then one entry per child path; the version index also has `describedby` (this document) and `docs`',
+      additionalProperties: false,
     },
   },
   required: ['data', 'meta', 'links'],
@@ -142,8 +163,8 @@ export default fp(async (fastify) => {
 
   /**
    * Index / discovery document. Same envelope, but `meta.type` is `index`: an
-   * index node describes a path, not a stored record. `links` enumerates the
-   * node's children (the discovery plugin supplies them).
+   * index node describes a path, not a stored record. `data.resources` lists the
+   * node's children, and `links` its relations (the discovery plugin supplies both).
    */
   fastify.decorateReply('sendIndex', function sendIndex(data, { links = {} } = {}) {
     return this.send({

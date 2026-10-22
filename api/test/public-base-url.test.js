@@ -71,11 +71,14 @@ test('every link on single, list and index responses starts with the configured 
 
   const root = (await app.inject({ method: 'GET', url: '/' })).json();
   assert.equal(root.links.self, `${OTHER}/`);
-  assert.equal(root.links.api, `${OTHER}/api`);
+  assert.equal(root.data.resources.api.href, `${OTHER}/api`);
 
   const v1 = (await app.inject({ method: 'GET', url: '/api/v1' })).json();
   for (const [name, href] of Object.entries(v1.links)) {
     assert.ok(href.startsWith(`${OTHER}/api/v1`), `${name}: ${href}`);
+  }
+  for (const [name, { href }] of Object.entries(v1.data.resources)) {
+    assert.ok(href.startsWith(`${OTHER}/api/v1/`), `${name}: ${href}`);
   }
 });
 
