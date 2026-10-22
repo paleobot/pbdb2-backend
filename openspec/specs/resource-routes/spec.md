@@ -423,6 +423,17 @@ expansion parameter the resource declares. A resource that declares no filters
 and no expansions therefore recognizes only the universal list parameters on its
 list endpoint, and none on its single read.
 
+Each read route SHALL declare the parameters it recognizes as a querystring
+schema, and the system SHALL validate requests against that schema, so that the
+parameters the API description lists are the parameters the route enforces
+(`api-description`). Before validation, every query value SHALL be trimmed of
+surrounding whitespace, and a parameter declared as an integer SHALL be a bare
+string of digits (so `1e3`, `0x10` and `1.0` are rejected, not converted). Each
+parameter SHALL carry one value: a repeated parameter SHALL be rejected with HTTP
+400. A validation failure SHALL be reported in the standard error shape with the
+same message the parameter's rule gives on a hand-checked request, so declaring
+the schema changes no response.
+
 This replaces the previous provisional leniency, under which an unrecognized
 parameter was ignored. The reason is that a silently ignored parameter yields a
 response indistinguishable from a correct one — a misspelled filter returns an
@@ -460,4 +471,25 @@ matches no stored value SHALL yield an empty result rather than an error.
   field but matches no stored value
 - **THEN** the system responds with HTTP 200 and an empty `data` array, not an
   error
+
+#### Scenario: The declared schema is what is enforced
+
+- **WHEN** the querystring schema a list route declares is compared with the
+  parameters the route accepts
+- **THEN** every declared parameter is accepted and any other is a 400 naming it
+
+#### Scenario: Surrounding whitespace is trimmed
+
+- **WHEN** a client sends `?publicationType=%20standalone%20book%20`
+- **THEN** the filter matches `standalone book`, as without the spaces
+
+#### Scenario: A non-decimal limit is rejected
+
+- **WHEN** a client sends `?limit=1e3`, `?limit=0x10` or `?limit=1.0`
+- **THEN** the system responds with HTTP 400 saying `limit` must be a positive integer
+
+#### Scenario: A repeated parameter is rejected
+
+- **WHEN** a client sends `?limit=5&limit=6`
+- **THEN** the system responds with HTTP 400 in the standard error shape
 

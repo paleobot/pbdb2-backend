@@ -322,3 +322,21 @@ as index documents. When writes become real, their routes are unhidden with requ
   URI templates, instead of links only (D10). Decided "for now".
 - **Follow-up:** descriptions for the many properties that have none (D9).
 - **Prerequisites:** `tidy-response-shape` and `adopt-json-schema-2020-12` land first (D6, D7).
+
+## Apply notes (2026-10-21)
+
+Where the implementation departs from the decisions above:
+- **One message changed (amends D11).** An unrecognized parameter on a route that declares none
+  used to read "This resource accepts ``". It now reads "This resource accepts no query
+  parameters". Every other message was compared before and after on 36 URLs and is unchanged.
+- **Routes that became strict.** The three index routes and the `schemas` single read used to
+  ignore unknown parameters (the latter answered 404 for a missing schema). They now declare an
+  empty querystring schema and answer 400, as "Strict query-param handling" requires. A repeated
+  parameter is a 400 with "`<param>` must be sent once, with a single value".
+- **`verbose: true`** on the querystring Ajv, so the error formatter can read each error's
+  `parentSchema` to list the accepted parameters (D1).
+- **Legal filter values live only in the querystring schema.** The repository no longer attaches
+  `values` to its filters (`withLegalValues` and the exposed `repository.filters` are gone). Routes
+  pass the descriptor's `filters` to the list handler.
+- **Load order.** `plugins/discovery.js` declares a fastify-plugin dependency on `openapi`, so
+  `@fastify/swagger` is registered before the index routes and documents them.

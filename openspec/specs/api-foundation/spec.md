@@ -56,7 +56,9 @@ rather than returning 404.
 ### Requirement: Standard response envelope
 
 The system SHALL return every successful response using a consistent envelope of
-`data`, `meta`, and `links`. For a single resource, `data` SHALL be an object;
+`data`, `meta`, and `links`, except the API description's routes
+(`/api/v1/openapi.json`, an OpenAPI document, and `/api/v1/docs`, an HTML viewer;
+`api-description`), whose formats are defined by OpenAPI and HTML. For a single resource, `data` SHALL be an object;
 for a collection, `data` SHALL be an array and `meta` SHALL carry result counts
 describing the returned page. The public identity of a resource SHALL be its
 `permid`, and internal database identifiers SHALL NOT be exposed.
@@ -99,6 +101,11 @@ cursor pagination depends on it to avoid skipping or repeating records.
 - **THEN** `data` is an array ordered by `permid`
 - **AND** `meta` includes result counts for the returned page
 - **AND** `links` includes `next` and `prev`, each either a URL or `null`
+
+#### Scenario: The description is not enveloped
+
+- **WHEN** a client requests `/api/v1/openapi.json`
+- **THEN** the body is the OpenAPI document itself, with no `data`, `meta` or `links` wrapper
 
 ### Requirement: Consistent HTTP error responses
 
