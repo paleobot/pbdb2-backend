@@ -3,8 +3,6 @@ import assert from 'node:assert/strict';
 
 import { build, DEFAULT_PUBLIC_BASE_URL as BASE } from '../src/app.js';
 import { makeReadRepository } from '../src/lib/repository.js';
-import { descriptorFor } from '../src/lib/resource-tables.js';
-import { referenceSource } from '../../payloadSchemas/reference.schema.js';
 
 /**
  * DB-backed reads, driven with NO database: `build({ pg })` injects a fake
@@ -220,20 +218,4 @@ test('stub reads expose the enriched reference shape with href (no DB configured
   });
   assert.deepEqual(schema.additionalReferences, []);
   assert.equal(schema.characters[0].states[0].quantitative, false);
-});
-
-test('a filter on a source enum carries that enum as its legal values', () => {
-  const repo = makeReadRepository({ pg: fakePg(() => ({ rows: [] })), ...descriptorFor('references') });
-  assert.deepEqual(repo.filters.publicationType, {
-    jsonPath: 'publicationType',
-    op: 'eq',
-    values: referenceSource.properties.publicationType.enum,
-  });
-});
-
-test('a filter on a field with no enum is exposed as declared', () => {
-  const pg = fakePg(() => ({ rows: [] }));
-  const onTitle = { title: { jsonPath: 'title', op: 'eq' } };
-  const repo = makeReadRepository({ pg, table: 'refs', jsonbColumn: 'reference', filters: onTitle, source: referenceSource });
-  assert.deepEqual(repo.filters, onTitle);
 });

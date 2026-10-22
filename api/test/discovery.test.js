@@ -26,9 +26,50 @@ test('discovery links are derived from the route tree', async (t) => {
   assert.equal(root.links.api, `${BASE}/api`);
 
   const v1 = (await app.inject({ method: 'GET', url: '/api/v1' })).json();
-  for (const resource of ['references', 'authorities', 'collections', 'specimens', 'schemas']) {
+  for (const resource of ['references', 'authorities', 'collections', 'schemas', 'taxa']) {
     assert.equal(v1.links[resource], `${BASE}/api/v1/${resource}`, `links should include ${resource}`);
   }
+});
+
+test('the version index links its description; specimens, a stub, is not listed', async (t) => {
+  const app = build();
+  t.after(() => app.close());
+
+  const v1 = (await app.inject({ method: 'GET', url: '/api/v1' })).json();
+  assert.deepEqual(Object.keys(v1.links).sort(), [
+    'authorities', 'collections', 'describedby', 'docs', 'references', 'schemas', 'self', 'taxa',
+  ]);
+  assert.equal(v1.links.describedby, `${BASE}/api/v1/openapi.json`);
+  assert.equal(v1.links.docs, `${BASE}/api/v1/docs`);
+
+  for (const url of ['/', '/api']) {
+    const { links } = (await app.inject({ method: 'GET', url })).json();
+    assert.equal('describedby' in links || 'docs' in links, false, url);
+  }
+});
+
+test('a hidden route is not listed, unless a visible one shares its segment', async (t) => {
+  const app = build();
+  const handler = async () => ({});
+  app.register(async (f) => {
+    f.get('/api/v1/secret', { schema: { hide: true } }, handler);
+    f.get('/api/v1/mixed', handler);
+    f.post('/api/v1/mixed', { schema: { hide: true } }, handler);
+  });
+  t.after(() => app.close());
+
+  const { links } = (await app.inject({ method: 'GET', url: '/api/v1' })).json();
+  assert.equal('secret' in links, false);
+  assert.equal(links.mixed, `${BASE}/api/v1/mixed`);
+});
+
+test('an index takes no query parameters', async (t) => {
+  const app = build();
+  t.after(() => app.close());
+
+  const res = await app.inject({ method: 'GET', url: '/api/v1?x=1' });
+  assert.equal(res.statusCode, 400);
+  assert.match(res.json().error.message, /`x`/);
 });
 
 test('a resource with collection and :permid routes appears once in discovery', async (t) => {

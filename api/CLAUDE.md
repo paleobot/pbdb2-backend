@@ -56,12 +56,17 @@ src/
   server.js             entry point — build() + listen()
   config.js             env → config
   lib/crud-routes.js    shared CRUD route factory (readOnly option → 405)
+  lib/query-schemas.js  GET querystring schemas, query normalizer, 400 formatter
+  lib/published-schemas.js  published response components (Collection, ReferenceLink, …)
   plugins/              autoloaded first (fastify-plugin wrapped, global)
-    envelope.js         reply.sendData / reply.sendList → { data, meta, links }
+    envelope.js         reply.sendData / reply.sendList → { data, meta, links }, + their schemas
+    discovery.js        /, /api, /api/v1 index documents, derived from the route table
+    openapi.js          @fastify/swagger + swagger-ui: /api/v1/openapi.json, /api/v1/docs
     auth.js             stubbed fastify.authenticate (no-op preHandler)
     sensible.js         @fastify/sensible
   routes/api/v1/        autoloaded; URL prefix derived from directory layout
     references/  authorities/  collections/  specimens/   uniform CRUD
+                        (specimens: stub reads, hidden from the description)
     schemas/            CRUD + aggregate schema→characters→states read
     taxa/               READ-ONLY (405 on writes); derived table, no JSONB
 test/                   node:test suites, driven via app.inject()
@@ -79,6 +84,8 @@ docs/                   design notes (e.g. response-envelope rationale)
   `plugins/envelope.js`. Single resource → `data` is an object; list → `data` is
   an array with counts in `meta`. The rationale and the comparison against the
   legacy `data1.2` envelope are in `docs/api-response-envelope-comparison.md`.
+  The only unenveloped successes are the description's own routes
+  (`/api/v1/openapi.json`, `/api/v1/docs`).
 - **Absolute links:** every URL in a response body (`links.self`, `next`/`prev`,
   each `href`, discovery links) is the public base URL followed by the path.
   `build({ publicBaseUrl })` validates it and decorates `fastify.publicBaseUrl`;
@@ -110,28 +117,52 @@ docs/                   design notes (e.g. response-envelope rationale)
   expression is read through it (`location` as GeoJSON). Links come from the
   source's `x-link` properties and array `items`, and `href` is added by
   `hydrateSourceLinks`. Each response validates against the source's `out`
-  variant, which `test/source-reads.test.js` checks. Every version-chained
+  variant as published (`lib/published-schemas.js`), which
+  `test/source-reads.test.js` checks. Every version-chained
   resource reads this way (`authorities`, `collections`, `references`,
   `schemas`): the generic repository refuses a descriptor with no `source`. A
   schema single read adds its characters tree (`lib/schema-tree.js`), each
   node merged through `characterSource`/`stateSource`, and is contract-tested
-  in parts. Only `taxa` keeps descriptor `links` (single-valued, through
-  `linkProjections`) and has its own repository; `specimens` is a stub (see
+  in one validation against the published `Schema`. Only `taxa` keeps descriptor
+  `links` (single-valued, through `linkProjections`) and has its own
+  repository; its response is described by the read-only
+  `payloadSchemas/taxon.schema.js`. `specimens` is a stub (see
   `api/docs/response-contracts.md`).
+- **Route schemas validate queries and document responses.** Every GET route
+  declares a `querystring` schema built from its descriptor's `filters` and
+  `expansions` (`lib/query-schemas.js`) and, for documented resources, a 200
+  `response` schema: the envelope (`plugins/envelope.js`) around a published
+  component. Fastify validates querystrings with the backend's own
+  `createAjv()` (2020-12; coercing, never stripping, all errors, no defaults);
+  a `preValidation` hook trims values, rejects a repeated parameter and requires
+  bare digits for an integer, and the schema error formatter keeps the
+  hand-written 400 messages. What a schema cannot express (cursor decoding, the
+  100-distinct-ids cap, the default `limit`) stays in `collectListFilters`.
 - **Strict query params:** an unrecognized query parameter is a **400** naming it,
-  on single reads as well as lists. A filter *value* outside its field's enum in
-  the payload source is also a 400 listing the legal values (the repository
-  attaches them as `values`); a legal value matching nothing is an empty 200,
-  and a field with no enum keeps opaque values. A resource declares what it
-  accepts via its descriptor's `filters` and `expansions`.
+  on single reads, lists and indexes alike. A filter *value* outside its field's
+  inline enum in the payload source is also a 400 listing the legal values; a
+  legal value matching nothing is an empty 200, and a field with no enum keeps
+  opaque values.
+- **Responses are serialized with `JSON.stringify`**, never through the response
+  schema (`setSerializerCompiler`): fast-json-stringify drops undeclared fields
+  and coerces types. So a response schema has no runtime effect, and
+  `test/published.js` is what keeps it true: every resource's reads are
+  validated against the **published** components, in unit and integration tests.
+- **The description** (`plugins/openapi.js`) is generated by `@fastify/swagger`
+  from the route schemas; components come from `lib/published-schemas.js`
+  (`out` variants with storage annotations stripped, dictionary fields named
+  rather than enumerated, links as `<Target>Link`). A route with `schema.hide`
+  is left out of the document **and** of discovery: stub writes, taxa's 405s,
+  every `specimens` route, and the description's own routes. `/api/v1` links
+  the description as `describedby` and `docs`.
 - **Tests:** `node:test` + `node:assert` driven through `app.inject()`. No
   test-runner dependency. Vitest is the agreed fallback if watch/coverage
   ergonomics later justify it.
 
 ## Deferred (not yet built)
 
-Request-body validation and Swagger generation from the payload schemas in
-`payloadSchemas/`, real JWT auth + login, the write path (for taxonomy that means the
+Request-body validation (from the `in-create` / `patch-guard` variants, which
+also unhides the write routes in the description), real JWT auth + login, the write path (for taxonomy that means the
 *opinion* tables — `taxa` itself is never written), the per-entity `/versions`
 history sub-resource (`taxa` will never have one — it is not version-chained),
 and name-ordered taxa lists (viable but needs a `(name, permid)` index in

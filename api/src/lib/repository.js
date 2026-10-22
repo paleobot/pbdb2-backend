@@ -226,23 +226,6 @@ function sourceRecords(pg, source, children) {
 }
 
 /**
- * Give each declared filter the legal values its field has in the payload
- * source: `values` is the source property's `enum` when it has a literal one.
- * The route seam rejects any other value with a 400, since it cannot match a
- * stored row. A filter on a field with no enum is returned as declared, and
- * its values stay opaque.
- *
- * @param {Record<string, { jsonPath: string, op: string }>} filters
- * @param {object} source
- */
-function withLegalValues(filters, source) {
-  return Object.fromEntries(Object.entries(filters).map(([param, def]) => {
-    const values = source.properties?.[def.jsonPath]?.enum;
-    return [param, Array.isArray(values) ? { ...def, values: [...values] } : def];
-  }));
-}
-
-/**
  * @param {object} args
  * @param {{ query: (text: string, values?: unknown[]) => Promise<{ rows: any[] }> }} args.pg
  *   a @fastify/postgres client (or a compatible fake in tests)
@@ -269,11 +252,6 @@ export function makeReadRepository({ pg, table, jsonbColumn, filters = {}, sourc
   const toRecords = sourceRecords(pg, source, children);
 
   return {
-    // Declared field filters, exposed so the route seam knows which query params
-    // this resource accepts (and, through `values`, which values) and the head
-    // read can translate them to predicates.
-    filters: withLegalValues(filters, source),
-
     /**
      * Current head for a `permid`, or null if there is no current, non-removed
      * version (missing lineage, superseded head, or soft-removed head).

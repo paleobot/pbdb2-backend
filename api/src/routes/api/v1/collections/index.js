@@ -7,6 +7,8 @@ export default async function collections(fastify) {
     type: 'collection',
     repository: repositoryForResource(fastify, 'collections'),
     source: descriptorFor('collections').source,
+    filters: descriptorFor('collections').filters,
+    component: 'Collection',
     // A payload in the collection source's shape, as a merged read returns it.
     stub: (permid = 'col-00000000') => ({
       permid,

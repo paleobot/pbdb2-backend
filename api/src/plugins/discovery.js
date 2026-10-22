@@ -1,5 +1,8 @@
 import fp from 'fastify-plugin';
 
+import { INDEX_ENVELOPE } from './envelope.js';
+import { SINGLE_QUERY_SCHEMA } from '../lib/query-schemas.js';
+
 /**
  * Hypermedia discovery for the API base paths.
  *
@@ -12,11 +15,22 @@ import fp from 'fastify-plugin';
  * registered beneath it. Drop a new resource (or a future API version) folder
  * and it appears here automatically — same directory-is-the-config philosophy
  * as the autoloaded `/api/v1` prefix.
+ *
+ * A route hidden from the API description (`schema.hide`) is absent here too:
+ * a segment is listed when any non-hidden route lies under it, so hiding a
+ * group's stub writes keeps the group, and hiding all of `specimens` drops it.
+ * The description itself (`openapi.json`, `docs`) is hidden, and the version's
+ * index links it by relation instead (`describedby`, `docs`).
  */
 
 const BASE_PATHS = ['/', '/api', '/api/v1'];
 
-const NODE_DATA = {
+/** The API description of a version, linked from that version's index only. */
+const DESCRIPTION_LINKS = {
+  '/api/v1': { describedby: '/api/v1/openapi.json', docs: '/api/v1/docs' },
+};
+
+export const NODE_DATA = {
   '/': { name: 'PBDB2 API', description: 'Paleobiology Database REST API' },
   '/api': { name: 'PBDB2 API', description: 'Available API versions' },
   '/api/v1': {
@@ -45,6 +59,9 @@ function buildLinks(base, urls, publicBaseUrl) {
   for (const segment of childSegments(base, urls)) {
     links[segment] = publicBaseUrl + (base === '/' ? `/${segment}` : `${base}/${segment}`);
   }
+  for (const [rel, path] of Object.entries(DESCRIPTION_LINKS[base] ?? {})) {
+    links[rel] = publicBaseUrl + path;
+  }
   return links;
 }
 
@@ -52,10 +69,11 @@ export default fp(async (fastify) => {
   const urls = new Set();
   const linkMaps = {};
 
-  // Collect every registered route path. Added before routes autoload, on the
-  // root instance, so it captures all resource routes.
+  // Collect every registered route path that the description documents. Added
+  // before routes autoload, on the root instance, so it captures all resource
+  // routes.
   fastify.addHook('onRoute', (route) => {
-    urls.add(route.url);
+    if (!route.schema?.hide) urls.add(route.url);
   });
 
   // The route table is fixed once the app is ready, so build the link maps once
@@ -66,9 +84,10 @@ export default fp(async (fastify) => {
     }
   });
 
+  const schema = { querystring: SINGLE_QUERY_SCHEMA, response: { 200: INDEX_ENVELOPE } };
   for (const base of BASE_PATHS) {
-    fastify.get(base, async (_request, reply) =>
+    fastify.get(base, { schema }, async (_request, reply) =>
       reply.sendIndex(NODE_DATA[base], { links: linkMaps[base] }),
     );
   }
-});
+}, { name: 'discovery', dependencies: ['openapi'] });

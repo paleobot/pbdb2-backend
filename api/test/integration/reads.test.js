@@ -3,16 +3,9 @@ import assert from 'node:assert/strict';
 
 import { build, DEFAULT_PUBLIC_BASE_URL as BASE } from '../../src/app.js';
 import { makeReadRepository } from '../../src/lib/repository.js';
-import { authoritySource } from '../../../payloadSchemas/authority.schema.js';
-import { collectionSource } from '../../../payloadSchemas/collection.schema.js';
-import { referenceSource } from '../../../payloadSchemas/reference.schema.js';
-import { schemaSource } from '../../../payloadSchemas/schema.schema.js';
-import { characterSource } from '../../../payloadSchemas/character.schema.js';
-import { stateSource } from '../../../payloadSchemas/state.schema.js';
-import { deriveVariant } from '../../../payloadSchemas/lib/variants.js';
-import { createAjv } from '../../../payloadSchemas/lib/ajv.js';
 import { readSchemaCharacters } from '../../src/lib/schema-tree.js';
 import { descriptorFor } from '../../src/lib/resource-tables.js';
+import { assertPublished } from '../published.js';
 import {
   setupTestDb,
   seedPerson,
@@ -45,49 +38,19 @@ after(async () => {
 
 const refsRepo = () => makeReadRepository({ pg: ctx.pool, ...descriptorFor('references') });
 
-// The authority response contract (data-access): every authority read is
-// checked against it.
-const validateAuthorityOut = createAjv().compile(deriveVariant(authoritySource, 'out'));
-function assertAuthorityContract(record) {
-  assert.equal(validateAuthorityOut(record), true, JSON.stringify(validateAuthorityOut.errors));
-}
-
-// The collection response contract, likewise.
-const validateCollectionOut = createAjv().compile(deriveVariant(collectionSource, 'out'));
-function assertCollectionContract(record) {
-  assert.equal(validateCollectionOut(record), true, JSON.stringify(validateCollectionOut.errors));
-}
-
-// The reference response contract, likewise.
-const validateReferenceOut = createAjv().compile(deriveVariant(referenceSource, 'out'));
-function assertReferenceContract(record) {
-  assert.equal(validateReferenceOut(record), true, JSON.stringify(validateReferenceOut.errors));
-}
-
-// The schema response contract. A single read carries a characters tree the
-// schema out variant does not declare, so it is checked in parts: the record
-// without `characters`, each character without its children, each state
-// without its own (data-access, "Responses ... validate against its out variant").
-const validateSchemaOut = createAjv().compile(deriveVariant(schemaSource, 'out'));
-const validateCharacterOut = createAjv().compile(deriveVariant(characterSource, 'out'));
-const validateStateOut = createAjv().compile(deriveVariant(stateSource, 'out'));
+// The response contracts (data-access, api-description): every read is checked
+// against the schema the API publishes for it. A schema single read carries its
+// characters tree, which the published `Schema` declares through the recursive
+// `Character` and `State` components, so one validation covers every node.
+const assertAuthorityContract = (record) => assertPublished('Authority', record);
+const assertCollectionContract = (record) => assertPublished('Collection', record);
+const assertReferenceContract = (record) => assertPublished('Reference', record);
+const assertSchemaContract = (record) => assertPublished('Schema', record);
 const without = (obj, keys) => Object.fromEntries(Object.entries(obj).filter(([k]) => !keys.includes(k)));
-function assertValid(validate, record) {
-  assert.equal(validate(record), true, `${record.permid}: ${JSON.stringify(validate.errors)}`);
-}
-function assertSchemaContract(record) {
-  assertValid(validateSchemaOut, record);
-}
-function assertSchemaTreeContract(data) {
-  assertValid(validateSchemaOut, without(data, ['characters']));
-  const states = (list) => list.forEach((st) => { assertValid(validateStateOut, without(st, ['states'])); states(st.states); });
-  const characters = (list) => list.forEach((c) => {
-    assertValid(validateCharacterOut, without(c, ['characters', 'states']));
-    characters(c.characters);
-    states(c.states);
-  });
-  characters(data.characters);
-}
+const assertSchemaTreeContract = (data) => {
+  assert.ok(Array.isArray(data.characters), 'a single read carries its characters');
+  assertPublished('Schema', data);
+};
 
 // Enrichment repos use the production descriptors (table, jsonbColumn, references).
 const authoritiesRepo = () => makeReadRepository({ pg: ctx.pool, ...descriptorFor('authorities') });

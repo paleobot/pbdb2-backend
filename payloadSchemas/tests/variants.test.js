@@ -182,3 +182,22 @@ test('patch-guard omits propertyNames without readOnly properties', () => {
   assert.equal('propertyNames' in g, false);
   assert.equal(g.type, 'object');
 });
+
+test('createAjv options extend the defaults; no argument is unchanged', () => {
+  const coercing = createAjv({ coerceTypes: true });
+  assert.equal(coercing.compile({ type: 'integer' })('5'), true);
+  assert.equal(createAjv().compile({ type: 'integer' })('5'), false);
+  for (const ajv of [coercing, createAjv()]) {
+    assert.ok(ajv.compile({ type: 'string', 'x-storage': { column: 'c' }, 'x-link': {} }));
+    assert.throws(() => ajv.compile({ type: 'string', 'x-unknown': 1 }), /strict mode/);
+  }
+});
+
+test('a read-only source has no write variants', () => {
+  const s = { ...source(), readOnly: true };
+  for (const v of ['in-create', 'patch-guard']) {
+    assert.throws(() => deriveVariant(s, v), /thing\.json is read-only/);
+  }
+  assert.equal(deriveVariant(s, 'out')['x-variant'], 'out');
+  assert.equal('permid' in deriveVariant(s, 'db').properties, false);
+});

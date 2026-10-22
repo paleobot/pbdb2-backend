@@ -6,7 +6,8 @@
 (`reference-reads-from-payload-schemas`, 2026-10-12; no links, so the response is unchanged and
 now contract-tested), and schemas (`schema-reads-from-payload-schemas`, 2026-10-16, which took the
 collection reference shape and merges the character/state tree through its sources). Specimens
-follow in a later change.
+follow in a later change. Since `add-openapi-for-reads` (2026-10-21) the contract is published:
+`/api/v1/openapi.json` (§7).
 **Audience:** PBDB2 backend contributors
 **Subject:** How the API starts using `payloadSchemas/`, and where linked-resource conveniences
 (`title`, `href`) belong in a GET response
@@ -341,6 +342,15 @@ Settled 2026-10-06, in `authority-reads-from-payload-schemas` (design.md has the
 Settled 2026-10-08, in `collection-reads-from-payload-schemas`: a removed reference reads as
 `null` for a single link (collection `primaryReference`) and is omitted from an array of links
 (`additionalReferences`).
+
+Settled 2026-10-21, in `add-openapi-for-reads`: the response contract is published, at
+`/api/v1/openapi.json` (OpenAPI 3.1, generated from the route schemas; viewer at `/api/v1/docs`).
+Each resource's schema is its source's `out` variant with the storage annotations removed, so §1's
+deferral of serving the variants no longer applies to responses. A link appears as a named component
+per target (`ReferenceLink`, `AuthorityLink`, `TaxonLink`: `permid`, the target's label field and
+`href`, with the target's URL pattern in its description), referenced wherever a source declares
+`x-link`, and `null`-able where a single link can read as `null`. The schemas document; they do not
+serialize, so tests validate real responses against the published schemas.
 
 Still open:
 - the collection reference model (order, and where the primary lives), with a committee;

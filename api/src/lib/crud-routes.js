@@ -1,6 +1,11 @@
 import { hydrateSourceLinks } from './link-hydration.js';
-import { collectListFilters, rejectUnknownQuery } from './list-filters.js';
+import { collectListFilters } from './list-filters.js';
+import { listQuerySchema, SINGLE_QUERY_SCHEMA, PERMID_PARAMS_SCHEMA } from './query-schemas.js';
 import { pageLinks } from './cursor.js';
+import { singleEnvelope, listEnvelope } from '../plugins/envelope.js';
+
+/** Marks a route the API description leaves out; discovery skips it too. */
+const HIDDEN = { hide: true };
 
 /**
  * Registers the uniform CRUD verb coverage shared by references, authorities,
@@ -14,7 +19,12 @@ import { pageLinks } from './cursor.js';
  * configured), reads fall back to `stub` — preserving the pre-DB behavior.
  *
  * WRITES (POST/PUT/PATCH/DELETE) still return `stub` data and do NOT touch the
- * database; the write path is a separate, later change.
+ * database; the write path is a separate, later change. They are hidden from
+ * the API description, which documents only what a client can rely on.
+ *
+ * The GET routes declare their querystring (validated, query-schemas.js) and,
+ * given a `component`, their 200 response (documentation only: responses are
+ * not serialized through it).
  *
  * READ-ONLY GROUPS (`readOnly: true`) expose GET only and answer every write
  * verb with 405 plus an `Allow` header. This is a property of the resource, not
@@ -26,13 +36,19 @@ import { pageLinks } from './cursor.js';
  * @param {object} opts
  * @param {string} opts.type   resource type label used in meta.type
  * @param {(permid?: string) => object} opts.stub  builds a stub record
- * @param {{ readHead: (permid: string) => Promise<object|null>, readHeads: (criteria?: object) => Promise<{ records: object[], hasMore: boolean }>, filters?: object }} [opts.repository]
- *   read repository; when omitted, reads use `stub`. `repository.filters` (when
- *   present) declares the field-filter query params this resource accepts.
+ * @param {{ readHead: (permid: string) => Promise<object|null>, readHeads: (criteria?: object) => Promise<{ records: object[], hasMore: boolean }> }} [opts.repository]
+ *   read repository; when omitted, reads use `stub`
  * @param {object} [opts.source]  annotated payload source; when present, its
- *   x-link properties and items get an `href`
+ *   x-link properties and items get an `href`, and its inline enums are the
+ *   legal values of filters on those fields
+ * @param {Record<string, import('./resource-tables.js').FieldFilter>} [opts.filters]
+ *   the descriptor's field filters: query params this resource's list accepts
  * @param {Record<string, { type: 'boolean' }>} [opts.expansions]
  *   declared expansion params this resource's list accepts
+ * @param {string} [opts.component]  published schema (published-schemas.js) of
+ *   one record, for the GET response schemas; omitted, they declare none
+ * @param {boolean} [opts.hidden]  hide every route from the API description and
+ *   discovery (a stub resource, `specimens`)
  * @param {boolean} [opts.readOnly]  expose GET only; write verbs answer 405
  * @param {(record: object) => object} [opts.hydrate]
  *   override the default link hydration, for a group with no payload source
@@ -40,9 +56,9 @@ import { pageLinks } from './cursor.js';
  */
 export function registerCrudRoutes(
   fastify,
-  { type, stub, repository, source, expansions, readOnly = false, hydrate: customHydrate },
+  { type, stub, repository, source, filters, expansions, component, hidden = false, readOnly = false, hydrate: customHydrate },
 ) {
-  const write = { preHandler: fastify.authenticate };
+  const write = { preHandler: fastify.authenticate, schema: HIDDEN };
   // Each link's href base is derived from this group's mounted prefix and the
   // link's own target group, not hard-coded. A group with no source and no
   // `hydrate` of its own (specimens, a stub) has no links to hydrate.
@@ -50,15 +66,13 @@ export function registerCrudRoutes(
     ? (record) => hydrateSourceLinks(record, source, fastify.prefix, fastify.publicBaseUrl)
     : (record) => record);
 
-  fastify.get('/', listReadHandler(fastify, { type, stub, repository, hydrate, expansions }));
+  const list = { schema: listRouteSchema({ filters, source, expansions, component, hidden }) };
+  fastify.get('/', list, listReadHandler(fastify, { type, stub, repository, hydrate, filters, expansions }));
 
-  // Single read
-  fastify.get('/:permid', async (request, reply) => {
-    // A single read takes no filters and no pagination, so it recognizes no
-    // query parameters at all — but it is validated on the same terms as a list,
-    // so strictness does not differ by endpoint shape.
-    rejectUnknownQuery(request.query, fastify.httpErrors);
-
+  // Single read. It takes no filters and no pagination, so its schema recognizes
+  // no query parameters — but it is validated on the same terms as a list, so
+  // strictness does not differ by endpoint shape.
+  fastify.get('/:permid', { schema: singleRouteSchema({ component, hidden }) }, async (request, reply) => {
     if (!repository) return reply.sendData(hydrate(stub(request.params.permid)), { type });
 
     const record = await repository.readHead(request.params.permid);
@@ -125,9 +139,32 @@ function registerMethodNotAllowed(fastify, type) {
       );
     };
 
-    fastify.route({ method: verb, url: '/', handler });
-    fastify.route({ method: verb, url: '/:permid', handler });
+    // Hidden from the description: it documents what a client can do.
+    fastify.route({ method: verb, url: '/', schema: HIDDEN, handler });
+    fastify.route({ method: verb, url: '/:permid', schema: HIDDEN, handler });
   }
+}
+
+/**
+ * The schema of a list read: its querystring, from what the resource declares,
+ * and its 200 response, a page of `component` records.
+ */
+export function listRouteSchema({ filters, source, expansions, component, hidden = false }) {
+  return {
+    querystring: listQuerySchema({ filters, source, expansions }),
+    ...(component ? { response: { 200: listEnvelope({ $ref: `${component}#` }) } } : {}),
+    ...(hidden ? HIDDEN : {}),
+  };
+}
+
+/** The schema of a single read: its `permid`, no query parameters, one `component` record. */
+export function singleRouteSchema({ component, hidden = false }) {
+  return {
+    params: PERMID_PARAMS_SCHEMA,
+    querystring: SINGLE_QUERY_SCHEMA,
+    ...(component ? { response: { 200: singleEnvelope({ $ref: `${component}#` }) } } : {}),
+    ...(hidden ? HIDDEN : {}),
+  };
 }
 
 /**
@@ -141,22 +178,17 @@ function registerMethodNotAllowed(fastify, type) {
  *
  * @param {import('fastify').FastifyInstance} fastify
  * @param {{ type: string, stub: () => object,
- *   repository?: { readHeads: (criteria?: object) => Promise<{ records: object[], hasMore: boolean }>, filters?: object },
- *   hydrate: (record: object) => object }} opts
+ *   repository?: { readHeads: (criteria?: object) => Promise<{ records: object[], hasMore: boolean }> },
+ *   hydrate: (record: object) => object, filters?: object, expansions?: object }} opts
  */
-export function listReadHandler(fastify, { type, stub, repository, hydrate, expansions }) {
+export function listReadHandler(fastify, { type, stub, repository, hydrate, filters: filterDefs, expansions }) {
   return async function listRead(request, reply) {
-    const filters = collectListFilters(
-      request.query,
-      fastify.httpErrors,
-      repository?.filters,
-      expansions,
-    );
+    const filters = collectListFilters(request.query, fastify.httpErrors, filterDefs, expansions);
 
     if (filters.ids) {
       // DB-backed: fetch the requested heads, narrowed by any field filters.
-      // Stub fallback: echo each id back as a stub record (field filters can't
-      // reach here — stub resources declare none — so the shape stays uniform).
+      // Stub fallback: echo each id back as a stub record, ignoring any field
+      // filter (stub data cannot be filtered), so the shape stays uniform.
       // An `ids` read is a single page by construction: it is capped at MAX_IDS
       // and the seam rejects `limit`/`cursor` alongside it, so both pagination
       // links stay null.

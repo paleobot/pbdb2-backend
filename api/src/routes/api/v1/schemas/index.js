@@ -22,7 +22,7 @@ import { repositoryForResource } from '../../../../lib/repository.js';
 import { readSchemaCharacters } from '../../../../lib/schema-tree.js';
 import { descriptorFor } from '../../../../lib/resource-tables.js';
 import { hydrateSourceLinks } from '../../../../lib/link-hydration.js';
-import { listReadHandler } from '../../../../lib/crud-routes.js';
+import { listReadHandler, listRouteSchema, singleRouteSchema } from '../../../../lib/crud-routes.js';
 
 const stubSchema = (permid = 'sch-00000000') => ({
   permid,
@@ -45,20 +45,22 @@ const stubSchemaTree = (permid = 'sch-00000000') => ({
 });
 
 export default async function schemas(fastify) {
-  const write = { preHandler: fastify.authenticate };
+  // Write verbs are stubs, hidden from the API description.
+  const write = { preHandler: fastify.authenticate, schema: { hide: true } };
   const repository = repositoryForResource(fastify, 'schemas');
-  const { source } = descriptorFor('schemas');
+  const { source, filters } = descriptorFor('schemas');
   const hydrate = (record) =>
     hydrateSourceLinks(record, source, fastify.prefix, fastify.publicBaseUrl);
 
   // List — flat heads through the shared seam (the tree shape is per-read)
   fastify.get(
     '/',
-    listReadHandler(fastify, { type: 'schema', stub: stubSchema, repository, hydrate }),
+    { schema: listRouteSchema({ filters, source, component: 'Schema' }) },
+    listReadHandler(fastify, { type: 'schema', stub: stubSchema, repository, hydrate, filters }),
   );
 
   // Single read — aggregate tree (schema -> characters -> states)
-  fastify.get('/:permid', async (request, reply) => {
+  fastify.get('/:permid', { schema: singleRouteSchema({ component: 'Schema' }) }, async (request, reply) => {
     if (!repository) {
       return reply.sendData(hydrate(stubSchemaTree(request.params.permid)), { type: 'schema' });
     }

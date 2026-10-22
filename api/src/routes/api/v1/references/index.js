@@ -7,6 +7,8 @@ export default async function references(fastify) {
     type: 'reference',
     repository: repositoryForResource(fastify, 'references'),
     source: descriptorFor('references').source,
+    filters: descriptorFor('references').filters,
+    component: 'Reference',
     // A payload in the reference source's shape, as a merged read returns it.
     stub: (permid = 'ref-00000000') => ({
       permid,

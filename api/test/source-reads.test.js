@@ -2,29 +2,18 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 import { build, DEFAULT_PUBLIC_BASE_URL as BASE } from '../src/app.js';
-import { authoritySource } from '../../payloadSchemas/authority.schema.js';
-import { collectionSource } from '../../payloadSchemas/collection.schema.js';
-import { referenceSource } from '../../payloadSchemas/reference.schema.js';
-import { schemaSource } from '../../payloadSchemas/schema.schema.js';
-import { characterSource } from '../../payloadSchemas/character.schema.js';
-import { stateSource } from '../../payloadSchemas/state.schema.js';
-import { deriveVariant } from '../../payloadSchemas/lib/variants.js';
-import { createAjv } from '../../payloadSchemas/lib/ajv.js';
+import { assertPublished, assertEnvelope } from './published.js';
 
 /**
  * Reads through a payload source (authorities, collections, references, schemas), driven with a fake
- * postgres client. Every response's `data` is checked against the resource's
- * `out` variant: that schema is the response contract, so a field it does not
- * declare is a failure here (data-access, "Responses of a resource with a
- * payload source validate against its out variant").
+ * postgres client. Every response's `data` is checked against the schema the
+ * API publishes for it (the source's `out` variant, published: links as named
+ * components, storage annotations gone): that schema is the response contract,
+ * so a field it does not declare is a failure here (data-access, "Responses of
+ * a resource with a payload source validate against its out variant";
+ * api-description).
  */
-const validateOut = createAjv().compile(deriveVariant(authoritySource, 'out'));
-
-function assertContract(data) {
-  for (const item of Array.isArray(data) ? data : [data]) {
-    assert.equal(validateOut(item), true, `${item.permid}: ${JSON.stringify(validateOut.errors)}`);
-  }
-}
+const assertContract = (data) => assertPublished('Authority', data);
 
 // Three authority heads: one citing a titled reference, one an untitled one,
 // one a soft-removed one. refs.id is a bigint, so node-postgres returns strings.
@@ -64,8 +53,9 @@ test('single read is the merged payload with a hydrated reference link', async (
   const app = build({ pg });
   t.after(() => app.close());
 
-  const { data } = (await app.inject({ method: 'GET', url: '/api/v1/authorities/aut-1' })).json();
-  assertContract(data);
+  const body = (await app.inject({ method: 'GET', url: '/api/v1/authorities/aut-1' })).json();
+  assertEnvelope('single', 'Authority', body);
+  const { data } = body;
   assert.deepEqual(data, {
     permid: 'aut-1',
     legacyIDs: { oldpbdbIDs: ['1'] },
@@ -91,8 +81,9 @@ test('list items honour the contract: titled, untitled and removed references', 
   const app = build({ pg });
   t.after(() => app.close());
 
-  const { data } = (await app.inject({ method: 'GET', url: '/api/v1/authorities' })).json();
-  assertContract(data);
+  const body = (await app.inject({ method: 'GET', url: '/api/v1/authorities' })).json();
+  assertEnvelope('list', 'Authority', body);
+  const { data } = body;
   assert.deepEqual(data.map((d) => d.reference), [
     { permid: 'ref-7', title: 'Fossil leaves', href: `${BASE}/api/v1/references/ref-7` },
     { permid: 'ref-9', href: `${BASE}/api/v1/references/ref-9` },
@@ -137,13 +128,7 @@ test('stub read honours the contract (no DB configured)', async (t) => {
 
 // ---------- collections ----------
 
-const validateCollectionOut = createAjv().compile(deriveVariant(collectionSource, 'out'));
-
-function assertCollectionContract(data) {
-  for (const item of Array.isArray(data) ? data : [data]) {
-    assert.equal(validateCollectionOut(item), true, `${item.permid}: ${JSON.stringify(validateCollectionOut.errors)}`);
-  }
-}
+const assertCollectionContract = (data) => assertPublished('Collection', data);
 
 const place = { toponym: { administrativeArea: { admin0: 'US', admin1: 'US-MT' } }, scale: 'outcrop' };
 // Three collection heads, as the head query returns them: `location` selected as
@@ -266,13 +251,7 @@ test('collection stub read honours the contract (no DB configured)', async (t) =
 
 // ---------- references ----------
 
-const validateReferenceOut = createAjv().compile(deriveVariant(referenceSource, 'out'));
-
-function assertReferenceContract(data) {
-  for (const item of Array.isArray(data) ? data : [data]) {
-    assert.equal(validateReferenceOut(item), true, `${item.permid}: ${JSON.stringify(validateReferenceOut.errors)}`);
-  }
-}
+const assertReferenceContract = (data) => assertPublished('Reference', data);
 
 // Shaped like localhost refs: a titled journal article, an untitled one (541 PBDB
 // refs have no title), and a standalone book, whose type allows different fields.
@@ -386,36 +365,16 @@ test('reference stub read honours the contract (no DB configured)', async (t) =>
 
 // ---------- schemas ----------
 
-const validateSchemaOut = createAjv().compile(deriveVariant(schemaSource, 'out'));
-const validateCharacterOut = createAjv().compile(deriveVariant(characterSource, 'out'));
-const validateStateOut = createAjv().compile(deriveVariant(stateSource, 'out'));
-
 const without = (obj, keys) => Object.fromEntries(Object.entries(obj).filter(([k]) => !keys.includes(k)));
-const assertValid = (validate, item) => assert.equal(validate(item), true, `${item.permid}: ${JSON.stringify(validate.errors)}`);
 
-function assertSchemaContract(data) {
-  for (const item of Array.isArray(data) ? data : [data]) assertValid(validateSchemaOut, item);
-}
+const assertSchemaContract = (data) => assertPublished('Schema', data);
 
-// A single read carries a characters tree the schema out variant does not
-// declare, so it is checked in parts (data-access, D7): the record without
-// `characters`, each character without its children, each state without its own.
+// A single read carries the characters tree, which the published `Schema`
+// declares through the recursive `Character` and `State` components: one
+// validation covers every node.
 function assertSchemaTreeContract(data) {
-  assertValid(validateSchemaOut, without(data, ['characters']));
-  const states = (list) => {
-    for (const st of list) {
-      assertValid(validateStateOut, without(st, ['states']));
-      states(st.states);
-    }
-  };
-  const characters = (list) => {
-    for (const c of list) {
-      assertValid(validateCharacterOut, without(c, ['characters', 'states']));
-      characters(c.characters);
-      states(c.states);
-    }
-  };
-  characters(data.characters);
+  assert.ok(Array.isArray(data.characters), 'a single read carries its characters');
+  assertPublished('Schema', data);
 }
 
 const schemaPayload = (title) => ({

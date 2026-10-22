@@ -5,6 +5,9 @@ import Fastify from 'fastify';
 import autoload from '@fastify/autoload';
 
 import { normalizePublicBaseUrl } from './config.js';
+import { createAjv } from '../../payloadSchemas/lib/ajv.js';
+import { normalizeQuery, formatQueryErrors } from './lib/query-schemas.js';
+import { publishedComponents } from './lib/published-schemas.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -46,6 +49,33 @@ export function build(opts = {}) {
 
   app.decorate('publicBaseUrl', base);
   if (pg) app.decorate('pg', pg);
+
+  // Route schemas compile with the backend's own Ajv (draft 2020-12, the
+  // annotation keywords registered), not Fastify's draft-07 default. Every
+  // query value arrives as a string, so querystrings and params coerce; nothing
+  // is stripped (an unknown parameter is a 400, not ignored), every error is
+  // reported, and no default is applied before the `ids` rule reads `limit`.
+  // `verbose` gives the error formatter each error's schema. Any other part (a
+  // request body, once writes are real) gets no coercion: a body's "12" is a
+  // client bug, not 12.
+  const queryAjv = createAjv({ coerceTypes: true, removeAdditional: false, useDefaults: false, verbose: true });
+  const bodyAjv = createAjv();
+  app.setValidatorCompiler(({ schema, httpPart }) =>
+    (httpPart === 'querystring' || httpPart === 'params' ? queryAjv : bodyAjv).compile(schema),
+  );
+  app.addHook('preValidation', normalizeQuery);
+  app.setSchemaErrorFormatter((errors, dataVar) => formatQueryErrors(app.httpErrors, errors, dataVar));
+
+  // Response schemas document the contract; they do not reshape it. A response
+  // is serialized as the handler built it, so a field a schema does not declare
+  // is never dropped, coerced or blanked (fast-json-stringify would). Tests
+  // validate real responses against the published schemas instead.
+  app.setSerializerCompiler(() => JSON.stringify);
+
+  // The published components (`Collection`, `ReferenceLink`, …) that route
+  // response schemas reference as `'<Name>#'`, and the description lists under
+  // `components.schemas`. Shared schemas must exist before routes load.
+  for (const schema of publishedComponents()) app.addSchema(schema);
 
   // Cross-cutting plugins first (each is fastify-plugin wrapped, so its
   // decorators apply to this root instance rather than being encapsulated).

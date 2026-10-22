@@ -453,7 +453,7 @@ collectionProperties.additionalReferences = {
     type: "array",
     items: link({ target: "references", label: "title" }),
     "x-storage": { table: "additional_collection_refs", codec: "referenceLinks" },
-    description: "every additional_collection_refs row, unordered; usually includes the primary"
+    description: "further references this collection is recorded from, unordered; usually includes the primary"
 };
 
 export const collectionSource = {

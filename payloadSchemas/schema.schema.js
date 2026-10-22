@@ -53,7 +53,7 @@ const schemaProperties = {
 		type: "array",
 		items: link({ target: "references", label: "title" }),
 		"x-storage": { table: "additional_schema_refs", codec: "referenceLinks" },
-		description: "every additional_schema_refs row, unordered; may include the primary"
+		description: "further references this schema is recorded from, unordered; may include the primary"
 	},
 	title: {
 		type: "string",

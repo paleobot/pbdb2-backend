@@ -174,12 +174,6 @@ export function makeTaxaRepository({ pg }) {
 
   return {
     /**
-     * `taxa` declares no field filters in this change. The property is present
-     * so the shared list seam can read it uniformly.
-     */
-    filters: {},
-
-    /**
      * One taxon by `permid`, or null when no row bears it. No version
      * resolution and no soft-removal predicate (see the module comment).
      *

@@ -9,8 +9,10 @@ import Ajv2020 from 'ajv/dist/2020.js';
 
 export const ANNOTATION_KEYWORDS = ['x-enumFrom', 'x-storage', 'x-create', 'x-link', 'x-variant'];
 
-export function createAjv() {
-  const ajv = new Ajv2020({ allErrors: true, strict: true, strictRequired: false });
+// `options` are merged over the defaults, so a caller validating query strings
+// can add coercion (the API's route validator). With none, the defaults stand.
+export function createAjv(options = {}) {
+  const ajv = new Ajv2020({ allErrors: true, strict: true, strictRequired: false, ...options });
   for (const keyword of ANNOTATION_KEYWORDS) ajv.addKeyword({ keyword });
   return ajv;
 }

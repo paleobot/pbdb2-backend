@@ -53,6 +53,7 @@ export default async function taxa(fastify) {
     readOnly: true,
     repository,
     expansions: descriptor.expansions,
+    component: 'Taxon',
     hydrate,
     // Reached only when no database is configured: the shared handlers fall back
     // to `stub` in that case, and taxa's fallback is an honest failure.

@@ -10,6 +10,7 @@ import {
   insertAuthority,
   insertTaxon,
 } from './helpers.js';
+import { assertPublished, assertEnvelope } from '../published.js';
 
 /**
  * Taxa reads against a REAL PostgreSQL loaded with the backend schema.
@@ -123,6 +124,7 @@ test('dictionary values resolve to text from the dictionaries schema', async (t)
 
   const syn = (await app.inject({ method: 'GET', url: `/api/v1/taxa/${synonym}` })).json().data;
   assert.equal(syn.nomenclaturalStatus, 'nomen dubium', 'joined from nomenclatural_statuses');
+  assertPublished('Taxon', [data, syn]);
 });
 
 test('a deep taxon carries its full chain, matching the adjacency walk', async (t) => {
@@ -239,6 +241,7 @@ test('the list paginates and omits the chain unless asked', async (t) => {
   if (!db.available) return t.skip(db.reason);
 
   const first = (await app.inject({ method: 'GET', url: '/api/v1/taxa?limit=2' })).json();
+  assertEnvelope('list', 'Taxon', first);
   assert.equal(first.data.length, 2);
   assert.ok(!('containingTaxa' in first.data[0]));
   assert.ok(first.links.next);
@@ -251,6 +254,7 @@ test('the list paginates and omits the chain unless asked', async (t) => {
   const expanded = (
     await app.inject({ method: 'GET', url: '/api/v1/taxa?limit=2&includeContainingTaxa=true' })
   ).json();
+  assertEnvelope('list', 'Taxon', expanded);
   assert.ok('containingTaxa' in expanded.data[0]);
 });
 

@@ -1,4 +1,4 @@
-// The real collection, specimen, person, reference, authority, schema, character and state sources: every variant resolves and
+// The real collection, specimen, person, reference, authority, schema, character, state and taxon sources: every variant resolves and
 // compiles in strict mode, and the variant rules hold on them. DB-free (fixture
 // enums).
 import { test } from 'node:test';
@@ -12,8 +12,9 @@ import * as authorityModule from '../authority.schema.js';
 import * as schemaModule from '../schema.schema.js';
 import * as characterModule from '../character.schema.js';
 import * as stateModule from '../state.schema.js';
+import * as taxonModule from '../taxon.schema.js';
 import { opinionAttributionSchema } from '../opinionAttribution.schema.js';
-import { applyEnums } from '../lib/enums.js';
+import { applyEnums, collectEnumSources } from '../lib/enums.js';
 import { deriveVariant, VARIANTS } from '../lib/variants.js';
 import { createAjv } from '../lib/ajv.js';
 import { collectCodecSources, split, merge } from '../lib/storage.js';
@@ -26,6 +27,8 @@ enums.set('admin1.iso', ['US-MT', 'CA-AB']);
 enums.set('maritime.iho_name', ['Arctic Ocean']);
 enums.set('roles.name', ['Superadmin', 'Admin', 'Authorizer', 'Enterer', 'Student', 'Person']);
 enums.set('book_types.name', ['monograph', 'compendium', 'Ph.D. thesis', 'M.S. thesis', 'guidebook', 'other']);
+enums.set('taxonomy_ranks.taxonomy_rank', ['species', 'genus', 'family', 'unranked']);
+enums.set('nomenclatural_statuses.status', ['nomen dubium', 'nomen nudum']);
 enums.set('languages.name', ['Chinese', 'English', 'French', 'German', 'Italian', 'Japanese', 'Portuguese', 'Russian', 'Spanish', 'other', 'unknown']);
 
 const sources = {
@@ -37,7 +40,11 @@ const sources = {
   schema: schemaModule.schemaSource,
   character: characterModule.characterSource,
   state: stateModule.stateSource,
+  taxon: taxonModule.taxonSource,
 };
+// A read-only source (root readOnly: true) has only db and out.
+const variantsOf = (entity) => (sources[entity].readOnly ? ['db', 'out'] : VARIANTS);
+const writable = Object.keys(sources).filter((entity) => !sources[entity].readOnly);
 const compile = (entity, variant) => createAjv().compile(deriveVariant(applyEnums(sources[entity], enums), variant));
 
 test('modules export only the annotated source', () => {
@@ -48,12 +55,13 @@ test('modules export only the annotated source', () => {
   assert.deepEqual(Object.keys(schemaModule).sort(), ['default', 'schemaSource']);
   assert.deepEqual(Object.keys(characterModule).sort(), ['characterSource', 'default']);
   assert.deepEqual(Object.keys(stateModule).sort(), ['default', 'stateSource']);
+  assert.deepEqual(Object.keys(taxonModule).sort(), ['default', 'taxonSource']);
   // Plus the publication type table, which the PBot refs migration filters fields by.
   assert.deepEqual(Object.keys(referenceModule).sort(), ['PUBLICATION_TYPES', 'SHARED_FIELDS', 'default', 'referenceSource']);
 });
 
 test('every variant of every entity compiles in strict mode', () => {
-  for (const entity of Object.keys(sources)) for (const v of VARIANTS) assert.ok(compile(entity, v), `${entity}.${v}`);
+  for (const entity of Object.keys(sources)) for (const v of variantsOf(entity)) assert.ok(compile(entity, v), `${entity}.${v}`);
 });
 
 // One draft everywhere: the one createAjv() compiles and OpenAPI 3.1 applies.
@@ -62,7 +70,7 @@ test('every schema and every variant declares draft 2020-12', () => {
   assert.equal(opinionAttributionSchema.$schema, DRAFT, 'opinionAttribution');
   for (const [entity, source] of Object.entries(sources)) {
     assert.equal(source.$schema, DRAFT, entity);
-    for (const v of VARIANTS) assert.equal(deriveVariant(source, v).$schema, DRAFT, `${entity}.${v}`);
+    for (const v of variantsOf(entity)) assert.equal(deriveVariant(source, v).$schema, DRAFT, `${entity}.${v}`);
   }
 });
 
@@ -157,7 +165,7 @@ test('db: legacy-shaped row passes; top-level permid fails; admin1 rule absent',
 });
 
 test('patch-guard on the real sources', () => {
-  for (const entity of Object.keys(sources)) {
+  for (const entity of writable) {
     const validate = compile(entity, 'patch-guard');
     assert.equal(validate({ notes: null, name: 'x' }), true);
     assert.equal(validate({ legacyIDs: { oldpbdbID: '1' } }), false);
@@ -608,4 +616,30 @@ test('state quantitative round-trips through its column, and is absent from spli
   const { permid, ...writable } = merged;
   assert.deepEqual(split(sources.state, writable), { jsonb: { name: 'quantity' }, columns: { quantitative: true }, children: {} });
   assert.deepEqual(split(sources.state, { name: 'ovate' }).columns, {});
+});
+
+// ---------- taxon ----------
+
+test('taxon is read-only: no write variants, and nothing in jsonb', () => {
+  assert.equal(sources.taxon.readOnly, true);
+  for (const v of ['in-create', 'patch-guard']) assert.throws(() => deriveVariant(sources.taxon, v), /read-only/);
+  assert.deepEqual(deriveVariant(sources.taxon, 'db').properties, {});
+  for (const [name, prop] of Object.entries(sources.taxon.properties)) assert.ok(prop['x-storage']?.column, name);
+});
+
+test('taxon out validates a taxon read, with null status, authority and accepted links', () => {
+  const validate = createAjv().compile(deriveVariant(sources.taxon, 'out'));
+  const taxon = {
+    permid: 't-1', name: 'Calymene blumenbachii', rank: 'species', nomenclaturalStatus: null,
+    authority: { permid: 'aut-1', citation: 'Brongniart 1822', href: '/api/v1/authorities/aut-1' },
+    accepted: { permid: 't-1', name: 'Calymene blumenbachii', href: '/api/v1/taxa/t-1' },
+  };
+  assert.equal(validate(taxon), true, JSON.stringify(validate.errors));
+  assert.equal(validate({ ...taxon, authority: null, nomenclaturalStatus: 'nomen dubium' }), true, 'no authority');
+  assert.equal(validate({ ...taxon, rank: 'not a dictionary rank' }), true, 'dictionary enums are not enforced on out');
+  assert.equal(validate({ ...taxon, containingTaxa: null }), false, 'the chain is not part of the source');
+  assert.deepEqual(collectEnumSources(sources.taxon), [
+    { table: 'taxonomy_ranks', column: 'taxonomy_rank' },
+    { table: 'nomenclatural_statuses', column: 'status' },
+  ]);
 });

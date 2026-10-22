@@ -8,6 +8,9 @@
 //   patch-guard  screens a JSON Merge Patch body (object, no root readOnly keys); the
 //                merged document is validated separately (payloadSchemas/DESIGN_NOTES.md)
 //
+// A source with root `readOnly: true` (taxon) has no write path, so asking for
+// its in-create or patch-guard throws.
+//
 // Resolve enums on the source first (./enums.js), then derive. Recurses through
 // properties, items, allOf/anyOf/oneOf, if/then/else and not. $defs/$ref are not
 // followed. They would be needed only if the API created a schema's whole
@@ -84,6 +87,9 @@ export function deriveVariant(source, variant) {
     throw new Error(`Unknown variant '${variant}'; expected one of ${VARIANTS.join(', ')}`);
   }
   const $id = variantId(source, variant);
+  if (source.readOnly === true && (variant === 'in-create' || variant === 'patch-guard')) {
+    throw new Error(`${source.$id} is read-only: it has no '${variant}' variant`);
+  }
 
   if (variant === 'patch-guard') {
     const readOnly = Object.entries(source.properties ?? {}).filter(([, p]) => p.readOnly).map(([n]) => n);

@@ -290,6 +290,11 @@ through its own source, so states now carry `quantitative`. Every version-chaine
 this way; only `taxa` keeps descriptor links. Whether `out` describes the schema's characters tree is
 still open (the single read is contract-tested in parts).
 
+**Update 2026-10-21:** `add-openapi-for-reads` publishes the schema single read as one `Schema`
+component that nests the recursive `Character` and `State` components, and the tree is validated
+against it in one pass. `taxa` has a read-only source (`payloadSchemas/taxon.schema.js`) that
+describes its response; its reads still use their own repository.
+
 The API is about 2,000 lines. Its transport layer (envelope, pagination, discovery, filters,
 405 handling; about 950 lines, specified and tested) doesn't depend on payload shape. About
 580 lines of data layer (`repository.js`, `resource-tables.js` links, `link-hydration.js`, parts of
@@ -361,6 +366,31 @@ Clients would get the API contract over HTTP instead of depending on backend cod
 
 Open: whether to serve `db` (probably not: it describes storage, not the contract), and caching,
 since resolved enums change only when a dictionary does.
+
+**Update 2026-10-21:** `add-openapi-for-reads` partly serves this. `/api/v1/openapi.json` publishes
+each resource's `out` variant (storage annotations stripped, links as named `<Target>Link`
+components) under `components.schemas`, so a client can read the response contract over HTTP.
+Write variants (`in-create`, `patch-guard`) and resolved dictionary enums are not served; the
+latter wait on [A dictionaries read resource](#a-dictionaries-read-resource).
+
+## A dictionaries read resource
+
+**Deferred** (`add-openapi-for-reads`, design.md D5). The API description documents a
+dictionary-backed field (`x-enumFrom`) as a string whose description names its vocabulary, not as an
+`enum`: `out` does not enforce dictionary values (a stored value may have left its dictionary), the
+document must not depend on the database (`npm test` builds it without one), and some vocabularies
+are large (`admin1`: 3,865 values on localhost). A read resource such as
+`/api/v1/dictionaries/{name}`, linked from each such field, would let a client fetch current values.
+
+*Trigger:* the first dictionary-backed GET filter (likely `?rank=` on taxa, whose 400 must then list
+live values), or the frontend's first dropdown. Runtime enum resolution for validation lands with it.
+
+## Property descriptions
+
+**Follow-up** (`add-openapi-for-reads`, design.md D9). The description publishes each source's
+`description`s as written, and coverage is thin: 62 descriptions across six sources for a few hundred
+properties. Writing them is content work in `payloadSchemas/`, not mechanism. A description must not
+name a table or column: the description is a contract, not storage.
 
 ## Repository boundary: backend monorepo vs. frontend
 

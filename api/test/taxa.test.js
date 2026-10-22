@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 
 import { build, DEFAULT_PUBLIC_BASE_URL as BASE } from '../src/app.js';
 import { makeTaxaRepository } from '../src/lib/taxa-repository.js';
+import { assertPublished, assertEnvelope } from './published.js';
 
 /**
  * The taxa resource: the API's first read-only, non-JSONB, non-version-chained
@@ -73,7 +74,9 @@ test('taxa single read returns the representation with a nested chain', async (t
   const res = await app.inject({ method: 'GET', url: `/api/v1/taxa/${OWN_CONCEPT}` });
   assert.equal(res.statusCode, 200);
 
-  const { data, meta } = res.json();
+  const body = res.json();
+  assertEnvelope('single', 'Taxon', body);
+  const { data, meta } = body;
   assert.equal(meta.type, 'taxon');
   assert.equal(data.permid, OWN_CONCEPT);
   assert.equal(data.name, 'Calymene blumenbachii');
@@ -182,11 +185,13 @@ test('the list omits the chain by default and includes it on request', async (t)
   t.after(() => app.close());
 
   const bare = (await app.inject({ method: 'GET', url: '/api/v1/taxa' })).json();
+  assertEnvelope('list', 'Taxon', bare);
   assert.ok(!('containingTaxa' in bare.data[0]), 'omitted by default — ~457 kB per page');
 
   const expanded = (
     await app.inject({ method: 'GET', url: '/api/v1/taxa?includeContainingTaxa=true' })
   ).json();
+  assertEnvelope('list', 'Taxon', expanded);
   assert.equal(expanded.data[0].containingTaxa.name, 'Calymene');
   assert.equal(expanded.data[0].containingTaxa.href, `${BASE}/api/v1/taxa/${PARENT}`);
 });
@@ -305,4 +310,18 @@ test('the repository is a plain module, usable without the route layer', async (
   assert.equal(taxon.authority.href, undefined);
   assert.equal(taxon.containingTaxa.href, undefined);
   assert.equal(taxon.containingTaxa.name, 'Calymene');
+});
+
+test('the published Taxon describes a taxon with no authority, a root and a status', async (t) => {
+  const root = { ...TAXON, authority: null, nomenclaturalStatus: 'nomen dubium', classification_path: OWN_CONCEPT.replaceAll('-', '_') };
+  const app = build({ pg: fakeTaxaPg({ taxa: [root], ancestors: [] }) });
+  t.after(() => app.close());
+
+  const { data } = (await app.inject({ method: 'GET', url: `/api/v1/taxa/${OWN_CONCEPT}` })).json();
+  assert.equal(data.containingTaxa, null);
+  assertPublished('Taxon', data);
+  // A stray field anywhere in the chain is outside the contract.
+  const crumb = { permid: PARENT, name: 'Calymene', rank: 'genus', href: 'x', containingTaxa: null };
+  assertPublished('Taxon', { ...data, containingTaxa: crumb });
+  assert.throws(() => assertPublished('Taxon', { ...data, containingTaxa: { ...crumb, extra: 1 } }));
 });
