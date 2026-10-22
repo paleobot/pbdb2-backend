@@ -506,7 +506,7 @@ Nothing deploys from these repos yet, so nothing needs re-pointing.
 
 ## Human-facing identifiers
 
-**Open; permids stay UUIDv7 until decided.** Some advisory committee members have proposed
+**Open; permids stay UUIDv7 until decided. Leaning B with sequences (2026-10-22, see below).** Some advisory committee members have proposed
 replacing UUID permids with integers. The underlying need is probably an identifier people can cite,
 say and type ("PBDB col. 12345"). Two ways to meet it are on the table: a short *handle* beside the
 UUID permid (A), or a prefixed short code that replaces the UUID as the permid (B). The case
@@ -630,10 +630,81 @@ codes. Not obviously worth it, but worth considering:
 - Counter-argument: a permid with meaning in it. Sequential numbers are also enumerable, though the
   data is public anyway.
 
+### Leaning (2026-10-22): B, with sequences, Classic numbers and a check digit
+
+The committee is likely to require prefixed sequence values for each entity type, with migrated
+records keeping their Classic number. If it does, the plan is **B**, the prefixed code as the
+permid, with sequences instead of random codes.
+
+**Why B and not A.** Under these rules the handle would be unique, immutable, system-minted, one
+per entity, and the thing everyone cites. In other words, it would be a permid. Keeping the UUID
+beside it means two identifiers of equal standing on every resource, and the API would have to
+resolve and return both. A's two remaining advantages, an ID with no meaning and minting without
+coordination, don't apply to the identifier people cite. Sequences also remove B's blocker, since a
+sequence that starts above the legacy maximum cannot collide. They also bring back creation order.
+
+**Condition: who mints?** If anything outside this database creates entities (a PBot that keeps
+writing on its own, offline clients, bulk importers), choose A instead. Those systems can mint a
+UUID and get a handle when the record arrives. Under B they would have to call `mint_permid()`.
+
+**Format: `<PREFIX>-<number>-<CC>`**, for example `COL-12345-47`.
+- `<number>` is decimal with no padding.
+- `<CC>` is two check digits, ISO 7064 MOD 97-10 (as in IBAN), computed over the whole
+  uppercased ID with the hyphens removed. Letters become digits as A=10 … Z=35. Including the prefix
+  catches a mistyped prefix, which would otherwise be a valid ID for another entity, since `REF-12345`
+  and `COL-12345` usually both exist.
+- Prefixes are still to be chosen, one per permid space (see B).
+- A resolver can also accept the bare Classic number on an entity's endpoint, because the prefix
+  is known there and the check digits can be computed.
+
+**Storage and ordering.** Store the permid as `text` with an ICU numeric collation, so that
+`COL-99-…` sorts before `COL-100-…` without padding or a separate number column:
+
+```sql
+CREATE COLLATION permid_num (provider = icu, locale = 'und-u-kn');
+```
+
+`ORDER BY permid` and keyset pagination then follow numeric order: Classic order first, then
+creation order. Only the database sorts correctly. A client sorting the strings itself does not.
+ICU-collated indexes must be reindexed after an ICU version upgrade. Aurora supports ICU.
+Zero-padding (`COL-00012345-47`) was the alternative and was rejected because it moves the ID away
+from the cited Classic number.
+
+**Registry.** The `permids` table from B stays as the place permids are minted and as the FK target
+for every permid column, including `subject_permid`, `concept_permid` and
+`specimens.name_opinions_permid`. It is no longer needed to guard against collisions.
+
+**Numbering for each table:**
+
+| Table | Number taken from |
+|---|---|
+| refs, persons, collections, specimens | the Classic number (`reference_no`, `person_no`, `collection_no`, `specimen_no`). PBot rows and others with no Classic row get a sequence number. |
+| authorities | Classic `taxon_no`. A merged authority takes the **lowest** absorbed `taxon_no`. All of them stay in `legacyIDs.oldpbdbIDs`, so no alias table is needed. Resolving a citation of an absorbed number would mean looking it up in `oldpbdbIDs` (a payload index), and only if that is wanted. |
+| name_opinions | `authorities.taxon_no` for rows migrated from Classic authorities (the authority-opinions root rows). Every other row gets a sequence number: concept and misspelling rows, name backfills from the opinions migration, and lineage rows. One Classic opinion can produce two `name_opinions` rows, so `opinion_no` cannot be used. |
+| assignment_opinions, validity_opinions | the sequence for every row. `opinion_no` is not used, so it doesn't need to be carried through. |
+| schemas, characters, states | the sequence (PBot only). |
+
+`name_opinions` is the only table that draws on more than one Classic table (`taxon_no` and
+`opinion_no`). That's why a single source is fixed for it.
+
+**Sequences.**
+- One sequence per prefix.
+- **Start each one at a fixed floor well above the Classic maximum**, not at max + 1. If Classic
+  keeps taking writes after the dump, its new records would otherwise land on numbers pbdb2 has
+  already issued.
+- The runner sets every sequence before it mints any row without a Classic number. Otherwise PBot
+  persons, sentinels and the like could take a number a later legacy insert needs. The floors are
+  fixed, so this is a setup step, not something read from MariaDB.
+- Legacy-numbered permids are deterministic across rebuilds. Sequence-numbered ones are
+  deterministic as long as the run order is.
+
+**Timing.** B is a broad rewrite (see Scope under B). It is only possible before permids are
+published or cited.
+
 *Reasoning:* the committee doc above; `place_in_lineage()` in `db/02-core.sql`; explored 2026-10-20,
 including azlibrary's trigger-minted `<group>-<epoch ms>-<1..1000>` IDs, rejected because `now()` is
 fixed per transaction (a collision is a coin flip at ~38 rows in one transaction), nothing retries, and the time part makes
-the ID long without making it readable.
+the ID long without making it readable. The 2026-10-22 leaning came from a later explore session that assumed sequences, Classic numbers and a check digit.
 
 ## Collection reference model
 
