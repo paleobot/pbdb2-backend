@@ -33,7 +33,7 @@
 
 - [x] 3.1 `api/CLAUDE.md`: the description is linked from `/api/v1` as `service-desc` and
       `service-doc`; an index lists its children in `data.resources`
-- [ ] 3.2 At sync, reword `api-discovery`'s Purpose by hand: the index documents list their children
+- [x] 3.2 At sync, reword `api-discovery`'s Purpose by hand: the index documents list their children
       in `data.resources`, and `links` holds relations (a delta cannot change a Purpose)
 
 ## 4. Verify
