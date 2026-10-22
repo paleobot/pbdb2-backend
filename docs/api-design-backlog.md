@@ -392,6 +392,20 @@ live values), or the frontend's first dropdown. Runtime enum resolution for vali
 properties. Writing them is content work in `payloadSchemas/`, not mechanism. A description must not
 name a table or column: the description is a contract, not storage.
 
+## Docs page branding
+
+**Follow-up** (`add-openapi-for-reads`). `/api/v1/docs` still shows `@fastify/swagger-ui`'s
+defaults: the Fastify logo in the top bar, Fastify favicons, and the stock page title. It is left
+as is on purpose, as a visible reminder. `api/src/plugins/openapi.js` registers the plugin with only
+`routePrefix`; the plugin's options cover the rest:
+- `logo: { type, content, href, target }` replaces the top-bar logo. `logo: null` falls back to
+  Swagger UI's own logo, not none; hide `.topbar` with CSS for no logo.
+- `theme.title`, `theme.favicon[]`, and `theme.css[]` / `theme.js[]` set the title, the favicons, and
+  any styling.
+
+*Needs:* a PBDB logo and favicon (none in the repo), or a decision to just strip the branding
+(title from the version node's `name`, top bar hidden).
+
 ## Repository boundary: backend monorepo vs. frontend
 
 **Decided 2026-09-25: grow `pbdb2-migrations` into `pbdb2-backend` (option B), with migrations as a
