@@ -1,3 +1,5 @@
+import { readFile } from 'node:fs/promises';
+
 import fp from 'fastify-plugin';
 import swagger from '@fastify/swagger';
 import swaggerUi from '@fastify/swagger-ui';
@@ -18,9 +20,29 @@ import { NODE_DATA } from './discovery.js';
  * This must load before any documented route, discovery's included, since
  * `@fastify/swagger` collects routes as they are added: discovery depends on
  * it by name.
+ *
+ * The viewer carries PBDB Classic's branding as a stopgap until PBDB2 has its
+ * own: the logo and favicon in `api/assets/` are copies of
+ * https://paleobiodb.org/data1.2/images/logo_white.png and
+ * https://paleobiodb.org/favicon.ico (fetched 2026-10-22), and the teal is
+ * data1.2's banner colour, used for the bar and in place of Swagger UI's
+ * green. The explore bar, which loads another description into the viewer, is
+ * hidden, and the logo is shown at 80px rather than the plugin's 40.
  */
 
 const VERSION = '/api/v1';
+const ASSETS = new URL('../../assets/', import.meta.url);
+
+const THEME_CSS = `
+.swagger-ui .topbar, html.dark-mode .swagger-ui .topbar { background: #00A0A0; }
+.swagger-ui .topbar .download-url-wrapper { display: none; }
+.swagger-ui .topbar .dark-mode-toggle { margin-left: auto; }
+.swagger-ui .topbar a img { height: 80px; }
+.swagger-ui .info .title small.version-stamp,
+html.dark-mode .swagger-ui .info .title small.version-stamp { background: #00A0A0; }
+.swagger-ui .response-control-media-type--accept-controller select { border-color: #00A0A0; }
+.swagger-ui .response-control-media-type__accept-message { color: #00A0A0; }
+`;
 
 export default fp(
   async (fastify) => {
@@ -37,7 +59,21 @@ export default fp(
       },
     });
 
-    await fastify.register(swaggerUi, { routePrefix: `${VERSION}/docs` });
+    await fastify.register(swaggerUi, {
+      routePrefix: `${VERSION}/docs`,
+      logo: { type: 'image/png', content: await readFile(new URL('pbdb-logo-white.png', ASSETS)) },
+      theme: {
+        title: node.name,
+        favicon: [{
+          filename: 'favicon.ico',
+          rel: 'icon',
+          type: 'image/x-icon',
+          sizes: '16x16 24x24 32x32 64x64',
+          content: await readFile(new URL('pbdb-favicon.ico', ASSETS)),
+        }],
+        css: [{ filename: 'theme.css', content: THEME_CSS }],
+      },
+    });
 
     fastify.get(`${VERSION}/openapi.json`, { schema: { hide: true } }, async () => fastify.swagger());
   },

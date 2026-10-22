@@ -70,6 +70,7 @@ src/
     schemas/            CRUD + aggregate schema→characters→states read
     taxa/               READ-ONLY (405 on writes); derived table, no JSONB
 test/                   node:test suites, driven via app.inject()
+assets/                 docs-page logo + favicon (PBDB Classic's, a stopgap)
 docs/                   design notes (e.g. response-envelope rationale)
 ```
 

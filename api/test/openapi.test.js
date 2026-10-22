@@ -129,6 +129,19 @@ test('the viewer is HTML, and the description is linked by relation, not listed 
   assert.ok(links['service-doc'].endsWith('/api/v1/docs'));
 });
 
+test('the viewer carries PBDB branding, not the framework\'s', async () => {
+  const html = (await app.inject({ method: 'GET', url: '/api/v1/docs' })).body;
+  assert.match(html, /<title>PBDB2 API<\/title>/);
+  assert.doesNotMatch(html, /favicon-(16x16|32x32)\.png/);
+
+  const icon = await app.inject({ method: 'GET', url: html.match(/<link rel="icon"[^>]*href="([^"]+)"/)[1] });
+  assert.equal(icon.statusCode, 200);
+  assert.equal(icon.headers['content-type'], 'image/x-icon');
+
+  const init = (await app.inject({ method: 'GET', url: '/api/v1/docs/static/swagger-initializer.js' })).body;
+  assert.match(init, /data:image\/png;base64,iVBOR/);
+});
+
 test('a hidden route still answers as before', async () => {
   assert.equal((await app.inject({ method: 'GET', url: '/api/v1/specimens' })).statusCode, 200);
   assert.equal((await app.inject({ method: 'POST', url: '/api/v1/references' })).statusCode, 201);

@@ -394,17 +394,15 @@ name a table or column: the description is a contract, not storage.
 
 ## Docs page branding
 
-**Follow-up** (`add-openapi-for-reads`). `/api/v1/docs` still shows `@fastify/swagger-ui`'s
-defaults: the Fastify logo in the top bar, Fastify favicons, and the stock page title. It is left
-as is on purpose, as a visible reminder. `api/src/plugins/openapi.js` registers the plugin with only
-`routePrefix`; the plugin's options cover the rest:
-- `logo: { type, content, href, target }` replaces the top-bar logo. `logo: null` falls back to
-  Swagger UI's own logo, not none; hide `.topbar` with CSS for no logo.
-- `theme.title`, `theme.favicon[]`, and `theme.css[]` / `theme.js[]` set the title, the favicons, and
-  any styling.
+**Placeholder in place** (`pbdb-branding-on-docs-page`, 2026-10-22). `/api/v1/docs` carries PBDB
+Classic's branding as a stopgap: the white emblem (at 80px) and favicon copied from paleobiodb.org
+into `api/assets/`, data1.2's teal (`#00A0A0`) for the top bar in light and dark mode and in place of
+Swagger UI's green, the tab title `PBDB2 API`, and the explore bar hidden. All of it is
+`@fastify/swagger-ui` options in `api/src/plugins/openapi.js`.
 
-*Needs:* a PBDB logo and favicon (none in the repo), or a decision to just strip the branding
-(title from the version node's `name`, top bar hidden).
+*Still open:* PBDB2's own visual identity, which replaces these assets and the colour. The logo is
+swapped in by a selector on Swagger UI's top-bar markup, so check the page by eye after a Swagger UI
+upgrade.
 
 ## Repository boundary: backend monorepo vs. frontend
 
