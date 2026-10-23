@@ -40,7 +40,7 @@ Each object SHALL go in the file whose function it serves:
   `nomenclatural_statuses`).
 - `02-core.sql`: the tables whose rows are written by the application (API or migration), with their
   indexes and the functions and triggers they need. These are the versioning trigger functions, the
-  `lookup` schema, the `postgis` extension, the versioned entities from `persons` through `authorities`,
+  `lookup` schema, the `postgis` and `unaccent` extensions, the versioned entities from `persons` through `authorities`,
   the opinion ledgers (`name_opinions`, `assignment_opinions`, `validity_opinions`), and the hand-entered
   non-derived tables (`taxon_annotations`, `homonyms`).
 - `03-taxa.sql`: the tables whose rows are written by the rebuild functions (`taxa_linnaean`,
@@ -61,6 +61,10 @@ function derives them.
 #### Scenario: Derived output is taxa
 - **WHEN** `03-taxa.sql` is read
 - **THEN** it defines `taxa_linnaean`, `taxa_clades`, `taxa_attachments`, `taxa` and `cycle_cuts`, and every function named `derive_*`, `rebuild_*` or `assert_*_invariant`
+
+#### Scenario: Core holds the text-matching extension
+- **WHEN** `02-core.sql` is read
+- **THEN** it creates the `unaccent` extension, and no other file does
 
 ### Requirement: No file refers to an object defined in a later file
 A file SHALL refer only to objects defined in itself or in an earlier file. A reference is any use outside

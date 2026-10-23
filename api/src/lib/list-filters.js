@@ -3,19 +3,22 @@
  * normalized object here and handed to the route handler, so a new filter is a
  * contributor to this function, not a branch bolted onto the handler. Its
  * contributors are `ids` (the multi-entity read), the resource's declared field
- * filters, its expansions, and pagination (`limit` / `cursor`).
+ * filters (each parsed by its match kind, field-filter-ops.js), its expansions,
+ * and pagination (`limit` / `cursor`).
  *
  * The request has already been validated against the route's querystring
  * schema (query-schemas.js) by the time it arrives: unknown parameters, empty
  * or illegal filter values, non-boolean expansions, a bad `limit` and `ids`
  * combined with pagination are all 400s there. What is left here is what JSON
  * Schema cannot express: splitting `ids` and capping the distinct count,
+ * parsing field-filter values (a reversed year range, an empty author name),
  * decoding the cursor, and the default `limit`. It runs before any query, so a
  * malformed request never reaches the repository. The `translate` stage
  * (filter to SQL predicate) lives in the repository.
  */
 
 import { decodeCursor } from './cursor.js';
+import { filterOp } from './field-filter-ops.js';
 
 /** Max distinct ids accepted by a single multi-entity read. */
 export const MAX_IDS = 100;
@@ -34,8 +37,10 @@ export const MAX_LIMIT = 1000;
  * {@link MAX_IDS} distinct ids → 400. `permid`s are opaque, so an unknown id is
  * simply absent from the result (reported as `missing`), never rejected here.
  *
- * Field filters (`filterDefs`) and expansions (`expansionDefs`) are copied for
- * the parameters the request sent; their values were checked by the schema.
+ * Field filters (`filterDefs`): each sent value is parsed by its match kind
+ * into what its predicate binds, which may be a 400. Expansions
+ * (`expansionDefs`) are copied for the parameters the request sent; their values
+ * were checked by the schema.
  *
  * Pagination: `limit` absent → {@link DEFAULT_LIMIT}. `cursor` present but
  * undecodable → 400.
@@ -45,7 +50,7 @@ export const MAX_LIMIT = 1000;
  *   `fastify.httpErrors` (from @fastify/sensible)
  * @param {Record<string, object>} [filterDefs]  the resource's declared field filters
  * @param {Record<string, { type: 'boolean' }>} [expansionDefs]  its declared expansions
- * @returns {{ ids?: string[], fields?: Record<string, string>,
+ * @returns {{ ids?: string[], fields?: Record<string, unknown>,
  *   expansions?: Record<string, boolean>,
  *   page: { limit: number, cursor?: { permid: string, direction: 'next'|'prev' } } }}
  */
@@ -61,7 +66,11 @@ export function collectListFilters(query, httpErrors, filterDefs = {}, expansion
   }
 
   const fields = pick(query, filterDefs);
-  if (fields) filters.fields = fields;
+  if (fields) {
+    filters.fields = Object.fromEntries(
+      Object.entries(fields).map(([param, value]) => [param, filterOp(filterDefs[param].op).parse(value, param, httpErrors)]),
+    );
+  }
 
   const expansions = pick(query, expansionDefs);
   if (expansions) filters.expansions = expansions;

@@ -59,7 +59,9 @@ test('its paths are exactly the GET operations discovery reaches, single reads i
 
 test('a list documents its filters and bounds; an expansion is a boolean', () => {
   const params = Object.fromEntries(doc.paths['/api/v1/references'].get.parameters.map((p) => [p.name, p]));
-  assert.deepEqual(Object.keys(params), ['ids', 'limit', 'cursor', 'publicationType']);
+  assert.deepEqual(Object.keys(params), [
+    'ids', 'limit', 'cursor', 'publicationType', 'doi', 'title', 'authors', 'firstAuthor', 'publicationYear',
+  ]);
   assert.deepEqual(params.publicationType.schema.enum, referenceSource.properties.publicationType.enum);
   assert.equal(params.limit.schema.type, 'integer');
   assert.equal(params.limit.schema.minimum, 1);
@@ -70,6 +72,19 @@ test('a list documents its filters and bounds; an expansion is a boolean', () =>
 
   const taxa = doc.paths['/api/v1/taxa'].get.parameters.find((p) => p.name === 'includeContainingTaxa');
   assert.equal(taxa.schema.type, 'boolean');
+});
+
+test('each shared-field filter on references documents its match rule', () => {
+  const params = Object.fromEntries(doc.paths['/api/v1/references'].get.parameters.map((p) => [p.name, p]));
+  assert.equal(params.publicationYear.schema.type, 'string');
+  assert.equal(params.publicationYear.schema.pattern, '^\\d{4}(-\\d{4})?$');
+  assert.match(params.publicationYear.description, /both years included, the earlier first/);
+  assert.match(params.authors.description, /Comma-separated/);
+  assert.match(params.authors.description, /every name must be present/);
+  assert.match(params.doi.description, /ignoring case and a leading `https:\/\/doi\.org\/` or `doi:`/);
+  assert.match(params.title.description, /every word .* in any order, ignoring case and accents/);
+  assert.match(params.firstAuthor.description, /first entry in `authors`/);
+  assert.match(params.publicationType.description, /equals this value/);
 });
 
 test('storage does not leak into the document', () => {

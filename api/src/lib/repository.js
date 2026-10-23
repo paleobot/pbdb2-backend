@@ -28,6 +28,7 @@ import {
 } from '../../../payloadSchemas/lib/storage.js';
 import { descriptorFor, targetFor } from './resource-tables.js';
 import { DEFAULT_LIMIT } from './list-filters.js';
+import { filterOp } from './field-filter-ops.js';
 import { BACKWARD } from './cursor.js';
 
 const HEAD_FILTER = 'succeeded_by_id IS NULL AND NOT COALESCE(removed, false)';
@@ -238,6 +239,8 @@ export function makeReadRepository({ pg, table, jsonbColumn, filters = {}, sourc
   if (!source) {
     throw new Error(`Resource table '${table}' has no payload source; the generic repository reads only through one`);
   }
+  // An unknown match kind is a descriptor mistake: fail here, not on a request.
+  for (const def of Object.values(filters)) filterOp(def.op);
   const from = ident(table);
   const payload = ident(jsonbColumn);
   // Each storage column is selected in the form its codec's merge expects
@@ -273,7 +276,8 @@ export function makeReadRepository({ pg, table, jsonbColumn, filters = {}, sourc
      * into a single `WHERE` (the `translate` stage). Contributors:
      *   - `HEAD_FILTER` — always
      *   - `ids`    → `permid = ANY($n)`               (the multi-entity read)
-     *   - `fields` → `payload->>'<jsonPath>' = $n`    (one per declared filter)
+     *   - `fields` → one predicate per sent filter, from its match kind
+     *                (field-filter-ops.js), e.g. `payload->>'<jsonPath>' = $n`
      *   - `page`   → `permid > $n` / `permid < $n`    (the keyset cursor)
      * Filter *values* are bound as parameters; only declared filters translate
      * (others are ignored). A bare call is the first page of every head.
@@ -287,7 +291,7 @@ export function makeReadRepository({ pg, table, jsonbColumn, filters = {}, sourc
      * The query asks for `limit + 1` rows: the extra row is never returned as
      * data, it only answers "is there a further page?" without a second query.
      *
-     * @param {{ ids?: string[], fields?: Record<string, string>,
+     * @param {{ ids?: string[], fields?: Record<string, unknown>,
      *   page?: { limit?: number, cursor?: { permid: string, direction: 'next'|'prev' } }
      * }} [criteria]
      * @returns {Promise<{ records: object[], hasMore: boolean }>}
@@ -302,11 +306,14 @@ export function makeReadRepository({ pg, table, jsonbColumn, filters = {}, sourc
       }
 
       if (fields) {
+        const bind = (value) => {
+          values.push(value);
+          return `$${values.length}`;
+        };
         for (const [param, value] of Object.entries(fields)) {
           const def = filters[param];
           if (!def) continue; // defensive: only declared filters reach SQL
-          values.push(value);
-          predicates.push(`${payload}->>${literal(def.jsonPath)} = $${values.length}`);
+          predicates.push(filterOp(def.op).predicate({ payload, key: literal(def.jsonPath), bind }, value));
         }
       }
 

@@ -18,6 +18,7 @@
  */
 
 import { MAX_IDS, MAX_LIMIT, DEFAULT_LIMIT } from './list-filters.js';
+import { filterOp, PATTERN_MESSAGES } from './field-filter-ops.js';
 
 /** The universal list parameters. No `default`: Ajv must not invent a `limit` before the `ids` rule reads it. */
 const UNIVERSAL_PROPERTIES = {
@@ -50,20 +51,23 @@ const IDS_EXCLUDE = {
  * The querystring schema of a list read.
  *
  * @param {object} [opts]
- * @param {Record<string, { jsonPath: string }>} [opts.filters]  the descriptor's field filters
- * @param {object} [opts.source]  the payload source, whose inline `enum` on a
- *   filter's field becomes the filter's legal values
+ * @param {Record<string, { jsonPath: string, op: string }>} [opts.filters]  the descriptor's
+ *   field filters; each one's match kind (field-filter-ops.js) supplies its schema and description
+ * @param {object} [opts.source]  the payload source, whose inline `enum` on an
+ *   `eq` filter's field becomes the filter's legal values
  * @param {Record<string, { type: 'boolean' }>} [opts.expansions]  declared expansions
  */
 export function listQuerySchema({ filters = {}, source, expansions = {} } = {}) {
   const properties = { ...UNIVERSAL_PROPERTIES };
   for (const [param, def] of Object.entries(filters)) {
-    const values = source?.properties?.[def.jsonPath]?.enum;
+    const kind = filterOp(def.op);
+    const values = def.op === 'eq' ? source?.properties?.[def.jsonPath]?.enum : undefined;
     properties[param] = {
       type: 'string',
       minLength: 1,
+      ...kind.schema,
       ...(Array.isArray(values) ? { enum: [...values] } : {}),
-      description: `Only items whose \`${def.jsonPath}\` equals this value.`,
+      description: kind.describe(def.jsonPath),
     };
   }
   for (const [param, def] of Object.entries(expansions)) {
@@ -131,7 +135,8 @@ function messageFor(error) {
     case 'minLength':
       return `\`${param}\` must have a value`;
     case 'pattern':
-      return param === 'ids' ? '`ids` must contain at least one id' : `\`${param}\` must have a value`;
+      if (param === 'ids') return '`ids` must contain at least one id';
+      return PATTERN_MESSAGES[error.params.pattern]?.(param) ?? `\`${param}\` must have a value`;
     case 'maximum':
       return `\`${param}\` accepts at most ${error.params.limit}`;
     case 'type':

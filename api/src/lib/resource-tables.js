@@ -22,7 +22,8 @@
  *
  * @typedef {object} FieldFilter
  * @property {string} jsonPath  JSONB key within the payload to match (e.g. 'publicationType')
- * @property {'eq'}   op        predicate kind — only equality today
+ * @property {'eq'|'doi'|'allWords'|'familyNames'|'firstFamilyName'|'yearRange'} op
+ *   the match kind (field-filter-ops.js): its parameter schema, value parsing and predicate
  *
  * @typedef {object} ResourceDescriptor
  * @property {string} table          backing table name
@@ -123,7 +124,16 @@ export const RESOURCE_DESCRIPTORS = {
     table: 'refs',
     jsonbColumn: 'reference',
     source: referenceSource,
-    filters: { publicationType: { jsonPath: 'publicationType', op: 'eq' } },
+    // Filters on fields every publication type carries; see
+    // openspec/changes/add-reference-shared-filters/design.md.
+    filters: {
+      publicationType: { jsonPath: 'publicationType', op: 'eq' },
+      doi: { jsonPath: 'doi', op: 'doi' },
+      title: { jsonPath: 'title', op: 'allWords' },
+      authors: { jsonPath: 'authors', op: 'familyNames' },
+      firstAuthor: { jsonPath: 'authors', op: 'firstFamilyName' },
+      publicationYear: { jsonPath: 'publicationYear', op: 'yearRange' },
+    },
   },
   authorities: {
     table: 'authorities',

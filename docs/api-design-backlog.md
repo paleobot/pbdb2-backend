@@ -164,6 +164,20 @@ Open: which roles may set which fields, and whether provenance is ever shown in 
 
 *Reasoning:* `openspec/changes/archive/2026-09-22-convert-person-payload-schema/design.md`.
 
+**`enteredBy` filter: parked** (`add-reference-shared-filters`, design.md D8). A references filter
+on the enterer was asked for and deferred. It has four obstacles:
+1. A filter on the enterer exposes provenance, because it lists every reference a person
+   entered, so the open question above has to be decided first.
+2. There is no `/persons` read, so a client cannot learn a person's permid.
+3. Names are ambiguous: 14 persons are named Smith, and Nathan Jud has two records on purpose.
+4. On a head row, `enterer_person_id` is whoever made the latest edit, not the original enterer.
+   "Entered by" means the first row of the lineage.
+
+If one parameter takes either a permid or a name, telling them apart by the value's shape depends
+on the permid format. Two parameters avoid that.
+
+*Trigger:* the provenance decision, plus a `/persons` read.
+
 ## The authority's copy of its reference's data
 
 **Open; a modelling question.** On 43,351 authorities `publishedInReference` is true. For those,
@@ -730,6 +744,24 @@ applies to collections and schemas alike, as the same edit to both; for schemas 
 **Write path, either way:**
 - Does a PATCH that rewrites the references keep a removed reference that GET omitted?
 - May a write cite the primary again among the additional references?
+
+## Reference list filters
+
+**Follow-ups** (`add-reference-shared-filters`). `references` lists filter on `doi`, `title`,
+`authors`, `firstAuthor` and `publicationYear`; `enteredBy` is parked (see "Fields the server
+supplies").
+
+- **Stored DOIs: a question for the team.** 91 stored DOIs carry a resolver URL
+  (`https://doi.org/`, `http://dx.doi.org/`) or a `doi:` prefix, and about 140 are not DOIs at all
+  (handle and JSTOR URLs, `ISSN 1175-5334`, `June 2007`). The filter removes the prefixes when it
+  compares, so it works either way. Open: should the migration normalize them, and where should
+  the values that are not DOIs go?
+- **Family-name matching is exact** on the whole name, so `Fuente` does not find `de la Fuente`.
+  Prefix or particle-aware matching would be a new match kind.
+- **No indexes.** A filtered list scans the current heads (about 40–100 ms on 96k refs). Trigram
+  indexes (`pg_trgm`, available on localhost and Aurora) for `title`, and GIN or `unaccent`
+  expression indexes for authors, can follow without an API change. `unaccent()` is `STABLE`, so
+  an expression index needs an `IMMUTABLE` wrapper.
 
 ## Known data issues that affect the API
 

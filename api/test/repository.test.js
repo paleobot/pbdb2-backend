@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 
 import { build, DEFAULT_PUBLIC_BASE_URL as BASE } from '../src/app.js';
 import { makeReadRepository } from '../src/lib/repository.js';
+import { referenceSource } from '../../payloadSchemas/reference.schema.js';
 
 /**
  * DB-backed reads, driven with NO database: `build({ pg })` injects a fake
@@ -185,6 +186,20 @@ test('a repository without a payload source is refused, naming its table', () =>
   assert.throws(
     () => makeReadRepository({ pg, table: 'collections', jsonbColumn: 'collection' }),
     /Resource table 'collections' has no payload source/,
+  );
+  assert.equal(pg.calls.length, 0);
+});
+
+test('a filter naming an unknown match kind is refused when the repository is built', () => {
+  const pg = fakePg(() => {
+    throw new Error('no query may run');
+  });
+  assert.throws(
+    () => makeReadRepository({
+      pg, table: 'refs', jsonbColumn: 'reference', source: referenceSource,
+      filters: { title: { jsonPath: 'title', op: 'like' } },
+    }),
+    /Unknown field-filter op 'like'/,
   );
   assert.equal(pg.calls.length, 0);
 });

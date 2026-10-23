@@ -46,15 +46,51 @@ test('a filter on a source enum declares that enum, in order; one without stays 
 
 test('the declared parameters are accepted and any other is a 400 naming it', async () => {
   const schema = listQuerySchema({ ...descriptorFor('references') });
-  const values = { ids: 'r-1', limit: '5', cursor: undefined, publicationType: 'other' };
+  const values = {
+    ids: 'r-1', limit: '5', cursor: undefined, publicationType: 'other',
+    doi: '10.1234/abc', title: 'triassic archosaur', authors: 'Sues,Reisz', firstAuthor: 'Sues',
+    publicationYear: '1990-2000',
+  };
   for (const param of Object.keys(schema.properties)) {
     if (values[param] === undefined) continue;
     assert.equal((await get(`/api/v1/references?${param}=${encodeURIComponent(values[param])}`)).status, 200, param);
   }
   await badRequest(
     '/api/v1/references?colour=blue&size=2',
-    'Unrecognized query parameters: `colour`, `size`. This resource accepts `ids`, `limit`, `cursor`, `publicationType`',
+    'Unrecognized query parameters: `colour`, `size`. This resource accepts `ids`, `limit`, `cursor`, `publicationType`, `doi`, `title`, ' +
+      '`authors`, `firstAuthor`, `publicationYear`',
   );
+});
+
+test('a publicationYear that is not YYYY or YYYY-YYYY is a 400 naming both forms', async () => {
+  for (const value of ['79', '1990-', '1990..2000', '19900', 'abcd', '1990-2000-2010']) {
+    await badRequest(
+      `/api/v1/references?publicationYear=${encodeURIComponent(value)}`,
+      '`publicationYear` must be a year (YYYY) or a range (YYYY-YYYY)',
+    );
+  }
+  await badRequest(
+    '/api/v1/references?publicationYear=2000-1990',
+    '`publicationYear` range 2000-1990 is reversed; write the earlier year first',
+  );
+});
+
+test('the shared-field filters reject an empty value, and values their kind cannot parse', async () => {
+  for (const param of ['doi', 'title', 'authors', 'firstAuthor', 'publicationYear']) {
+    await badRequest(`/api/v1/references?${param}=`, `\`${param}\` must have a value`);
+    await badRequest(`/api/v1/references?${param}=%20`, `\`${param}\` must have a value`);
+  }
+  await badRequest('/api/v1/references?authors=Sues,', '`authors` must not contain an empty name');
+  await badRequest(
+    '/api/v1/references?firstAuthor=Sues,Reisz',
+    '`firstAuthor` takes one family name; use `authors` for several',
+  );
+  await badRequest('/api/v1/references?doi=doi:', '`doi` must contain a DOI after its prefix');
+});
+
+test('enteredBy is not a filter', async () => {
+  const message = await badRequest('/api/v1/references?enteredBy=Smith');
+  assert.match(message, /^Unrecognized query parameter: `enteredBy`\./);
 });
 
 test('surrounding whitespace is trimmed before an enum is matched', async () => {

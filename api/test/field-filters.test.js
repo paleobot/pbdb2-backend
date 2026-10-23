@@ -96,6 +96,38 @@ test('field filter composes with ids in a single WHERE', async (t) => {
   assert.deepEqual(q.values, [['ref-1', 'ref-2'], 'standalone book', DEFAULT_LIMIT + 1]);
 });
 
+test('the shared-field filters reach SQL as bound predicates and compose with ids and each other', async (t) => {
+  const pg = fakeRefsPg(REFS);
+  const app = build({ pg });
+  t.after(() => app.close());
+
+  const res = await app.inject({
+    method: 'GET',
+    url:
+      '/api/v1/references?ids=ref-1,ref-2&publicationType=standalone%20book&doi=DOI:10.1/X' +
+      '&title=on%20trilobites&authors=Sues,Reisz&firstAuthor=Sues&publicationYear=1990-2000',
+  });
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.json().meta.missing, undefined, 'a filtered ids read has no missing accounting');
+
+  const q = pg.calls.find((c) => c.text.includes('permid = ANY($1)'));
+  assert.ok(q, 'one composed query ran');
+  for (const fragment of [
+    `->>'publicationType' = $2`,
+    `regexp_replace("reference"->>'doi', $3, '', 'i')) = $4`,
+    `unaccent("reference"->>'title') ILIKE ('%' || unaccent($5) || '%') AND`,
+    `ILIKE ('%' || unaccent($6) || '%')`,
+    `jsonb_array_elements("reference"->'authors') a WHERE lower(unaccent(a->>'familyName')) = lower(unaccent($7))`,
+    `= lower(unaccent($8)))`,
+    `lower(unaccent("reference"->'authors'->0->>'familyName')) = lower(unaccent($9))`,
+    `BETWEEN $10 AND $11`,
+  ]) {
+    assert.ok(q.text.includes(fragment), fragment);
+  }
+  assert.deepEqual(q.values.slice(0, 2), [['ref-1', 'ref-2'], 'standalone book']);
+  assert.deepEqual(q.values.slice(3, -1), ['10.1/x', 'on', 'trilobites', 'Sues', 'Reisz', 'Sues', 1990, 2000]);
+});
+
 test('a legal field-filter value with no match is an empty 200 with no missing accounting', async (t) => {
   const pg = fakeRefsPg(REFS);
   const app = build({ pg });

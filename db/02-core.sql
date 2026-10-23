@@ -13,6 +13,7 @@
 -- ============================================================================
 
 CREATE EXTENSION IF NOT EXISTS postgis; -- collections.location is a geography column
+CREATE EXTENSION IF NOT EXISTS unaccent; -- the API's accent-insensitive text filters (references title, authors)
 CREATE SCHEMA lookup;
 
 -- ============================================================
