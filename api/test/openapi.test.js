@@ -61,6 +61,7 @@ test('a list documents its filters and bounds; an expansion is a boolean', () =>
   const params = Object.fromEntries(doc.paths['/api/v1/references'].get.parameters.map((p) => [p.name, p]));
   assert.deepEqual(Object.keys(params), [
     'ids', 'limit', 'cursor', 'publicationType', 'doi', 'title', 'authors', 'firstAuthor', 'publicationYear',
+    'journalTitle', 'seriesTitle', 'bookTitle', 'publisher', 'publicationCity', 'bookType',
   ]);
   assert.deepEqual(params.publicationType.schema.enum, referenceSource.properties.publicationType.enum);
   assert.equal(params.limit.schema.type, 'integer');
@@ -85,6 +86,22 @@ test('each shared-field filter on references documents its match rule', () => {
   assert.match(params.title.description, /every word .* in any order, ignoring case and accents/);
   assert.match(params.firstAuthor.description, /first entry in `authors`/);
   assert.match(params.publicationType.description, /equals this value/);
+});
+
+test('each type-specific filter on references names the types that allow its field', () => {
+  const params = Object.fromEntries(doc.paths['/api/v1/references'].get.parameters.map((p) => [p.name, p]));
+  assert.match(params.journalTitle.description, /whole `journalTitle` equals this value/);
+  assert.match(params.journalTitle.description, /Allowed on journal article and other\.$/);
+  assert.match(params.seriesTitle.description, /Allowed on serial monograph and other\.$/);
+  assert.match(
+    params.publisher.description,
+    /Allowed on standalone book, edited collection, article in edited collection, serial monograph and other\./,
+  );
+  assert.match(params.bookTitle.description, /an edited collection's own title is in `title`/);
+  assert.equal('enum' in params.bookType.schema, false);
+  for (const shared of ['publicationType', 'doi', 'title', 'authors', 'firstAuthor', 'publicationYear']) {
+    assert.doesNotMatch(params[shared].description, /Allowed on/, shared);
+  }
 });
 
 test('storage does not leak into the document', () => {

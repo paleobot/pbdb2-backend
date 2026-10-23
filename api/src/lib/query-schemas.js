@@ -51,8 +51,9 @@ const IDS_EXCLUDE = {
  * The querystring schema of a list read.
  *
  * @param {object} [opts]
- * @param {Record<string, { jsonPath: string, op: string }>} [opts.filters]  the descriptor's
- *   field filters; each one's match kind (field-filter-ops.js) supplies its schema and description
+ * @param {Record<string, { jsonPath: string, op: string, note?: string }>} [opts.filters]  the
+ *   descriptor's field filters; each one's match kind (field-filter-ops.js) supplies its schema and
+ *   description, and a filter's `note` is appended to that description
  * @param {object} [opts.source]  the payload source, whose inline `enum` on an
  *   `eq` filter's field becomes the filter's legal values
  * @param {Record<string, { type: 'boolean' }>} [opts.expansions]  declared expansions
@@ -67,7 +68,7 @@ export function listQuerySchema({ filters = {}, source, expansions = {} } = {}) 
       minLength: 1,
       ...kind.schema,
       ...(Array.isArray(values) ? { enum: [...values] } : {}),
-      description: kind.describe(def.jsonPath),
+      description: def.note ? `${kind.describe(def.jsonPath)} ${def.note}` : kind.describe(def.jsonPath),
     };
   }
   for (const [param, def] of Object.entries(expansions)) {

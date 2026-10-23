@@ -14,7 +14,8 @@
  * JSONB key from the trusted descriptor) and `bind`, which pushes a value as a
  * query parameter and returns its `$n`; request values are only ever bound.
  *
- * See openspec/changes/add-reference-shared-filters/design.md, D1–D6.
+ * See openspec/changes/add-reference-shared-filters/design.md, D1–D6, and
+ * openspec/changes/add-reference-type-filters/design.md, D3 (`foldedEq`).
  */
 
 /** A leading DOI resolver URL or `doi:` label, removed from both sides of a `doi` match. */
@@ -31,6 +32,9 @@ export const PATTERN_MESSAGES = {
 
 /** Case- and accent-folded text, compared on both sides of a family-name match. */
 const folded = (expression) => `lower(unaccent(${expression}))`;
+
+/** {@link folded}, with each run of whitespace collapsed to one space first. */
+const foldedSpaced = (expression) => folded(`regexp_replace(${expression}, '\\s+', ' ', 'g')`);
 
 /** Escape `LIKE`'s wildcards and its escape character, so they match literally. */
 const likeLiteral = (word) => word.replace(/[\\%_]/g, '\\$&');
@@ -55,6 +59,16 @@ export const FIELD_FILTER_OPS = {
     },
     predicate: ({ payload, key, bind }, doi) =>
       `lower(regexp_replace(${payload}->>${key}, ${bind(DOI_PREFIX)}, '', 'i')) = ${bind(doi)}`,
+  },
+
+  foldedEq: {
+    schema: {},
+    describe: (jsonPath) =>
+      `Only items whose whole \`${jsonPath}\` equals this value, ignoring case, accents and runs of ` +
+      'whitespace. Part of a longer value does not match.',
+    parse: (value) => value,
+    predicate: ({ payload, key, bind }, value) =>
+      `${foldedSpaced(`${payload}->>${key}`)} = ${foldedSpaced(bind(value))}`,
   },
 
   allWords: {

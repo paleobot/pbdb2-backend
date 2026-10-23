@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 
 import { build } from '../src/app.js';
 import { DEFAULT_LIMIT } from '../src/lib/list-filters.js';
+import { allowedOn } from '../src/lib/resource-tables.js';
 
 /**
  * Per-entity field filters on `references` (publicationType). The fake pg
@@ -126,6 +127,47 @@ test('the shared-field filters reach SQL as bound predicates and compose with id
   }
   assert.deepEqual(q.values.slice(0, 2), [['ref-1', 'ref-2'], 'standalone book']);
   assert.deepEqual(q.values.slice(3, -1), ['10.1/x', 'on', 'trilobites', 'Sues', 'Reisz', 'Sues', 1990, 2000]);
+});
+
+test('allowedOn names the types whose fields list the field, then other', () => {
+  assert.equal(allowedOn('journalTitle'), 'Allowed on journal article and other.');
+  assert.equal(
+    allowedOn('publisher'),
+    'Allowed on standalone book, edited collection, article in edited collection, serial monograph and other.',
+  );
+  assert.equal(allowedOn('bookType'), 'Allowed on standalone book and other.');
+});
+
+test('the type-specific filters reach SQL as bound predicates and compose with publicationType and ids', async (t) => {
+  const pg = fakeRefsPg(REFS);
+  const app = build({ pg });
+  t.after(() => app.close());
+
+  const res = await app.inject({
+    method: 'GET',
+    url:
+      '/api/v1/references?ids=ref-1,ref-2&publicationType=standalone%20book&journalTitle=Palaeontology' +
+      '&seriesTitle=Novitates&bookTitle=Dinosauria&publisher=Elsevier&publicationCity=Washington&bookType=monograph',
+  });
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.json().meta.missing, undefined, 'a filtered ids read has no missing accounting');
+
+  const q = pg.calls.find((c) => c.text.includes('permid = ANY($1)'));
+  assert.ok(q, 'one composed query ran');
+  for (const fragment of [
+    `->>'publicationType' = $2`,
+    `lower(unaccent(regexp_replace("reference"->>'journalTitle', '\\s+', ' ', 'g'))) = lower(unaccent(regexp_replace($3,`,
+    `lower(unaccent(regexp_replace("reference"->>'seriesTitle', '\\s+', ' ', 'g'))) = lower(unaccent(regexp_replace($4,`,
+    `unaccent("reference"->>'bookTitle') ILIKE ('%' || unaccent($5) || '%')`,
+    `unaccent("reference"->>'publisher') ILIKE ('%' || unaccent($6) || '%')`,
+    `unaccent("reference"->>'publicationCity') ILIKE ('%' || unaccent($7) || '%')`,
+    `"reference"->>'bookType' = $8`,
+  ]) {
+    assert.ok(q.text.includes(fragment), fragment);
+  }
+  assert.deepEqual(q.values.slice(0, -1), [
+    ['ref-1', 'ref-2'], 'standalone book', 'Palaeontology', 'Novitates', 'Dinosauria', 'Elsevier', 'Washington', 'monograph',
+  ]);
 });
 
 test('a legal field-filter value with no match is an empty 200 with no missing accounting', async (t) => {

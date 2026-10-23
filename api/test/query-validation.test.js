@@ -49,7 +49,8 @@ test('the declared parameters are accepted and any other is a 400 naming it', as
   const values = {
     ids: 'r-1', limit: '5', cursor: undefined, publicationType: 'other',
     doi: '10.1234/abc', title: 'triassic archosaur', authors: 'Sues,Reisz', firstAuthor: 'Sues',
-    publicationYear: '1990-2000',
+    publicationYear: '1990-2000', journalTitle: 'Palaeontology', seriesTitle: 'American Museum Novitates',
+    bookTitle: 'The Dinosauria', publisher: 'Elsevier', publicationCity: 'Washington, D.C.', bookType: 'novel',
   };
   for (const param of Object.keys(schema.properties)) {
     if (values[param] === undefined) continue;
@@ -58,7 +59,8 @@ test('the declared parameters are accepted and any other is a 400 naming it', as
   await badRequest(
     '/api/v1/references?colour=blue&size=2',
     'Unrecognized query parameters: `colour`, `size`. This resource accepts `ids`, `limit`, `cursor`, `publicationType`, `doi`, `title`, ' +
-      '`authors`, `firstAuthor`, `publicationYear`',
+      '`authors`, `firstAuthor`, `publicationYear`, `journalTitle`, `seriesTitle`, `bookTitle`, `publisher`, ' +
+      '`publicationCity`, `bookType`',
   );
 });
 
@@ -73,6 +75,13 @@ test('a publicationYear that is not YYYY or YYYY-YYYY is a 400 naming both forms
     '/api/v1/references?publicationYear=2000-1990',
     '`publicationYear` range 2000-1990 is reversed; write the earlier year first',
   );
+});
+
+test('the type-specific filters reject an empty value', async () => {
+  for (const param of ['journalTitle', 'seriesTitle', 'bookTitle', 'publisher', 'publicationCity', 'bookType']) {
+    await badRequest(`/api/v1/references?${param}=`, `\`${param}\` must have a value`);
+    await badRequest(`/api/v1/references?${param}=%20`, `\`${param}\` must have a value`);
+  }
 });
 
 test('the shared-field filters reject an empty value, and values their kind cannot parse', async () => {

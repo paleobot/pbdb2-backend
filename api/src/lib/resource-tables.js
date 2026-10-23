@@ -22,8 +22,9 @@
  *
  * @typedef {object} FieldFilter
  * @property {string} jsonPath  JSONB key within the payload to match (e.g. 'publicationType')
- * @property {'eq'|'doi'|'allWords'|'familyNames'|'firstFamilyName'|'yearRange'} op
+ * @property {'eq'|'doi'|'foldedEq'|'allWords'|'familyNames'|'firstFamilyName'|'yearRange'} op
  *   the match kind (field-filter-ops.js): its parameter schema, value parsing and predicate
+ * @property {string} [note]    appended to the kind's parameter description
  *
  * @typedef {object} ResourceDescriptor
  * @property {string} table          backing table name
@@ -51,7 +52,7 @@
 
 import { authoritySource } from '../../../payloadSchemas/authority.schema.js';
 import { collectionSource } from '../../../payloadSchemas/collection.schema.js';
-import { referenceSource } from '../../../payloadSchemas/reference.schema.js';
+import { PUBLICATION_TYPES, referenceSource } from '../../../payloadSchemas/reference.schema.js';
 import { schemaSource } from '../../../payloadSchemas/schema.schema.js';
 
 /**
@@ -118,14 +119,31 @@ export const LINK_TARGETS = {
  * @property {string} via           FK column (e.g. 'authority_id')
  */
 
+/**
+ * The note naming the publication types that allow a reference field: those whose
+ * `fields` list it, and `other`, which allows every field. Stored legacy refs can
+ * carry the field on other types too, and the filter matches them.
+ *
+ * @param {string} field
+ */
+export function allowedOn(field) {
+  const types = Object.entries(PUBLICATION_TYPES)
+    .filter(([, { fields, unrestricted }]) => unrestricted || fields.includes(field))
+    .map(([type]) => type);
+  const list = types.length > 1 ? `${types.slice(0, -1).join(', ')} and ${types.at(-1)}` : types[0];
+  return `Allowed on ${list}.`;
+}
+
 /** @type {Record<string, ResourceDescriptor>} */
 export const RESOURCE_DESCRIPTORS = {
   references: {
     table: 'refs',
     jsonbColumn: 'reference',
     source: referenceSource,
-    // Filters on fields every publication type carries; see
-    // openspec/changes/add-reference-shared-filters/design.md.
+    // The first six are on fields every publication type carries (see
+    // openspec/changes/add-reference-shared-filters/design.md); the rest are on
+    // fields only some types allow, and match them on any type
+    // (openspec/changes/add-reference-type-filters/design.md).
     filters: {
       publicationType: { jsonPath: 'publicationType', op: 'eq' },
       doi: { jsonPath: 'doi', op: 'doi' },
@@ -133,6 +151,18 @@ export const RESOURCE_DESCRIPTORS = {
       authors: { jsonPath: 'authors', op: 'familyNames' },
       firstAuthor: { jsonPath: 'authors', op: 'firstFamilyName' },
       publicationYear: { jsonPath: 'publicationYear', op: 'yearRange' },
+      journalTitle: { jsonPath: 'journalTitle', op: 'foldedEq', note: allowedOn('journalTitle') },
+      seriesTitle: { jsonPath: 'seriesTitle', op: 'foldedEq', note: allowedOn('seriesTitle') },
+      bookTitle: {
+        jsonPath: 'bookTitle',
+        op: 'allWords',
+        note:
+          `${allowedOn('bookTitle')} It is the book an article in an edited collection appears in; ` +
+          "an edited collection's own title is in `title`.",
+      },
+      publisher: { jsonPath: 'publisher', op: 'allWords', note: allowedOn('publisher') },
+      publicationCity: { jsonPath: 'publicationCity', op: 'allWords', note: allowedOn('publicationCity') },
+      bookType: { jsonPath: 'bookType', op: 'eq', note: allowedOn('bookType') },
     },
   },
   authorities: {

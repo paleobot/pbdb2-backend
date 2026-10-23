@@ -57,7 +57,7 @@ src/
   config.js             env → config
   lib/crud-routes.js    shared CRUD route factory (readOnly option → 405)
   lib/query-schemas.js  GET querystring schemas, query normalizer, 400 formatter
-  lib/field-filter-ops.js  field-filter match kinds (eq, doi, allWords, familyNames, …)
+  lib/field-filter-ops.js  field-filter match kinds (eq, doi, foldedEq, allWords, …)
   lib/published-schemas.js  published response components (Collection, ReferenceLink, …)
   plugins/              autoloaded first (fastify-plugin wrapped, global)
     envelope.js         reply.sendData / reply.sendList → { data, meta, links }, + their schemas
@@ -141,11 +141,15 @@ docs/                   design notes (e.g. response-envelope rationale)
   hand-written 400 messages. What a schema cannot express (cursor decoding, the
   100-distinct-ids cap, the default `limit`, parsing a filter's value) stays in
   `collectListFilters`.
-- **Field filters name a match kind.** A descriptor filter is `{ jsonPath, op }`;
+- **Field filters name a match kind.** A descriptor filter is `{ jsonPath, op, note? }`;
   `op` is a kind in `lib/field-filter-ops.js`, which defines its parameter
-  schema, description, value parsing and SQL predicate in one place. `references`
-  has `publicationType` (`eq`), `doi`, `title`, `authors`, `firstAuthor` and
-  `publicationYear`. The text kinds use the `unaccent` extension (`db/02-core.sql`).
+  schema, description, value parsing and SQL predicate in one place; `note` is
+  appended to the description. `references` has `publicationType` (`eq`), `doi`,
+  `title`, `authors`, `firstAuthor` and `publicationYear` on shared fields, and
+  `journalTitle`, `seriesTitle` (`foldedEq`), `bookTitle`, `publisher`,
+  `publicationCity` (`allWords`) and `bookType` (`eq`) on fields only some types
+  allow. Those match on any type; their `note` (`allowedOn()`) names the types
+  that allow the field. The text kinds use the `unaccent` extension (`db/02-core.sql`).
 - **Strict query params:** an unrecognized query parameter is a **400** naming it,
   on single reads, lists and indexes alike. A filter *value* outside its field's
   inline enum in the payload source is also a 400 listing the legal values; a

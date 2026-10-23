@@ -43,6 +43,17 @@ test('doi: the stored value is normalized by the same prefix pattern, bound', ()
   assert.equal(values[1], '10.1234/abc');
 });
 
+test('foldedEq: the value as sent; both sides folded and whitespace runs collapsed', () => {
+  assert.equal(parse('foldedEq', 'Revue de  Paléobiologie'), 'Revue de  Paléobiologie');
+  const { sql, values } = predicate('foldedEq', 'Palaeontology');
+  assert.equal(
+    sql,
+    `lower(unaccent(regexp_replace("reference"->>'f', '\\s+', ' ', 'g'))) = ` +
+      `lower(unaccent(regexp_replace($1, '\\s+', ' ', 'g')))`,
+  );
+  assert.deepEqual(values, ['Palaeontology']);
+});
+
 test('allWords: split on whitespace and de-duplicated', () => {
   assert.deepEqual(parse('allWords', 'triassic  archosaur triassic'), ['triassic', 'archosaur']);
 });
