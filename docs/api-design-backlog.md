@@ -671,22 +671,61 @@ UUID and get a handle when the record arrives. Under B they would have to call `
 - A resolver can also accept the bare Classic number on an entity's endpoint, because the prefix
   is known there and the check digits can be computed.
 
-**Storage and ordering.** Store the permid as `text` with an ICU numeric collation, so that
-`COL-99-…` sorts before `COL-100-…` without padding or a separate number column:
+**Storage and ordering (leaning 2026-10-26).** Store the permid as plain `text` (the cited form
+and the FK target). Each table also gets a generated `permid_no` column holding its number, and
+lists order by that column:
 
 ```sql
-CREATE COLLATION permid_num (provider = icu, locale = 'und-u-kn');
+permid    text NOT NULL,
+permid_no bigint GENERATED ALWAYS AS (split_part(permid, '-', 2)::bigint) STORED
+-- versioned tables: UNIQUE index on (permid_no) WHERE succeeded_by_id IS NULL
 ```
 
-`ORDER BY permid` and keyset pagination then follow numeric order: Classic order first, then
-creation order. Only the database sorts correctly. A client sorting the strings itself does not.
-ICU-collated indexes must be reindexed after an ICU version upgrade. Aurora supports ICU.
-Zero-padding (`COL-00012345-47`) was the alternative and was rejected because it moves the ID away
-from the cited Classic number.
+Within one table every permid has the same prefix, and the check digits depend only on the
+number. So the number alone is a total order. `ORDER BY permid_no` and keyset pagination follow
+numeric order: Classic order first, then creation order. The cursor still carries the permid, and
+the API decodes it to its number. A client can reproduce the order by sorting on the number in the
+ID. The `permids` registry never needs a meaningful order, so plain `C` collation is fine there.
+The permid text stays the source of truth, and the number is derived from it. Doing it the other way
+round (store the number, generate the text) was rejected because the text is what gets cited and
+what the registry's FKs point at.
+
+Rejected for ordering:
+- **ICU numeric collation** (`CREATE COLLATION permid_num (provider = icu, locale = 'und-u-kn')`
+  on the permid). It gives the same order, but the indexes depend on the ICU version. After an
+  Aurora or OS upgrade they need `REINDEX` plus `ALTER COLLATION … REFRESH VERSION`. Every permid
+  column (`subject_permid`, `concept_permid`, the registry, …) would also have to carry the same
+  collation, or comparisons fail with "could not determine which collation". Only the database
+  could sort correctly.
+- **Plain `C` collation on the text.** Pagination is stable, but `COL-100` sorts before `COL-99`.
+- **Zero-padding** (`COL-00012345-47`). It moves the ID away from the cited Classic number.
+- **`created_at`.** On versioned tables it is per version row, so ordering heads by it means
+  ordering by last-modified time. An edit moves a row while someone is paginating, so they see it
+  twice or skip a row. Bulk migration inserts share one `NOW()` per transaction, so there are huge
+  numbers of ties and the tiebreak falls back on the permid anyway. It also loses Classic order and
+  is nullable in several tables.
 
 **Registry.** The `permids` table from B stays as the place permids are minted and as the FK target
 for every permid column, including `subject_permid`, `concept_permid` and
 `specimens.name_opinions_permid`. It is no longer needed to guard against collisions.
+
+The registry drops B's `entity_type` column (leaning 2026-10-26) and keeps only
+`permid (PK, text COLLATE "C") │ created_at`. The prefix already says which entity a permid belongs
+to, and a second copy of that could disagree with it. What `entity_type` would have done goes
+elsewhere:
+- **Type-checking references.** Each permid column gets a CHECK on its own prefix, next to the
+  format and check-digit check: for example `CHECK (subject_permid LIKE 'NAM-%')`. An FK to
+  `permids(permid)` only proves the permid exists. Proving its type through the registry would take
+  a composite FK `(permid, entity_type)` plus a constant column on every referencing table.
+- **Known prefixes only.** `mint_permid(prefix)` refuses a prefix it doesn't know. If something
+  later needs the prefix-to-entity mapping as data (a resolver endpoint, for example), add a
+  `dictionaries.permid_prefixes(prefix PK, entity_type, …)` table. The registry would then get a
+  generated `split_part(permid, '-', 1)` column with an FK to it.
+- **Reporting by type.** `GROUP BY split_part(permid, '-', 1)`.
+
+The registry's `created_at` is when the **entity** was created, not its latest version. That is the
+place to answer "when was this record created" without walking the version chain. It is not used
+for ordering (see Storage and ordering).
 
 **Numbering for each table:**
 
