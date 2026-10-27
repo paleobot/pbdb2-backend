@@ -78,18 +78,68 @@ Settled in the backlog (2026-10-22, 2026-10-26). Repeated briefly here:
    new IDs without its changes. Tasks are grouped by layer within this change.
 8. **`homonym_group_id` stays a UUID.** It is internal and never exposed.
 
+Settled while working through the open questions (2026-10-27):
+
+9. **Prefixes.** Where a pbdb2 table means the same thing as a Classic data-service extended
+   identifier (`col:12345`, data1.2 "identifiers" doc), it reuses that prefix, uppercased.
+   Classic's `txn`, `var` and `opn` are not reused: Classic opinions are split across three
+   tables here, and the `txn`/`var` split doesn't map onto authorities and name_opinions.
+
+   | Table | Prefix | | Table | Prefix |
+   |---|---|---|---|---|
+   | refs | `REF` (Classic) | | name_opinions | `NOP` |
+   | persons | `PRS` (Classic) | | assignment_opinions | `AOP` |
+   | collections | `COL` (Classic) | | validity_opinions | `VOP` |
+   | specimens | `SPM` (Classic) | | taxon_annotations | `TAN` |
+   | intervals | `INT` (Classic) | | schemas | `SCH` |
+   | timescales | `TSC` (Classic) | | characters | `CHR` |
+   | authorities | `AUT` | | states | `STA` |
+
+   **Reserved, not minted:** `TXL` (taxa_linnaean) and `TXC` (taxa_clades). Rows in those tables
+   have no identity of their own today. Their `permid` is the name permid (see 10).
+
+   The separator stays `-` (Classic uses `:`, which ltree labels don't allow). A resolver for
+   Classic's `col:12345` forms could come later; it's cheap because the number carries over.
+10. **Names use `NOP` permids.** Names-as-spelled have no separate permid space: every root
+    `name_opinions` row has `subject_permid = permid` (525,868 of 525,868 on localhost), and
+    `taxa_linnaean.permid`, `taxa_clades.permid` and the derived `*_permid` columns all hold that
+    value. So a taxon name is cited as `NOP-<taxon_no>-<CC>`. Its number is the Classic `taxon_no`,
+    the same number its authority has under `AUT`.
+11. **Other permid columns.** `intervals` and `timescales` get prefixes now (both empty and
+    unfinished; on migration, Classic `interval_no` and `scale_no` are their legacy numbers).
+    `taxon_annotations` uses the sequence only. `homonyms.permid` is not an identity but a
+    reference to a group member. It gets the CHECK and FK for `NOP`, and no prefix of its own. The
+    derived taxa tables only change type and gain the `NOP` CHECK.
+12. **One floor, 1,000,000, for every sequence.** It is above every Classic number that becomes a
+    permid (the largest is `taxon_no` at 526,272), so sequence-numbered IDs are visibly one digit
+    longer than any legacy ID. Classic `opinion_no` (up to 1,029,177) isn't carried into any
+    table, so it doesn't constrain the floor.
+13. **ltree labels hold permids as-is.** PG16+ allows `-` in labels, and permids contain only
+    letters, digits and `-`. The `-`↔`_` swap goes from `db/03-taxa.sql` and
+    `api/src/lib/classification-path.js`.
+14. **The check-digit algorithm lives only in SQL.** Every permid needs a registry row before
+    anything can reference it, so the migrations have to make a database round trip anyway. JS asks
+    for formatted IDs in batches: `register_permids(prefix, bigint[])` for legacy numbers and
+    `mint_permids(prefix, n)` for sequence numbers, both returning the text. The API never
+    computes check digits (cursors use `permid_no`, and lookups go by the text), and the fixtures
+    mint through SQL. There's one implementation and no cross-check test.
+15. **Only this database mints, and nothing is public yet** (confirmed 2026-10-27). These were the
+    backlog's conditions for B and for doing the rewrite now.
+
 ## Risks / Trade-offs
 
 - [Permids carry meaning and are enumerable] → Accepted. The data is public, and citeable
   continuity with Classic is the point.
-- [Only this database can mint] → Accepted on the assumption that nothing outside it creates
-  entities (Open Question 5). If that turns out to be wrong, A is the fallback.
-- [Bulk inserts minting through `mint_permid()` row by row is slow at 517k rows] → See Open
-  Question 6.
+- [`NOP-526272-xx` and `AUT-526272-xx` share a number but are different records] → Intended: one
+  Classic taxon, two pbdb2 views of it. The prefix and check digits keep them apart.
+- [Only this database can mint] → Confirmed that nothing outside it creates entities. If that
+  changes, an outside system calls `mint_permids()` or A becomes the fallback.
+- [Bulk inserts minting row by row would be slow at 517k rows] → Batched
+  `mint_permids`/`register_permids` calls (Decision 14).
 - [Sequence-numbered permids depend on run order] → Deterministic as long as the runner order is
   fixed. Legacy-numbered ones are deterministic regardless.
-- [The rewrite is cheap only until permids are published or cited] → Land it before anything
-  public exposes permids (Open Question 7).
+- [The rewrite is cheap only until permids are published or cited] → Nothing is public yet.
+  Land it before anything is.
 - [`derive_taxa()` is large and uuid-typed throughout] → Its assertions and a full `taxa` runner
   step on localhost and Aurora must reproduce today's 525,805 rows.
 
@@ -102,32 +152,4 @@ legacy-numbered permids are identical across two rebuilds. Do localhost first, t
 
 ## Open Questions
 
-1. **Which tables get prefixes.** The backlog's numbering table covers refs, persons, collections,
-   specimens, authorities, the three opinion tables, schemas, characters and states. The schema
-   also has permids on **intervals, timescales, taxon_annotations and homonyms**. Each needs a
-   prefix and a numbering rule, or an explicit "stays UUID for now" (as `homonym_group_id` does).
-   Intervals and timescales aren't populated yet. The derived taxa tables (`taxa`,
-   `taxa_linnaean`, `taxa_clades`, `taxa_attachments`, `cycle_cuts`) only carry other tables'
-   permids and just change type.
-2. **The prefix strings.** The examples disagree (`COL-` in the leaning, `COLL-` in B's sketch).
-   A candidate set of three letters: `REF PER COL SPC AUT NAM ASG VAL SCH CHR STA` (+ interval,
-   timescale, annotation if they're in). These appear in every citation, so they're worth
-   showing to the committee.
-3. **Floor values.** Classic maxima in `pbdb_2026_10_18`: collections 281,030; refs 96,229; taxa
-   526,272; opinions 1,029,177; specimens 168,287; persons 1,332. One round floor everywhere (for
-   example 10,000,000, which also makes non-legacy IDs visibly longer), or a floor per prefix?
-4. **ltree labels.** `classification_path` stores concept permids with `-` replaced by `_`,
-   because ltree labels used to forbid hyphens. PG16+ allows them (both environments are PG16+),
-   so the swap in `03-taxa.sql` and `api/src/lib/classification-path.js` could be dropped. Leaning:
-   drop it.
-5. **Who mints?** The backlog's condition for choosing B: nothing outside this database (PBot
-   writing independently, offline clients, bulk importers) creates entities. Confirm this, and
-   state it in the proposal.
-6. **Check digits in two languages.** SQL needs them for `mint_permid()` and the CHECK. The bulk
-   migration inserts would otherwise call `mint_permid()` row by row. Options: (a) a JS helper
-   that formats the ID from a legacy number or a block of `nextval`s, tested against the SQL
-   function; (b) insert numbers and let SQL format the text (for example a set-based
-   `mint_permids(prefix, n)` or a format function used in the INSERT). Leaning: whichever keeps a
-   single definition of the algorithm, with a cross-check test if there are two.
-7. **Is anything public yet?** If the docs page, OpenAPI examples or any deployed API already
-   shows permids to outside users, it's worth knowing before the switch.
+None. All seven were settled on 2026-10-27 (Decisions 9 to 15).
