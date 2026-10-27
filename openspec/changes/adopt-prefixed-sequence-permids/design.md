@@ -66,13 +66,15 @@ Settled in the backlog (2026-10-22, 2026-10-26). Repeated briefly here:
    prefixes. `created_at` is when the entity was created.
 5. **Numbering by table**: refs, persons, collections and specimens use the Classic number.
    Authorities use `taxon_no`; a merged authority takes the lowest absorbed number, and the rest
-   stay in `legacyIDs.oldpbdbIDs`. name_opinions uses `authorities.taxon_no` for authority-opinions
+   stay in `legacyIDs.oldpbdbIDs`. name_opinions uses the source `authorities` row's own `taxon_no` (one
+   root row per source row, so an absorbed `taxon_no` still names its own name) for authority-opinions
    root rows and the sequence for everything else. assignment/validity opinions, schemas,
    characters and states use the sequence only. PBot rows, sentinels and anything else with no
    Classic row use the sequence.
 6. **Sequences**: one per prefix, starting at a fixed floor well above the Classic maximum (not
-   max + 1, because Classic may keep taking writes). The runner sets every sequence before any
-   non-legacy mint, as a setup step that doesn't read MariaDB.
+   max + 1, because Classic may keep taking writes). Each sequence is created with its
+   start in the DDL, so a database built from the DDL can mint at once and the runner needs no
+   setup step (decided while writing the specs, 2026-10-27; the backlog had a runner step).
 7. **One change, not a sequence by layer.** The DDL, the migrations and the API reads have to
    switch together: the new schema rejects the old migration output, and the API can't read the
    new IDs without its changes. Tasks are grouped by layer within this change.
@@ -145,8 +147,7 @@ Settled while working through the open questions (2026-10-27):
 
 ## Migration Plan
 
-Rebuild, not convert: apply the new DDL to a fresh database, run the full runner (with the new
-sequence-floor setup step), then the taxa step. Compare totals with the last run, and check that
+Rebuild, not convert: apply the new DDL to a fresh database, run the full runner, then the taxa step. Compare totals with the last run, and check that
 legacy-numbered permids are identical across two rebuilds. Do localhost first, then Aurora
 `pbdb2_migration_test`. Rollback is the previous branch's DDL plus a rebuild.
 

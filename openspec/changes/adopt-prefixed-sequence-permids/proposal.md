@@ -10,7 +10,7 @@ option B and the 2026-10-22 leaning) and in `design.md`.
 ## What Changes
 
 - **BREAKING** Every exposed permid becomes `<PREFIX>-<number>-<CC>` text (for example
-  `COL-12345-47`) instead of a UUIDv7. `CC` is ISO 7064 MOD 97-10 over the whole ID. The `uuid`
+  `COL-12345-70`) instead of a UUIDv7. `CC` is ISO 7064 MOD 97-10 over the whole ID. The `uuid`
   permid columns, their version-7 CHECKs, and the `uuid[]` parameters, uuid temp tables and
   `::uuid` casts in the taxa functions all go.
 - New `permids` registry (`permid` PK, `created_at`). It is the FK target for every permid
@@ -27,7 +27,8 @@ option B and the 2026-10-22 leaning) and in `design.md`.
   takes the lowest absorbed `taxon_no`). Everything else (PBot rows, sentinels, concept,
   misspelling and lineage name opinions, assignment and validity opinions, schemas, characters,
   states) takes a sequence number.
-- The migration runner gains a setup step that sets every sequence's floor before any step mints.
+- Sequences start at 1,000,000 in the DDL itself, so a database built from the DDL can mint at once.
+  The runner needs no new step.
 - `migrations/src/lib/uuidv7.js` and the `uuid` dependency go. Scripts get permids from the SQL
   functions in batches.
 - **BREAKING** (API) Lists and keyset pagination order by `permid_no`: Classic order first, then
@@ -52,11 +53,11 @@ option B and the 2026-10-22 leaning) and in `design.md`.
   from the UUIDv7 helper. For authorities, a merged authority takes the lowest `taxon_no`.
 - `pbot-refs-migration`, `pbot-person-migration`, `pbot-schema-migration`: permids come from
   `mint_permids`. The rule against reusing `pbotID` stays.
-- `name-opinions-migration`: root rows take `authorities.taxon_no` as their `NOP` number, still
+- `name-opinions-migration`: root rows take the source `authorities` row's own `taxon_no` as their
+  `NOP` number, still
   stored as both `permid` and `subject_permid`.
 - `synonymy-opinions-migration`, `assignment-opinions-migration`: permids come from the
   sequence, not `uuidv7()`.
-- `migration-runner`: a new sequence-floor setup step runs before the first minting step.
 - `taxa-opinions`: the "permid columns enforce uuidv7" requirement becomes the prefix, format and
   FK checks. `classification_path` labels are permids without the `_` swap. `homonym_group_id`
   keeps its v7 CHECK.
