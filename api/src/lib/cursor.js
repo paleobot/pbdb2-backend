@@ -1,7 +1,8 @@
 /**
  * Cursor tokens for keyset pagination.
  *
- * A cursor names a position in the list's total `permid` ordering plus the
+ * A cursor names a position in the list's total ordering by the number in each
+ * `permid` (`permid_no`, so `REF-99-…` precedes `REF-100-…`) plus the
  * direction of travel, so one parameter carries both and an inconsistent
  * combination is unrepresentable. It is handed to clients only inside a
  * `links.next` / `links.prev` URL.
@@ -19,6 +20,21 @@
 export const FORWARD = 'next';
 export const BACKWARD = 'prev';
 
+// A permid's shape, `<PREFIX>-<number>-<CC>` (prefixed-permids). Only the shape:
+// the check digits are the database's business, and a cursor only needs the number.
+const PERMID = /^[A-Z]{3}-([1-9][0-9]{0,17})-[0-9]{2}$/;
+
+/**
+ * The number inside a well-formed permid, as a decimal string (it can exceed
+ * Number's safe range), or null. Lists order and seek on it (`permid_no`).
+ *
+ * @param {string} permid
+ * @returns {string | null}
+ */
+export function permidNumber(permid) {
+  return PERMID.exec(permid)?.[1] ?? null;
+}
+
 /**
  * Encode a position + direction into an opaque token.
  *
@@ -32,7 +48,7 @@ export function encodeCursor({ permid, direction }) {
 /**
  * Decode a token back to `{ permid, direction }`, or `null` when it is not a
  * cursor this system issued. Every malformed input — bad base64, bad JSON, a
- * missing or non-string `permid`, an unknown direction — returns `null` rather
+ * missing, non-string or ill-formed `permid`, an unknown direction — returns `null` rather
  * than throwing, so the seam can turn it into a 400 and a decode failure can
  * never surface as a 500.
  *
@@ -49,7 +65,7 @@ export function decodeCursor(token) {
 
   if (!parsed || typeof parsed !== 'object') return null;
   const { p: permid, d: direction } = parsed;
-  if (typeof permid !== 'string' || permid === '') return null;
+  if (typeof permid !== 'string' || permidNumber(permid) === null) return null;
   if (direction !== FORWARD && direction !== BACKWARD) return null;
 
   return { permid, direction };

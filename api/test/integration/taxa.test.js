@@ -4,7 +4,8 @@ import assert from 'node:assert/strict';
 import { build, DEFAULT_PUBLIC_BASE_URL as BASE } from '../../src/app.js';
 import {
   setupTestDb,
-  newPermid,
+  mintPermid,
+  mintPermids,
   seedPerson,
   insertRef,
   insertAuthority,
@@ -28,25 +29,27 @@ import { assertPublished, assertEnvelope } from '../published.js';
 let db;
 let app;
 
-// The fixture tree, root-ward:  Life > Animalia > Calymene > C. blumenbachii
-const life = newPermid();
-const animalia = newPermid();
-const calymene = newPermid();
-const blumenbachii = newPermid();
-const synonym = newPermid();
+// The fixture tree, root-ward:  Life > Animalia > Calymene > C. blumenbachii.
+// Taxa are identified by their names' NOP permids, minted once the database exists.
+let life;
+let animalia;
+let calymene;
+let blumenbachii;
+let synonym;
 
 before(async () => {
   db = await setupTestDb();
   if (!db.available) return;
+  [life, animalia, calymene, blumenbachii, synonym] = await mintPermids(db.pool, 'NOP', 5);
 
   const personId = await seedPerson(db.pool);
   const ref = await insertRef(db.pool, {
-    permid: newPermid(),
+    permid: await mintPermid(db.pool, 'REF'),
     personId,
     reference: { title: 'On the Trilobites' },
   });
   const authority = await insertAuthority(db.pool, {
-    permid: newPermid(),
+    permid: await mintPermid(db.pool, 'AUT'),
     personId,
     authority: { citation: 'Brongniart 1822' },
     referenceId: ref.id,
@@ -261,7 +264,7 @@ test('the list paginates and omits the chain unless asked', async (t) => {
 test('a multi-entity read reports missing ids and accepts the chain opt-in', async (t) => {
   if (!db.available) return t.skip(db.reason);
 
-  const absent = newPermid();
+  const absent = await mintPermid(db.pool, 'NOP');
   const body = (
     await app.inject({
       method: 'GET',

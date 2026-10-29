@@ -118,7 +118,7 @@ A script that re-runs over existing rows SHALL register only the permids of rows
 - **THEN** it returns `{REF-12345-15, REF-96229-78}`, and both are in `permids`
 
 #### Scenario: A legacy number registered twice fails
-- **WHEN** two different source rows would both register `AUT-526272-03`
+- **WHEN** two different source rows would both register `AUT-526271-06`
 - **THEN** the second registration raises an error, instead of the second row silently becoming
   a version of the first
 
@@ -178,9 +178,9 @@ more than one `name_opinions` row. An authority's absorbed `taxon_no`s other tha
 SHALL remain in `legacyIDs.oldpbdbIDs`.
 
 #### Scenario: A taxon's name and authority share a number
-- **WHEN** Classic `taxon_no` 526,272 is migrated as an authority survivor and as a root name opinion
-- **THEN** the authority's permid is `AUT-526272-03` and the root name opinion's permid is
-  `NOP-526272-68`
+- **WHEN** Classic `taxon_no` 526,271 is migrated as an authority survivor and as a root name opinion
+- **THEN** the authority's permid is `AUT-526271-06` and the root name opinion's permid is
+  `NOP-526271-71`
 
 #### Scenario: Merged authority
 - **WHEN** Classic `taxon_no`s 100, 200 and 300 collapse into one authority
@@ -203,9 +203,12 @@ own `NOP` permid as both `permid` and `subject_permid`. That permid is the name'
 ### Requirement: Each table carries its permid's number for ordering
 Every table with its own permid SHALL have
 `permid_no bigint GENERATED ALWAYS AS (split_part(permid, '-', 2)::bigint) STORED`. On a versioned
-table, a unique index on `permid_no` WHERE `succeeded_by_id IS NULL` SHALL guarantee one head per
-number. On an unversioned table (`persons`), `permid` SHALL be `UNIQUE`, and so is `permid_no`. The
-permid text SHALL stay the source of truth, and `permid_no` is derived from it.
+table, a constraint `<table>_one_head_per_number`, `EXCLUDE (permid_no WITH =) WHERE (succeeded_by_id
+IS NULL) DEFERRABLE INITIALLY DEFERRED`, SHALL guarantee one head per number. It is deferred because a
+new version is inserted as a head before `handle_new_version()` closes the old head in its AFTER
+trigger; a non-deferrable unique index would reject every new version. On an unversioned table
+(`persons`, and the derived `taxa_linnaean`, `taxa_clades` and `taxa`), `permid` and `permid_no` SHALL
+be `UNIQUE`. The permid text SHALL stay the source of truth, and `permid_no` is derived from it.
 
 Within one table every permid has the same prefix, and the check digits depend only on the number,
 so `permid_no` is a total order on the table's entities.
@@ -215,5 +218,10 @@ so `permid_no` is a total order on the table's entities.
 - **THEN** `COL-99-…` comes first
 
 #### Scenario: Two heads with one number are refused
-- **WHEN** a second head with an existing head's `permid_no` would be left in place
-- **THEN** PostgreSQL rejects the write with a unique-index violation
+- **WHEN** a transaction would commit leaving a second head with an existing head's `permid_no`
+- **THEN** PostgreSQL rejects the commit with an exclusion-constraint violation
+
+#### Scenario: A new version is accepted
+- **WHEN** a second row with an existing head's permid is inserted, and the version triggers close the
+  old head
+- **THEN** the insert succeeds, and the table holds two rows and one head for that permid

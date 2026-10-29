@@ -9,7 +9,7 @@ import { assertPublished } from '../published.js';
 import {
   setupTestDb,
   seedPerson,
-  newPermid,
+  mintPermid,
   insertRef,
   insertAuthority,
   insertCollection,
@@ -21,7 +21,7 @@ import {
 /**
  * Integration tier: real PostgreSQL, real lineage triggers, real recursive CTE.
  * Provisions one ephemeral database for the file; each test mints its own
- * permids via `newPermid()` so assertions are independent. Skips cleanly when no
+ * permids via `mintPermid()` so assertions are independent. Skips cleanly when no
  * database is reachable.
  */
 let ctx = { available: false, reason: 'not initialized' };
@@ -59,19 +59,19 @@ const schemasRepo = () => makeReadRepository({ pg: ctx.pool, ...descriptorFor('s
 
 // Source-valid schema, character and state rows, as the PBot migration writes them.
 const schemaPayload = (title) => ({ legacyIDs: { pbotID: `p-${title}` }, title, year: '2023' });
-async function insertCharacter(pool, { permid = newPermid(), schemaId = null, characterId = null, character, sortOrder }) {
+async function insertCharacter(pool, { permid, schemaId = null, characterId = null, character, sortOrder }) {
   const { rows: [row] } = await pool.query(
     `INSERT INTO characters (permid, authorizer_person_id, enterer_person_id, parent_schema_id, parent_character_id, character, sort_order)
      VALUES ($1, $2, $2, $3, $4, $5::jsonb, $6) RETURNING id, permid`,
-    [permid, personId, schemaId, characterId, JSON.stringify(character), sortOrder],
+    [permid ?? await mintPermid(pool, 'CHR'), personId, schemaId, characterId, JSON.stringify(character), sortOrder],
   );
   return row;
 }
-async function insertState(pool, { permid = newPermid(), characterId = null, stateId = null, state, quantitative = false, sortOrder }) {
+async function insertState(pool, { permid, characterId = null, stateId = null, state, quantitative = false, sortOrder }) {
   const { rows: [row] } = await pool.query(
     `INSERT INTO states (permid, authorizer_person_id, enterer_person_id, parent_character_id, parent_state_id, state, quantitative, sort_order)
      VALUES ($1, $2, $2, $3, $4, $5::jsonb, $6, $7) RETURNING id, permid`,
-    [permid, personId, characterId, stateId, JSON.stringify(state), quantitative, sortOrder],
+    [permid ?? await mintPermid(pool, 'STA'), personId, characterId, stateId, JSON.stringify(state), quantitative, sortOrder],
   );
   return row;
 }
@@ -79,7 +79,7 @@ async function insertState(pool, { permid = newPermid(), characterId = null, sta
 test('readHead returns the current head and excludes superseded versions', async (t) => {
   if (!ctx.available) return t.skip(ctx.reason);
 
-  const permid = newPermid();
+  const permid = await mintPermid(ctx.pool, 'REF');
   await insertRef(ctx.pool, { permid, personId, reference: { title: 'v1' } });
   await insertRef(ctx.pool, { permid, personId, reference: { title: 'v2' } }); // triggers → head
 
@@ -91,7 +91,7 @@ test('readHead returns the current head and excludes superseded versions', async
 test('readHead excludes a soft-removed head', async (t) => {
   if (!ctx.available) return t.skip(ctx.reason);
 
-  const permid = newPermid();
+  const permid = await mintPermid(ctx.pool, 'REF');
   await insertRef(ctx.pool, { permid, personId, reference: { title: 'gone' }, removed: true });
 
   assert.equal(await refsRepo().readHead(permid), null);
@@ -99,15 +99,15 @@ test('readHead excludes a soft-removed head', async (t) => {
 
 test('readHead returns null for an unknown permid', async (t) => {
   if (!ctx.available) return t.skip(ctx.reason);
-  assert.equal(await refsRepo().readHead(newPermid()), null);
+  assert.equal(await refsRepo().readHead(await mintPermid(ctx.pool, 'REF')), null);
 });
 
 test('list returns one record per non-removed lineage head', async (t) => {
   if (!ctx.available) return t.skip(ctx.reason);
 
-  const live1 = newPermid();
-  const live2 = newPermid();
-  const removed = newPermid();
+  const live1 = await mintPermid(ctx.pool, 'REF');
+  const live2 = await mintPermid(ctx.pool, 'REF');
+  const removed = await mintPermid(ctx.pool, 'REF');
   await insertRef(ctx.pool, { permid: live1, personId, reference: { title: 'L1 v1' } });
   await insertRef(ctx.pool, { permid: live1, personId, reference: { title: 'L1 v2' } }); // 2 versions, 1 head
   await insertRef(ctx.pool, { permid: live2, personId, reference: { title: 'L2' } });
@@ -126,9 +126,9 @@ test('list returns one record per non-removed lineage head', async (t) => {
 test('schema read: merged head, a repeated primary, and a merged tree of current versions', async (t) => {
   if (!ctx.available) return t.skip(ctx.reason);
 
-  const ref = await insertRef(ctx.pool, { permid: newPermid(), personId, reference: { title: 'Backing ref' } });
+  const ref = await insertRef(ctx.pool, { permid: await mintPermid(ctx.pool, 'REF'), personId, reference: { title: 'Backing ref' } });
   const schema = await insertSchema(ctx.pool, {
-    permid: newPermid(), personId, schema: schemaPayload('Leaf architecture'), referenceId: ref.id,
+    permid: await mintPermid(ctx.pool, 'SCH'), personId, schema: schemaPayload('Leaf architecture'), referenceId: ref.id,
   });
   // The one localhost child row repeats its schema's primary; so does this one.
   await insertAdditionalSchemaRef(ctx.pool, { schemaId: schema.id, referenceId: ref.id, personId });
@@ -172,7 +172,7 @@ test('schema read of an unknown permid is a 404, and it has no characters', asyn
   if (!ctx.available) return t.skip(ctx.reason);
   const app = build({ pg: ctx.pool });
   t.after(() => app.close());
-  const missing = newPermid();
+  const missing = await mintPermid(ctx.pool, 'SCH');
   assert.equal((await app.inject({ method: 'GET', url: `/api/v1/schemas/${missing}` })).statusCode, 404);
   assert.deepEqual(await readSchemaCharacters(ctx.pool, missing), []);
 });
@@ -180,9 +180,9 @@ test('schema read of an unknown permid is a 404, and it has no characters', asyn
 test('re-versioned schema keeps its tree and child rows (FKs swung to the new head)', async (t) => {
   if (!ctx.available) return t.skip(ctx.reason);
 
-  const primary = await insertRef(ctx.pool, { permid: newPermid(), personId, reference: { title: 'P' } });
-  const add = await insertRef(ctx.pool, { permid: newPermid(), personId, reference: {} });
-  const v1 = await insertSchema(ctx.pool, { permid: newPermid(), personId, schema: schemaPayload('v1'), referenceId: primary.id });
+  const primary = await insertRef(ctx.pool, { permid: await mintPermid(ctx.pool, 'REF'), personId, reference: { title: 'P' } });
+  const add = await insertRef(ctx.pool, { permid: await mintPermid(ctx.pool, 'REF'), personId, reference: {} });
+  const v1 = await insertSchema(ctx.pool, { permid: await mintPermid(ctx.pool, 'SCH'), personId, schema: schemaPayload('v1'), referenceId: primary.id });
   await insertAdditionalSchemaRef(ctx.pool, { schemaId: v1.id, referenceId: add.id, personId });
   const char = await insertCharacter(ctx.pool, { schemaId: v1.id, character: { name: 'Margin' }, sortOrder: 1 });
 
@@ -206,8 +206,8 @@ test('re-versioned schema keeps its tree and child rows (FKs swung to the new he
 test('authority read embeds its single reference', async (t) => {
   if (!ctx.available) return t.skip(ctx.reason);
 
-  const refPermid = newPermid();
-  const authorityPermid = newPermid();
+  const refPermid = await mintPermid(ctx.pool, 'REF');
+  const authorityPermid = await mintPermid(ctx.pool, 'AUT');
 
   const ref = await insertRef(ctx.pool, {
     permid: refPermid,
@@ -239,8 +239,8 @@ test('authority read embeds its single reference', async (t) => {
 test('authority citing an untitled reference reads without a title key', async (t) => {
   if (!ctx.available) return t.skip(ctx.reason);
 
-  const refPermid = newPermid();
-  const authorityPermid = newPermid();
+  const refPermid = await mintPermid(ctx.pool, 'REF');
+  const authorityPermid = await mintPermid(ctx.pool, 'AUT');
   const ref = await insertRef(ctx.pool, { permid: refPermid, personId, reference: {} });
   await insertAuthority(ctx.pool, { permid: authorityPermid, personId, referenceId: ref.id });
 
@@ -252,10 +252,10 @@ test('authority citing an untitled reference reads without a title key', async (
 test('authority routes honour the out contract over real PostgreSQL, with hrefs', async (t) => {
   if (!ctx.available) return t.skip(ctx.reason);
 
-  const titled = await insertRef(ctx.pool, { permid: newPermid(), personId, reference: { title: 'Route ref' } });
-  const removed = await insertRef(ctx.pool, { permid: newPermid(), personId, reference: { title: 'Gone' }, removed: true });
-  const live = newPermid();
-  const orphaned = newPermid();
+  const titled = await insertRef(ctx.pool, { permid: await mintPermid(ctx.pool, 'REF'), personId, reference: { title: 'Route ref' } });
+  const removed = await insertRef(ctx.pool, { permid: await mintPermid(ctx.pool, 'REF'), personId, reference: { title: 'Gone' }, removed: true });
+  const live = await mintPermid(ctx.pool, 'AUT');
+  const orphaned = await mintPermid(ctx.pool, 'AUT');
   await insertAuthority(ctx.pool, { permid: live, personId, referenceId: titled.id });
   await insertAuthority(ctx.pool, { permid: orphaned, personId, referenceId: removed.id });
 
@@ -294,8 +294,8 @@ test('reference routes honour the out contract over real PostgreSQL', async (t) 
     publicationType: 'journal article',
     publicationYear: '1999',
   };
-  const titled = await insertRef(ctx.pool, { permid: newPermid(), personId, reference: titledPayload });
-  const untitled = await insertRef(ctx.pool, { permid: newPermid(), personId, reference: untitledPayload });
+  const titled = await insertRef(ctx.pool, { permid: await mintPermid(ctx.pool, 'REF'), personId, reference: titledPayload });
+  const untitled = await insertRef(ctx.pool, { permid: await mintPermid(ctx.pool, 'REF'), personId, reference: untitledPayload });
 
   const app = build({ pg: ctx.pool });
   t.after(() => app.close());
@@ -313,10 +313,10 @@ test('reference routes honour the out contract over real PostgreSQL', async (t) 
 test('collection read merges coordinates and embeds references, a repeated primary included', async (t) => {
   if (!ctx.available) return t.skip(ctx.reason);
 
-  const primaryPermid = newPermid();
-  const add1Permid = newPermid();
-  const add2Permid = newPermid();
-  const collectionPermid = newPermid();
+  const primaryPermid = await mintPermid(ctx.pool, 'REF');
+  const add1Permid = await mintPermid(ctx.pool, 'REF');
+  const add2Permid = await mintPermid(ctx.pool, 'REF');
+  const collectionPermid = await mintPermid(ctx.pool, 'COL');
 
   const primary = await insertRef(ctx.pool, { permid: primaryPermid, personId, reference: { title: 'Primary' } });
   const add1 = await insertRef(ctx.pool, { permid: add1Permid, personId, reference: { title: 'Add 1' } });
@@ -360,9 +360,9 @@ test('collection read merges coordinates and embeds references, a repeated prima
 test('collection with no additional references yields an empty array', async (t) => {
   if (!ctx.available) return t.skip(ctx.reason);
 
-  const collectionPermid = newPermid();
+  const collectionPermid = await mintPermid(ctx.pool, 'COL');
 
-  const primary = await insertRef(ctx.pool, { permid: newPermid(), personId, reference: { title: 'Only primary' } });
+  const primary = await insertRef(ctx.pool, { permid: await mintPermid(ctx.pool, 'REF'), personId, reference: { title: 'Only primary' } });
   await insertCollection(ctx.pool, {
     permid: collectionPermid,
     personId,
@@ -378,16 +378,16 @@ test('collection with no additional references yields an empty array', async (t)
 test('schema head embeds primary and additional references; removed ones are suppressed', async (t) => {
   if (!ctx.available) return t.skip(ctx.reason);
 
-  const primaryPermid = newPermid();
-  const add1Permid = newPermid();
+  const primaryPermid = await mintPermid(ctx.pool, 'REF');
+  const add1Permid = await mintPermid(ctx.pool, 'REF');
   const primary = await insertRef(ctx.pool, { permid: primaryPermid, personId, reference: { title: 'Schema primary' } });
   const add1 = await insertRef(ctx.pool, { permid: add1Permid, personId, reference: { title: 'Schema add 1' } });
-  const gone = await insertRef(ctx.pool, { permid: newPermid(), personId, reference: { title: 'Gone' }, removed: true });
+  const gone = await insertRef(ctx.pool, { permid: await mintPermid(ctx.pool, 'REF'), personId, reference: { title: 'Gone' }, removed: true });
 
-  const live = await insertSchema(ctx.pool, { permid: newPermid(), personId, schema: schemaPayload('Live'), referenceId: primary.id });
+  const live = await insertSchema(ctx.pool, { permid: await mintPermid(ctx.pool, 'SCH'), personId, schema: schemaPayload('Live'), referenceId: primary.id });
   await insertAdditionalSchemaRef(ctx.pool, { schemaId: live.id, referenceId: add1.id, personId });
   await insertAdditionalSchemaRef(ctx.pool, { schemaId: live.id, referenceId: gone.id, personId });
-  const orphaned = await insertSchema(ctx.pool, { permid: newPermid(), personId, schema: schemaPayload('Orphaned'), referenceId: gone.id });
+  const orphaned = await insertSchema(ctx.pool, { permid: await mintPermid(ctx.pool, 'SCH'), personId, schema: schemaPayload('Orphaned'), referenceId: gone.id });
 
   const head = await schemasRepo().readHead(live.permid);
   assertSchemaContract(head);
@@ -404,8 +404,8 @@ test('schema head embeds primary and additional references; removed ones are sup
 test('edited reference is reflected on re-read; permid is stable (FK swing tracks head)', async (t) => {
   if (!ctx.available) return t.skip(ctx.reason);
 
-  const refPermid = newPermid();
-  const authorityPermid = newPermid();
+  const refPermid = await mintPermid(ctx.pool, 'REF');
+  const authorityPermid = await mintPermid(ctx.pool, 'AUT');
 
   const v1 = await insertRef(ctx.pool, { permid: refPermid, personId, reference: { title: 'v1' } });
   await insertAuthority(ctx.pool, { permid: authorityPermid, personId, referenceId: v1.id });
@@ -422,10 +422,10 @@ test('edited reference is reflected on re-read; permid is stable (FK swing track
 test('edited collection retains its additional references (join FK swung to new head)', async (t) => {
   if (!ctx.available) return t.skip(ctx.reason);
 
-  const addPermid = newPermid();
-  const collectionPermid = newPermid();
+  const addPermid = await mintPermid(ctx.pool, 'REF');
+  const collectionPermid = await mintPermid(ctx.pool, 'COL');
 
-  const primary = await insertRef(ctx.pool, { permid: newPermid(), personId, reference: { title: 'P' } });
+  const primary = await insertRef(ctx.pool, { permid: await mintPermid(ctx.pool, 'REF'), personId, reference: { title: 'P' } });
   const add = await insertRef(ctx.pool, { permid: addPermid, personId, reference: { title: 'A' } });
   const v1 = await insertCollection(ctx.pool, {
     permid: collectionPermid,
@@ -453,10 +453,10 @@ test('edited collection retains its additional references (join FK swung to new 
 test('removed primary reference resolves to null', async (t) => {
   if (!ctx.available) return t.skip(ctx.reason);
 
-  const authorityPermid = newPermid();
+  const authorityPermid = await mintPermid(ctx.pool, 'AUT');
 
   const ref = await insertRef(ctx.pool, {
-    permid: newPermid(),
+    permid: await mintPermid(ctx.pool, 'REF'),
     personId,
     reference: { title: 'Gone' },
     removed: true,
@@ -471,12 +471,12 @@ test('removed primary reference resolves to null', async (t) => {
 test('removed additional references are omitted from the array', async (t) => {
   if (!ctx.available) return t.skip(ctx.reason);
 
-  const livePermid = newPermid();
-  const collectionPermid = newPermid();
+  const livePermid = await mintPermid(ctx.pool, 'REF');
+  const collectionPermid = await mintPermid(ctx.pool, 'COL');
 
-  const primary = await insertRef(ctx.pool, { permid: newPermid(), personId, reference: { title: 'P' } });
+  const primary = await insertRef(ctx.pool, { permid: await mintPermid(ctx.pool, 'REF'), personId, reference: { title: 'P' } });
   const live = await insertRef(ctx.pool, { permid: livePermid, personId, reference: { title: 'Live' } });
-  const gone = await insertRef(ctx.pool, { permid: newPermid(), personId, reference: { title: 'Gone' }, removed: true });
+  const gone = await insertRef(ctx.pool, { permid: await mintPermid(ctx.pool, 'REF'), personId, reference: { title: 'Gone' }, removed: true });
   const col = await insertCollection(ctx.pool, {
     permid: collectionPermid,
     personId,
@@ -493,8 +493,8 @@ test('removed additional references are omitted from the array', async (t) => {
 test('a collection whose primary reference is removed reads it as null', async (t) => {
   if (!ctx.available) return t.skip(ctx.reason);
 
-  const collectionPermid = newPermid();
-  const gone = await insertRef(ctx.pool, { permid: newPermid(), personId, reference: { title: 'Gone' }, removed: true });
+  const collectionPermid = await mintPermid(ctx.pool, 'COL');
+  const gone = await insertRef(ctx.pool, { permid: await mintPermid(ctx.pool, 'REF'), personId, reference: { title: 'Gone' }, removed: true });
   const col = await insertCollection(ctx.pool, { permid: collectionPermid, personId, referenceId: gone.id });
   await insertAdditionalCollectionRef(ctx.pool, { collectionId: col.id, referenceId: gone.id, personId });
 
@@ -506,17 +506,17 @@ test('a collection whose primary reference is removed reads it as null', async (
 
 /**
  * Keyset pagination against real PostgreSQL. This matters beyond the unit tier
- * because `permid` is a UUID column: `permid > $1` and `ORDER BY permid` follow
- * PostgreSQL's uuid comparison, not the string comparison a JS fake uses, and
- * the parameter arrives as text to be cast. Paging has to agree with the
- * database's own ordering or pages silently skip or repeat rows.
+ * because the order is the generated `permid_no` column: `permid_no > $1` and
+ * `ORDER BY permid_no` run in the database, with the cursor's number bound as
+ * text to be cast. Paging has to agree with the database's own ordering or
+ * pages silently skip or repeat rows.
  */
 test('keyset pagination pages through real heads in the database\'s own order', async (t) => {
   if (!ctx.available) return t.skip(ctx.reason);
 
   const minted = [];
   for (let i = 0; i < 7; i += 1) {
-    const permid = newPermid();
+    const permid = await mintPermid(ctx.pool, 'REF');
     minted.push(permid);
     await insertRef(ctx.pool, { permid, personId, reference: { title: `Page ${i}` } });
   }
@@ -525,7 +525,7 @@ test('keyset pagination pages through real heads in the database\'s own order', 
   const { rows: ordered } = await ctx.pool.query(
     `SELECT permid FROM refs
      WHERE permid = ANY($1) AND succeeded_by_id IS NULL AND NOT COALESCE(removed, false)
-     ORDER BY permid`,
+     ORDER BY permid_no`,
     [minted],
   );
   const expected = ordered.map((r) => r.permid);
@@ -558,4 +558,32 @@ test('keyset pagination pages through real heads in the database\'s own order', 
     'the reverse keyset returns the preceding page, re-reversed to ascending',
   );
   assert.equal(back.hasMore, true, 'and reports that more lie behind it');
+});
+
+test('lists order by the number in the permid, not its text, and page through every record once', async (t) => {
+  if (!ctx.available) return t.skip(ctx.reason);
+
+  // Legacy-numbered permids whose text order differs from their numeric order
+  // (REF-100-… sorts before REF-99-… as text), inserted out of order.
+  const numbers = [100, 9, 1000, 99, 10, 101, 8];
+  const { rows: [{ permids }] } = await ctx.pool.query(
+    'SELECT register_permids($1, $2::bigint[]) AS permids', ['REF', numbers],
+  );
+  for (const permid of permids) await insertRef(ctx.pool, { permid, personId, reference: { title: permid } });
+  const byNumber = Object.fromEntries(numbers.map((n, i) => [n, permids[i]]));
+  const expected = [8, 9, 10, 99, 100, 101, 1000].map((n) => byNumber[n]);
+
+  const seen = [];
+  let cursor;
+  let hasMore = true;
+  while (hasMore) {
+    const page = await refsRepo().readHeads({ ids: permids, page: { limit: 2, cursor } });
+    seen.push(...page.records.map((r) => r.permid));
+    hasMore = page.hasMore;
+    cursor = { permid: page.records.at(-1).permid, direction: 'next' };
+    assert.ok(seen.length <= permids.length, 'paging terminates');
+  }
+
+  assert.deepEqual(seen, expected, 'numeric order, every record exactly once');
+  assert.ok(seen.indexOf(byNumber[99]) < seen.indexOf(byNumber[100]), 'REF-99-… before REF-100-…');
 });

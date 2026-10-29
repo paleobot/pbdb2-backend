@@ -1,5 +1,5 @@
 import { mariadb, pg, closeAll } from '../lib/db.js';
-import { uuidv7 } from '../lib/uuidv7.js';
+import { registerPermids } from '../lib/permids.js';
 import { normalizeName, loadAdmin0, resolveCountry } from '../lib/country.js';
 import { collectionSource } from '../../../payloadSchemas/collection.schema.js';
 import { resolveEnums } from '../../../payloadSchemas/lib/enums.js';
@@ -446,7 +446,6 @@ async function main() {
       if (toponym.administrativeArea) insertedLand++; else insertedMaritime++;
 
       staged.push({
-        permid: uuidv7(),
         authorizerPersonId: authNo,
         entererPersonId: entNo,
         collectionJson: JSON.stringify(payload),
@@ -495,6 +494,9 @@ async function main() {
       const rowsSql = [];
       const params = [];
       let p = 1;
+      // COL-<collection_no>-<CC>, registered in this transaction.
+      const permids = await registerPermids(client, 'COL', batch.map((s) => Number(s.collection_no)));
+      batch.forEach((s, k) => { s.permid = permids[k]; });
       for (const s of batch) {
         const geoSql = s.geo
           ? `ST_Transform(ST_SetSRID(ST_MakePoint($${p + 4}, $${p + 5}), $${p + 6}), 4326)::geography`

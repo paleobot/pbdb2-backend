@@ -6,7 +6,7 @@ import { DEFAULT_LIMIT, MAX_LIMIT } from '../src/lib/list-filters.js';
 import { encodeCursor } from '../src/lib/cursor.js';
 
 /**
- * Keyset pagination over `permid`, driven with NO database: the fake pg applies
+ * Keyset pagination over the number in `permid` (`permid_no`), driven with NO database: the fake pg applies
  * the predicates the generated SQL actually declares, so paging is exercised
  * end-to-end (seam → repository → links) in-process.
  *
@@ -16,7 +16,7 @@ import { encodeCursor } from '../src/lib/cursor.js';
  * that fails to match, and neither shows up in a single-page assertion.
  */
 const REFS = Array.from({ length: 12 }, (_, i) => ({
-  permid: `ref-${String(i + 1).padStart(2, '0')}`,
+  permid: `REF-${(i + 1) * 10}-00`,
   payload: { title: `Reference ${i + 1}`, publicationType: i % 2 === 0 ? 'standalone book' : 'journal article' },
 }));
 
@@ -33,7 +33,7 @@ function fakeKeysetPg(rows = REFS) {
     query: async (text, values) => {
       calls.push({ text, values });
 
-      let out = [...rows].sort((a, b) => a.permid.localeCompare(b.permid));
+      let out = [...rows].sort((a, b) => no(a.permid) - no(b.permid));
 
       const idsParam = text.match(/permid = ANY\(\$(\d)\)/);
       if (idsParam) {
@@ -47,13 +47,13 @@ function fakeKeysetPg(rows = REFS) {
         out = out.filter((r) => r.payload.publicationType === wanted);
       }
 
-      const keyset = text.match(/permid ([<>]) \$(\d)/);
+      const keyset = text.match(/permid_no ([<>]) \$(\d)/);
       if (keyset) {
-        const boundary = values[Number(keyset[2]) - 1];
-        out = out.filter((r) => (keyset[1] === '>' ? r.permid > boundary : r.permid < boundary));
+        const boundary = Number(values[Number(keyset[2]) - 1]);
+        out = out.filter((r) => (keyset[1] === '>' ? no(r.permid) > boundary : no(r.permid) < boundary));
       }
 
-      if (/ORDER BY permid DESC/.test(text)) out.reverse();
+      if (/ORDER BY permid_no DESC/.test(text)) out.reverse();
 
       const limit = text.match(/LIMIT \$(\d)/);
       if (limit) out = out.slice(0, values[Number(limit[1]) - 1]);
@@ -64,10 +64,12 @@ function fakeKeysetPg(rows = REFS) {
 }
 
 const permids = (body) => body.data.map((d) => d.permid);
+// The number inside a permid, which lists order and seek on (the row's permid_no).
+const no = (permid) => Number(permid.split('-')[1]);
 
 test('first page: bounded by the default limit, ordered by permid, no prev link', async (t) => {
   const many = Array.from({ length: DEFAULT_LIMIT + 5 }, (_, i) => ({
-    permid: `ref-${String(i + 1).padStart(4, '0')}`,
+    permid: `REF-${i + 1}-00`,
     payload: { title: `R${i}` },
   }));
   const app = build({ pg: fakeKeysetPg(many) });
@@ -75,7 +77,7 @@ test('first page: bounded by the default limit, ordered by permid, no prev link'
 
   const body = (await app.inject({ method: 'GET', url: '/api/v1/references' })).json();
   assert.equal(body.data.length, DEFAULT_LIMIT, 'a bare list is bounded by the default');
-  assert.deepEqual(permids(body), [...permids(body)].sort(), 'ordered by permid');
+  assert.deepEqual(permids(body), [...permids(body)].sort((a, b) => no(a) - no(b)), 'ordered by permid number');
   assert.equal(body.links.prev, null, 'the first page has no prev');
   assert.ok(body.links.next, 'a further page is offered');
   // Counts describe the page, not the full result set.
@@ -115,9 +117,9 @@ test('forward paging walks every head exactly once, in order, then stops', async
   }
 
   assert.deepEqual(pages, [
-    ['ref-01', 'ref-02', 'ref-03', 'ref-04', 'ref-05'],
-    ['ref-06', 'ref-07', 'ref-08', 'ref-09', 'ref-10'],
-    ['ref-11', 'ref-12'],
+    ['REF-10-00', 'REF-20-00', 'REF-30-00', 'REF-40-00', 'REF-50-00'],
+    ['REF-60-00', 'REF-70-00', 'REF-80-00', 'REF-90-00', 'REF-100-00'],
+    ['REF-110-00', 'REF-120-00'],
   ]);
   assert.deepEqual(seen, REFS.map((r) => r.permid), 'every head exactly once, in permid order');
   assert.equal(new Set(seen).size, seen.length, 'no repeats');
@@ -165,7 +167,7 @@ test('a backward page still offers the page it reversed out of', async (t) => {
   // Walk forward to the middle page, then step back one.
   const first = (await app.inject({ method: 'GET', url: '/api/v1/references?limit=4' })).json();
   const middle = (await app.inject({ method: 'GET', url: first.links.next })).json();
-  assert.deepEqual(permids(middle), ['ref-05', 'ref-06', 'ref-07', 'ref-08']);
+  assert.deepEqual(permids(middle), ['REF-50-00', 'REF-60-00', 'REF-70-00', 'REF-80-00']);
 
   const back = (await app.inject({ method: 'GET', url: middle.links.prev })).json();
   assert.deepEqual(permids(back), permids(first), 'stepping back lands on the first page');
@@ -185,21 +187,21 @@ test('the keyset SQL binds the right comparison, order and limit per direction',
 
   await app.inject({ method: 'GET', url: '/api/v1/references?limit=3' });
   const first = pg.calls.at(-1);
-  assert.match(first.text, /ORDER BY permid ASC LIMIT \$1/);
+  assert.match(first.text, /ORDER BY permid_no ASC LIMIT \$1/);
   assert.deepEqual(first.values, [4], 'limit + 1, to detect a further page without a second query');
-  assert.doesNotMatch(first.text, /permid [<>] \$/, 'no keyset predicate without a cursor');
+  assert.doesNotMatch(first.text, /permid_no [<>] \$/, 'no keyset predicate without a cursor');
 
-  const forward = encodeCursor({ permid: 'ref-03', direction: 'next' });
+  const forward = encodeCursor({ permid: 'REF-30-00', direction: 'next' });
   await app.inject({ method: 'GET', url: `/api/v1/references?limit=3&cursor=${forward}` });
   const next = pg.calls.at(-1);
-  assert.match(next.text, /permid > \$1 ORDER BY permid ASC LIMIT \$2/);
-  assert.deepEqual(next.values, ['ref-03', 4]);
+  assert.match(next.text, /permid_no > \$1 ORDER BY permid_no ASC LIMIT \$2/);
+  assert.deepEqual(next.values, ['30', 4], 'the cursor permid binds as its number');
 
-  const backward = encodeCursor({ permid: 'ref-09', direction: 'prev' });
+  const backward = encodeCursor({ permid: 'REF-90-00', direction: 'prev' });
   await app.inject({ method: 'GET', url: `/api/v1/references?limit=3&cursor=${backward}` });
   const prev = pg.calls.at(-1);
-  assert.match(prev.text, /permid < \$1 ORDER BY permid DESC LIMIT \$2/);
-  assert.deepEqual(prev.values, ['ref-09', 4]);
+  assert.match(prev.text, /permid_no < \$1 ORDER BY permid_no DESC LIMIT \$2/);
+  assert.deepEqual(prev.values, ['90', 4]);
 });
 
 test('pagination composes with a field filter, and next preserves it', async (t) => {
@@ -209,7 +211,7 @@ test('pagination composes with a field filter, and next preserves it', async (t)
   const body = (
     await app.inject({ method: 'GET', url: '/api/v1/references?publicationType=standalone%20book&limit=3' })
   ).json();
-  assert.deepEqual(permids(body), ['ref-01', 'ref-03', 'ref-05'], 'only matching heads');
+  assert.deepEqual(permids(body), ['REF-10-00', 'REF-30-00', 'REF-50-00'], 'only matching heads');
   // URLSearchParams writes the space as '+'; the loop below follows it, so the
   // server must read it back as 'standalone book'.
   assert.match(body.links.next, /publicationType=standalone\+book/, 'the filter survives into next');
@@ -240,6 +242,13 @@ test('malformed limit and cursor are rejected with 400', async (t) => {
   assert.equal(res.statusCode, 400);
   assert.match(res.json().error.message, /cursor/);
 
+  // A well-encoded cursor whose permid is not a permid: its number can't be read.
+  for (const permid of ['ref-03', 'REF-030-00', 'REF--00', 'REF-30']) {
+    const forged = encodeCursor({ permid, direction: 'next' });
+    const bad = await app.inject({ method: 'GET', url: `/api/v1/references?cursor=${forged}` });
+    assert.equal(bad.statusCode, 400, `cursor permid ${permid} must be rejected`);
+  }
+
   // The boundary value itself is accepted.
   const ok = await app.inject({ method: 'GET', url: `/api/v1/references?limit=${MAX_LIMIT}` });
   assert.equal(ok.statusCode, 200);
@@ -249,8 +258,8 @@ test('ids combined with limit or cursor is rejected with 400', async (t) => {
   const app = build({ pg: fakeKeysetPg() });
   t.after(() => app.close());
 
-  const cursor = encodeCursor({ permid: 'ref-01', direction: 'next' });
-  for (const query of [`ids=ref-01,ref-02&limit=10`, `ids=ref-01,ref-02&cursor=${cursor}`]) {
+  const cursor = encodeCursor({ permid: 'REF-10-00', direction: 'next' });
+  for (const query of [`ids=REF-10-00,REF-20-00&limit=10`, `ids=REF-10-00,REF-20-00&cursor=${cursor}`]) {
     const res = await app.inject({ method: 'GET', url: `/api/v1/references?${query}` });
     assert.equal(res.statusCode, 400, `${query} must be rejected`);
     assert.match(res.json().error.message, /ids/);
@@ -262,9 +271,9 @@ test('an ids read keeps its accounting and carries null pagination links', async
   t.after(() => app.close());
 
   const body = (
-    await app.inject({ method: 'GET', url: '/api/v1/references?ids=ref-01,ref-02,nope' })
+    await app.inject({ method: 'GET', url: '/api/v1/references?ids=REF-10-00,REF-20-00,nope' })
   ).json();
-  assert.deepEqual(permids(body), ['ref-01', 'ref-02']);
+  assert.deepEqual(permids(body), ['REF-10-00', 'REF-20-00']);
   assert.equal(body.meta.requested, 3);
   assert.deepEqual(body.meta.missing, ['nope']);
   assert.equal(body.links.next, null);
@@ -290,11 +299,11 @@ test('a row inserted between pages skips or repeats nothing that was already the
   t.after(() => app.close());
 
   const first = (await app.inject({ method: 'GET', url: '/api/v1/references?limit=3' })).json();
-  assert.deepEqual(permids(first), ['ref-01', 'ref-02', 'ref-03']);
+  assert.deepEqual(permids(first), ['REF-10-00', 'REF-20-00', 'REF-30-00']);
 
   // Two inserts land between the requests: one behind the cursor, one ahead.
-  rows.push({ permid: 'ref-02a', payload: { title: 'inserted behind' } });
-  rows.push({ permid: 'ref-07', payload: { title: 'inserted ahead' } });
+  rows.push({ permid: 'REF-25-00', payload: { title: 'inserted behind' } });
+  rows.push({ permid: 'REF-70-00', payload: { title: 'inserted ahead' } });
 
   const seen = [...permids(first)];
   let url = first.links.next;
@@ -310,6 +319,6 @@ test('a row inserted between pages skips or repeats nothing that was already the
   }
   // The keyset names a position, so only the insert ahead of it can appear;
   // the one behind is simply not part of any later page.
-  assert.ok(seen.includes('ref-07'));
-  assert.ok(!seen.includes('ref-02a'));
+  assert.ok(seen.includes('REF-70-00'));
+  assert.ok(!seen.includes('REF-25-00'));
 });

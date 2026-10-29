@@ -102,70 +102,24 @@ export async function setupTestDb() {
   return { available: true, pool, dbName, teardown };
 }
 
-// Monotonic-counter state for newPermid(). The counter occupies the 12 bits of
-// rand_a (byte 6's low nibble plus byte 7), so it holds 4096 mints per ms.
-let lastMs = 0n;
-let seq = 0;
-const MAX_SEQ = 0xfff;
-
 /**
- * Mint a UUIDv7 for use as a `permid`.
+ * Mint `n` permids under `prefix` (`REF`, `PRS`, `COL`, …) through the database's
+ * own `mint_permids()`. That function is the only implementation of the permid
+ * format (openspec/specs/prefixed-permids): it takes numbers from the prefix's
+ * sequence, registers them in `permids` (which every permid column references),
+ * and returns them in increasing numeric order, so fixtures minted in turn list
+ * in mint order.
  *
- * Every versioned table declares
- * `permid uuid NOT NULL CHECK ((get_byte(uuid_send(permid), 6) >> 4) = 7)` —
- * the high nibble of byte 6 is the UUID version, so the column accepts v7 and
- * nothing else. `crypto.randomUUID()` emits v4 and is rejected, and there is no
- * `uuidv7()` to call in the database either: it arrives in PostgreSQL 18 and
- * the backend DDL defines no helper of its own. The schema's own comment on the
- * taxa/opinions tables settles the question — permids are "APP-MINTED uuidv7" —
- * so minting is the application's job, and the fixtures do it here.
- *
- * Layout per RFC 9562: 48-bit big-endian Unix timestamp in milliseconds, then
- * the version nibble, then random bits with the variant nibble pinned.
- *
- * Values are strictly increasing, including within a single millisecond, so
- * `ORDER BY permid` over minted fixtures is insertion order. That keeps any
- * assertion about permid ordering deterministic rather than dependent on which
- * random tail happened to sort first.
+ * @returns {Promise<string[]>}
  */
-export function newPermid() {
-  const bytes = randomBytes(16);
+export async function mintPermids(pool, prefix, n) {
+  const { rows } = await pool.query('SELECT mint_permids($1, $2) AS permids', [prefix, n]);
+  return rows[0].permids;
+}
 
-  const now = BigInt(Date.now());
-  if (now > lastMs) {
-    lastMs = now;
-    seq = 0;
-  } else if (seq < MAX_SEQ) {
-    // Same millisecond (or a clock that went backwards): keep advancing the
-    // counter so successive permids still sort in mint order.
-    seq += 1;
-  } else {
-    // Counter exhausted for this millisecond. Borrow from the next one rather
-    // than let the counter wrap and silently break monotonicity.
-    lastMs += 1n;
-    seq = 0;
-  }
-  const ms = lastMs;
-
-  for (let i = 5; i >= 0; i -= 1) {
-    bytes[i] = Number((ms >> BigInt(8 * (5 - i))) & 0xffn);
-  }
-
-  // Byte 6 high nibble = version 7; its low nibble plus byte 7 carry the
-  // monotonic counter, so intra-millisecond mints stay ordered.
-  bytes[6] = 0x70 | ((seq >> 8) & 0x0f);
-  bytes[7] = seq & 0xff;
-  // Byte 8 high bits = variant 0b10.
-  bytes[8] = (bytes[8] & 0x3f) | 0x80;
-
-  const hex = bytes.toString('hex');
-  return [
-    hex.slice(0, 8),
-    hex.slice(8, 12),
-    hex.slice(12, 16),
-    hex.slice(16, 20),
-    hex.slice(20),
-  ].join('-');
+/** Mint one permid; see `mintPermids`. */
+export async function mintPermid(pool, prefix) {
+  return (await mintPermids(pool, prefix, 1))[0];
 }
 
 /**
@@ -183,7 +137,7 @@ export async function seedPerson(pool) {
              '{"name":"Seed Admin"}'::jsonb, 1)
      ON CONFLICT (id) DO NOTHING
      RETURNING id`,
-    [newPermid()],
+    [await mintPermid(pool, 'PRS')],
   );
   return rows.length ? rows[0].id : 1;
 }
@@ -307,8 +261,8 @@ export async function insertAdditionalSchemaRef(pool, { schemaId, referenceId, p
  * joins, and the ltree round-trip. A direct insert exercises all of that while
  * keeping the fixture tree small enough to assert against exactly.
  *
- * `classification_path` is built from concept permids, root-first, with hyphens
- * replaced by underscores (ltree labels cannot contain `-`). Note it ends at the
+ * `classification_path` is built from concept permids, root-first, each label the
+ * permid as stored (ltree labels allow `-`). Note it ends at the
  * row's own CONCEPT, which for a synonym is a different row's permid — that
  * asymmetry is the whole point of the decoder.
  *
@@ -326,7 +280,7 @@ export async function insertTaxon(
   pool,
   { permid, name, rank, conceptPath, conceptPermid, containing, authorityId, nomenclaturalStatus },
 ) {
-  const ltree = conceptPath.map((p) => p.replaceAll('-', '_')).join('.');
+  const ltree = conceptPath.join('.');
   const concept = conceptPermid ?? permid;
 
   const { rows } = await pool.query(

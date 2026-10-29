@@ -1,5 +1,5 @@
 import { mariadb, pg, closeAll } from '../lib/db.js';
-import { uuidv7 } from '../lib/uuidv7.js';
+import { registerPermids } from '../lib/permids.js';
 import { authoritySource } from '../../../payloadSchemas/authority.schema.js';
 import { resolveEnums } from '../../../payloadSchemas/lib/enums.js';
 import { deriveVariant } from '../../../payloadSchemas/lib/variants.js';
@@ -240,10 +240,16 @@ async function main() {
       const values = [];
       const params = [];
       let pIdx = 1;
-      for (const s of batch) {
+      // AUT-<taxon_no>-<CC>, the survivor's taxon_no: source rows are read in
+      // taxon_no order, so oldpbdbIDs[0] is the lowest number the row absorbed.
+      // The others stay in oldpbdbIDs and are not permids.
+      const permids = await registerPermids(
+        pgClient, 'AUT', batch.map((s) => Number(s.payload.legacyIDs.oldpbdbIDs[0])),
+      );
+      for (const [k, s] of batch.entries()) {
         values.push(`($${pIdx}, $${pIdx+1}, $${pIdx+2}, $${pIdx+3}, $${pIdx+4})`);
         params.push(
-          uuidv7(),
+          permids[k],
           s.authorizerPersonId,
           s.entererPersonId,
           JSON.stringify(s.payload),

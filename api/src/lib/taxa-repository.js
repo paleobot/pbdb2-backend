@@ -35,7 +35,7 @@ import { linkProjections } from './repository.js';
 import { descriptorFor } from './resource-tables.js';
 import { ancestorPermids } from './classification-path.js';
 import { DEFAULT_LIMIT } from './list-filters.js';
-import { BACKWARD } from './cursor.js';
+import { BACKWARD, permidNumber } from './cursor.js';
 
 /** Outer-row alias. Link sub-selects use `r`, so the two never collide. */
 const SELF = 't';
@@ -192,11 +192,12 @@ export function makeTaxaRepository({ pg }) {
     },
 
     /**
-     * One page of taxa, ordered by `permid` — the same keyset contract every
-     * other list read follows, so `pageLinks` and the shared list handler work
-     * unchanged. Ordering by `permid` on a derived table is arbitrary (it is
-     * UUIDv7, i.e. rebuild insertion order); a name-ordered compound cursor is
-     * the recorded follow-up, kept open by the cursor token being opaque.
+     * One page of taxa, ordered by the number in `permid` (`permid_no`) — the
+     * same keyset contract every other list read follows, so `pageLinks` and the
+     * shared list handler work unchanged. A taxon's permid is its name's NOP
+     * permid, so migrated taxa list in Classic `taxon_no` order; a name-ordered
+     * compound cursor is the recorded follow-up, kept open by the cursor token
+     * being opaque.
      *
      * `fields` is accepted and ignored: taxa declares no filters, and the seam
      * rejects undeclared parameters before they reach here.
@@ -218,14 +219,14 @@ export function makeTaxaRepository({ pg }) {
       const backward = cursor?.direction === BACKWARD;
 
       if (cursor) {
-        values.push(cursor.permid);
-        predicates.push(`t.permid ${backward ? '<' : '>'} $${values.length}`);
+        values.push(permidNumber(cursor.permid));
+        predicates.push(`t.permid_no ${backward ? '<' : '>'} $${values.length}`);
       }
 
       values.push(limit + 1);
       const where = predicates.length ? ` WHERE ${predicates.join(' AND ')}` : '';
       const { rows } = await pg.query(
-        `${select}${where} ORDER BY t.permid ${backward ? 'DESC' : 'ASC'}` +
+        `${select}${where} ORDER BY t.permid_no ${backward ? 'DESC' : 'ASC'}` +
           ` LIMIT $${values.length}`,
         values,
       );

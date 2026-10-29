@@ -520,7 +520,7 @@ Nothing deploys from these repos yet, so nothing needs re-pointing.
 
 ## Human-facing identifiers
 
-**Open; permids stay UUIDv7 until decided. Leaning B with sequences (2026-10-22, see below).** Some advisory committee members have proposed
+**Decided 2026-10-27: B with sequences, carried out by the OpenSpec change `adopt-prefixed-sequence-permids` (spec `prefixed-permids`); see "Decided (2026-10-27)" below.** Some advisory committee members have proposed
 replacing UUID permids with integers. The underlying need is probably an identifier people can cite,
 say and type ("PBDB col. 12345"). Two ways to meet it are on the table: a short *handle* beside the
 UUID permid (A), or a prefixed short code that replaces the UUID as the permid (B). The case
@@ -661,7 +661,7 @@ sequence that starts above the legacy maximum cannot collide. They also bring ba
 writing on its own, offline clients, bulk importers), choose A instead. Those systems can mint a
 UUID and get a handle when the record arrives. Under B they would have to call `mint_permid()`.
 
-**Format: `<PREFIX>-<number>-<CC>`**, for example `COL-12345-47`.
+**Format: `<PREFIX>-<number>-<CC>`**, for example `COL-12345-70`.
 - `<number>` is decimal with no padding.
 - `<CC>` is two check digits, ISO 7064 MOD 97-10 (as in IBAN), computed over the whole
   uppercased ID with the hyphens removed. Letters become digits as A=10 … Z=35. Including the prefix
@@ -678,7 +678,7 @@ lists order by that column:
 ```sql
 permid    text NOT NULL,
 permid_no bigint GENERATED ALWAYS AS (split_part(permid, '-', 2)::bigint) STORED
--- versioned tables: UNIQUE index on (permid_no) WHERE succeeded_by_id IS NULL
+-- versioned tables: one head per permid_no (built as a deferred EXCLUDE; see Decided)
 ```
 
 Within one table every permid has the same prefix, and the check digits depend only on the
@@ -714,7 +714,7 @@ The registry drops B's `entity_type` column (leaning 2026-10-26) and keeps only
 to, and a second copy of that could disagree with it. What `entity_type` would have done goes
 elsewhere:
 - **Type-checking references.** Each permid column gets a CHECK on its own prefix, next to the
-  format and check-digit check: for example `CHECK (subject_permid LIKE 'NAM-%')`. An FK to
+  format and check-digit check: for example `CHECK (permid_is_valid(subject_permid, 'NOP'))`. An FK to
   `permids(permid)` only proves the permid exists. Proving its type through the registry would take
   a composite FK `(permid, entity_type)` plus a constant column on every referencing table.
 - **Known prefixes only.** `mint_permid(prefix)` refuses a prefix it doesn't know. If something
@@ -745,9 +745,8 @@ for ordering (see Storage and ordering).
 - **Start each one at a fixed floor well above the Classic maximum**, not at max + 1. If Classic
   keeps taking writes after the dump, its new records would otherwise land on numbers pbdb2 has
   already issued.
-- The runner sets every sequence before it mints any row without a Classic number. Otherwise PBot
-  persons, sentinels and the like could take a number a later legacy insert needs. The floors are
-  fixed, so this is a setup step, not something read from MariaDB.
+- ~~The runner sets every sequence before it mints any row without a Classic number.~~ Superseded:
+  each sequence is created with its start in the DDL, so no runner step is needed (see Decided).
 - Legacy-numbered permids are deterministic across rebuilds. Sequence-numbered ones are
   deterministic as long as the run order is.
 
@@ -758,6 +757,31 @@ published or cited.
 including azlibrary's trigger-minted `<group>-<epoch ms>-<1..1000>` IDs, rejected because `now()` is
 fixed per transaction (a collision is a coin flip at ~38 rows in one transaction), nothing retries, and the time part makes
 the ID long without making it readable. The 2026-10-22 leaning came from a later explore session that assumed sequences, Classic numbers and a check digit.
+
+### Decided (2026-10-27)
+
+The leaning above was adopted, with these decisions the backlog didn't have. The full record is
+`openspec/changes/adopt-prefixed-sequence-permids/design.md` (archived with the change) and the spec
+`prefixed-permids`.
+
+- **Prefixes.** Classic data-service prefixes where the record type is the same, upper-cased:
+  `REF` refs, `PRS` persons, `COL` collections, `SPM` specimens, `INT` intervals, `TSC` timescales.
+  New ones: `AUT` authorities, `NOP` name_opinions, `AOP` assignment_opinions, `VOP`
+  validity_opinions, `TAN` taxon_annotations, `SCH` schemas, `CHR` characters, `STA` states.
+  `TXL` and `TXC` are reserved and never minted. Names have no prefix of their own: a taxon is cited
+  by its root name opinion's `NOP` permid, whose number is the Classic `taxon_no`.
+- **One floor, 1,000,000, for every sequence**, above the largest Classic number that becomes a
+  permid (`taxon_no` 526,272). Legacy numbers at or above it are refused.
+- **No runner step.** Each sequence is created with `START WITH 1000000` in the DDL.
+- **Check digits only in SQL.** `register_permids(prefix, bigint[])` and `mint_permids(prefix, n)`
+  in `db/02-core.sql` format, register and return permids in batches; nothing in JavaScript computes
+  them. The API never needs to: cursors seek on `permid_no` and lookups go by the text.
+- **One head per number is a deferred `EXCLUDE (permid_no WITH =) WHERE (succeeded_by_id IS NULL)`**,
+  not a partial unique index. A unique index is checked row by row, and a new version is inserted
+  as a head while `handle_new_version()` closes the old head only in its AFTER trigger, so the index
+  would reject every new version. The deferred constraint is checked at commit.
+- **ltree labels are the permids as stored** (PostgreSQL 16+ allows `-`), with no `_` swap.
+- `homonyms.homonym_group_id` stays an internal UUIDv7.
 
 ## Collection reference model
 

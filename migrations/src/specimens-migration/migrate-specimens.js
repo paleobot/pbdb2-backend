@@ -20,7 +20,7 @@
 //    one-sided check still produces plausible output for most rows, which is what
 //    makes it dangerous.
 import { mariadb, pg, closeAll } from '../lib/db.js';
-import { uuidv7 } from '../lib/uuidv7.js';
+import { registerPermids } from '../lib/permids.js';
 import { resolvePersons, loadReferenceIdMap, loadNamePermidMap } from '../lib/identity.js';
 import { createAnomalyLog } from '../lib/anomaly-log.js';
 import { specimenSource } from '../../../payloadSchemas/specimen.schema.js';
@@ -250,7 +250,6 @@ async function main() {
 
       staged.push({
         specimen_no: src.specimen_no,
-        permid: uuidv7(),
         authorizerPersonId,
         entererPersonId,
         specimenJson: JSON.stringify(specimen),
@@ -276,9 +275,11 @@ async function main() {
       const rowsSql = [];
       const params = [];
       let p = 1;
-      for (const s of batch) {
+      // SPM-<specimen_no>-<CC>, registered in this transaction.
+      const permids = await registerPermids(client, 'SPM', batch.map((s) => Number(s.specimen_no)));
+      for (const [k, s] of batch.entries()) {
         rowsSql.push(`($${p}, $${p + 1}, $${p + 2}, $${p + 3}, $${p + 4}, $${p + 5}, $${p + 6}, $${p + 7})`);
-        params.push(s.permid, s.authorizerPersonId, s.entererPersonId, s.specimenJson,
+        params.push(permids[k], s.authorizerPersonId, s.entererPersonId, s.specimenJson,
           s.name_opinions_permid, s.oldpbdb_occurrence_no, s.collection_id, s.reference_id);
         p += 8;
       }

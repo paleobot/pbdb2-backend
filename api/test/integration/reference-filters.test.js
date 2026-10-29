@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 
 import { build } from '../../src/app.js';
 import { assertPublished } from '../published.js';
-import { setupTestDb, seedPerson, newPermid, insertRef } from './helpers.js';
+import { setupTestDb, seedPerson, mintPermid, insertRef } from './helpers.js';
 
 /**
  * The shared-field filters on `references` (doi, title, authors, firstAuthor,
@@ -41,10 +41,10 @@ before(async () => {
   if (!ctx.available) return;
   const personId = await seedPerson(ctx.pool);
   for (const [name, reference] of Object.entries(FIXTURES)) {
-    refs[name] = await insertRef(ctx.pool, { permid: newPermid(), personId, reference });
+    refs[name] = await insertRef(ctx.pool, { permid: await mintPermid(ctx.pool, 'REF'), personId, reference });
   }
   // A superseded version carries a DOI its head does not: only heads are filtered.
-  const lineage = newPermid();
+  const lineage = await mintPermid(ctx.pool, 'REF');
   await insertRef(ctx.pool, { permid: lineage, personId, reference: ja({ title: 'old', doi: '10.9999/gone' }) });
   refs.superseded = await insertRef(ctx.pool, { permid: lineage, personId, reference: ja({ title: 'new' }) });
   app = build({ pg: ctx.pool });

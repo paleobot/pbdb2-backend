@@ -1,5 +1,5 @@
 import { mariadb, pg, closeAll } from '../lib/db.js';
-import { uuidv7 } from '../lib/uuidv7.js';
+import { registerPermids } from '../lib/permids.js';
 import { createAjv } from '../../../payloadSchemas/lib/ajv.js';
 import { opinionAttributionSchema } from '../../../payloadSchemas/opinionAttribution.schema.js';
 
@@ -162,13 +162,12 @@ async function main() {
       }
 
       // ---- 2.7 Accumulate root name_opinion ----
-      const permid = uuidv7();
+      // Its permid, NOP-<taxon_no>-<CC> from this source row's own taxon_no, is
+      // registered at insert (3.1) and is both permid and subject_permid.
       nameOpinions.push({
-        permid,
         authorizerPersonId: authNo,
         entererPersonId: entNo,
         oldpbdbTaxonNo: src.taxon_no,
-        subjectPermid: permid,       // root: subject is itself
         reasonId: originalReasonId,
         rankId,
         authorityId: authEntry.authority_id,
@@ -214,14 +213,15 @@ async function main() {
       const values = [];
       const params = [];
       let p = 1;
-      for (const r of batch) {
+      const permids = await registerPermids(pgClient, 'NOP', batch.map((r) => r.oldpbdbTaxonNo));
+      for (const [k, r] of batch.entries()) {
         values.push(`($${p},$${p+1},$${p+2},$${p+3},$${p+4},$${p+5},$${p+6},$${p+7},$${p+8},$${p+9},$${p+10},$${p+11},$${p+12},$${p+13},$${p+14},$${p+15},$${p+16})`);
         params.push(
-          r.permid,               // permid
+          permids[k],             // permid
           r.authorizerPersonId,   // authorizer_person_id
           r.entererPersonId,      // enterer_person_id
           r.oldpbdbTaxonNo,       // oldpbdb_taxon_no
-          r.subjectPermid,        // subject_permid
+          permids[k],             // subject_permid (root: subject is itself)
           null,                   // target_permid (root)
           r.reasonId,             // reason_id
           'root',                 // edge_class

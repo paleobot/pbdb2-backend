@@ -14,10 +14,10 @@ import { assertPublished, assertEnvelope } from './published.js';
 
 // One depth-3 taxon with a real-shaped ltree path. The last element is its own
 // concept, which must never appear in its own chain.
-const OWN_CONCEPT = '01a08827-5ef9-71e5-a761-ba1298b75732';
-const PARENT = '01a08827-5db4-7561-ba19-a10fe5dbdcc1';
-const GRANDPARENT = '01a08827-6c18-70bb-a61b-537882be2fd1';
-const PATH = [GRANDPARENT, PARENT, OWN_CONCEPT].map((p) => p.replaceAll('-', '_')).join('.');
+const OWN_CONCEPT = 'NOP-69296-63';
+const PARENT = 'NOP-52941-46';
+const GRANDPARENT = 'NOP-28595-43';
+const PATH = [GRANDPARENT, PARENT, OWN_CONCEPT].join('.');
 
 const TAXON = {
   permid: OWN_CONCEPT,
@@ -25,7 +25,7 @@ const TAXON = {
   rank: 'species',
   nomenclaturalStatus: null,
   classification_path: PATH,
-  authority: { citation: 'Brongniart 1822', permid: 'aut-1' },
+  authority: { citation: 'Brongniart 1822', permid: 'AUT-1-33' },
   accepted: { name: 'Calymene blumenbachii', permid: OWN_CONCEPT },
 };
 
@@ -61,7 +61,7 @@ test('descriptor links and the chain start with the configured base', async (t) 
   t.after(() => app.close());
 
   const { data } = (await app.inject({ method: 'GET', url: `/api/v1/taxa/${OWN_CONCEPT}` })).json();
-  assert.equal(data.authority.href, `${base}/api/v1/authorities/aut-1`);
+  assert.equal(data.authority.href, `${base}/api/v1/authorities/AUT-1-33`);
   assert.equal(data.accepted.href, `${base}/api/v1/taxa/${OWN_CONCEPT}`);
   assert.equal(data.containingTaxa.href, `${base}/api/v1/taxa/${PARENT}`);
   assert.equal(data.containingTaxa.containingTaxa.href, `${base}/api/v1/taxa/${GRANDPARENT}`);
@@ -84,7 +84,7 @@ test('taxa single read returns the representation with a nested chain', async (t
   assert.equal(data.nomenclaturalStatus, null);
 
   // Links carry their own group's href; the chain points back into taxa.
-  assert.equal(data.authority.href, `${BASE}/api/v1/authorities/aut-1`);
+  assert.equal(data.authority.href, `${BASE}/api/v1/authorities/AUT-1-33`);
   assert.equal(data.accepted.href, `${BASE}/api/v1/taxa/${OWN_CONCEPT}`);
 
   // Outermost chain entry is the IMMEDIATE container, nesting root-ward.
@@ -264,7 +264,7 @@ test('a root taxon has a null chain', async (t) => {
 test('taxa lists are paginated on the same terms as every other group', async (t) => {
   const many = Array.from({ length: 3 }, (_, i) => ({
     ...TAXON,
-    permid: `txn-${i}`,
+    permid: `NOP-${i + 1}-00`,
     classification_path: PATH,
   }));
   const app = build({ pg: fakeTaxaPg({ taxa: many }) });

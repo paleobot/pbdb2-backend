@@ -24,28 +24,15 @@
  * its own iteration guard; this one needs none, because the path is a stored
  * value of fixed length, not a traversal.
  *
- * TWO TRAPS, both measured and both handled here:
- *
- *   1. ltree labels cannot contain `-`, so each element is a permid with its
- *      hyphens replaced by underscores. The round-trip is lossless because a
- *      UUID contains no underscores of its own.
- *   2. The last element is the row's own CONCEPT permid, not the row's permid,
- *      and the two differ for 30.7% of rows. It is never an ancestor, so it is
- *      always dropped.
+ * Each element is a concept permid exactly as stored (`NOP-526272-68`;
+ * PostgreSQL 16+ allows `-` in ltree labels), so no decoding is needed. ONE
+ * TRAP, measured and handled here: the last element is the row's own CONCEPT
+ * permid, not the row's permid, and the two differ for 30.7% of rows. It is
+ * never an ancestor, so it is always dropped.
  */
 
 /** Separator between ltree path elements. */
 const SEPARATOR = '.';
-
-/**
- * Decode one ltree label back into a permid.
- *
- * @param {string} label
- * @returns {string} the permid in its canonical hyphenated form
- */
-function labelToPermid(label) {
-  return label.replaceAll('_', '-');
-}
 
 /**
  * Decode a stored `classification_path` into the taxon's ancestor concept
@@ -68,7 +55,7 @@ export function ancestorPermids(path) {
     .filter((label) => label !== '');
 
   // Drop the last element: it names the taxon's own concept, never an ancestor.
-  return labels.slice(0, -1).map(labelToPermid);
+  return labels.slice(0, -1);
 }
 
 /**

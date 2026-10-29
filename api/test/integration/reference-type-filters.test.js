@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 
 import { build } from '../../src/app.js';
 import { assertPublished } from '../published.js';
-import { setupTestDb, seedPerson, newPermid, insertRef } from './helpers.js';
+import { setupTestDb, seedPerson, mintPermid, insertRef } from './helpers.js';
 
 /**
  * The type-specific filters on `references` (journalTitle, seriesTitle,
@@ -37,7 +37,7 @@ before(async () => {
   if (!ctx.available) return;
   const personId = await seedPerson(ctx.pool);
   for (const [name, reference] of Object.entries(FIXTURES)) {
-    refs[name] = await insertRef(ctx.pool, { permid: newPermid(), personId, reference });
+    refs[name] = await insertRef(ctx.pool, { permid: await mintPermid(ctx.pool, 'REF'), personId, reference });
   }
   app = build({ pg: ctx.pool });
 });

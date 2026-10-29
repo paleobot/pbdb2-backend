@@ -7,8 +7,8 @@ the survivor's (the lowest `taxon_no` that collapsed into the row), obtained in 
 absorbed `taxon_no`s stay in `legacyIDs.oldpbdbIDs` and are not permids.
 
 #### Scenario: Permid from the survivor's taxon_no
-- **WHEN** a survivor row with `taxon_no = 526272` is inserted
-- **THEN** its `permid` is `AUT-526272-03`, distinct from all other rows in the table, and the
+- **WHEN** a survivor row with `taxon_no = 526271` is inserted
+- **THEN** its `permid` is `AUT-526271-06`, distinct from all other rows in the table, and the
   `authorities` table's permid CHECK accepts it
 
 #### Scenario: Merged authority keeps the lowest number

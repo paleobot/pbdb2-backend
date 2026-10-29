@@ -1,5 +1,5 @@
 import { pg, closePg } from '../lib/pg-pool.js';
-import { uuidv7 } from '../lib/uuidv7.js';
+import { mintPermids } from '../lib/permids.js';
 import { referenceSource, PUBLICATION_TYPES, SHARED_FIELDS } from '../../../payloadSchemas/reference.schema.js';
 import { resolveEnums } from '../../../payloadSchemas/lib/enums.js';
 import { deriveVariant } from '../../../payloadSchemas/lib/variants.js';
@@ -249,25 +249,9 @@ async function main() {
   console.log(`  Skipped ${skippedCount} references with pbdbid (already migrated from MariaDB)`);
   console.log(`  Processing ${pbotOnlyRefs.length} PBot-only references`);
 
-  // --- 6.3 Ensure permid unique constraint exists ---
-  // Backstop only: guarantees permid uniqueness. Logical idempotency (avoiding
-  // duplicate references on re-run) is enforced by the legacyIDs.pbotID lookup
-  // in the upsert below, since permid is now a generated UUIDv7.
-
-  await pg.query(`
-    DO $$
-    BEGIN
-      IF NOT EXISTS (
-        SELECT 1 FROM pg_constraint
-        WHERE conrelid = 'refs'::regclass
-          AND conname = 'references_permid_key'
-      ) THEN
-        ALTER TABLE refs ADD CONSTRAINT references_permid_key UNIQUE (permid);
-      END IF;
-    END
-    $$;
-  `);
-  console.log('  Ensured permid unique constraint on references');
+  // No permid UNIQUE backstop: refs is versioned, so many rows share a permid,
+  // and the DDL's refs_one_head_per_number constraint is what keeps one head per
+  // permid. Idempotency on re-run comes from the legacyIDs.pbotID lookup below.
 
   // --- 4.1–4.4 + 5.1 Transform and insert references ---
 
@@ -275,6 +259,7 @@ async function main() {
   let warningCount = 0;
   let droppedFieldCount = 0;
   let droppedRefCount = 0;
+  const toInsert = []; // [entererPgId, jsonb], inserted after the loop under one mint
 
   for (const ref of pbotOnlyRefs) {
     // 4.1 Resolve enterer — look up in persons table
@@ -316,11 +301,10 @@ async function main() {
       throw new Error('payload failed reference db-schema validation');
     }
 
-    // 5.1 Idempotent upsert keyed on legacyIDs.pbotID.
-    // permid is now a generated UUIDv7 (a fresh value each run), so we can no
-    // longer rely on ON CONFLICT (permid). Match on the stable pbotID instead:
-    // update in place when the ref already exists (preserving its id + permid),
-    // otherwise insert a new row with a freshly generated permid.
+    // 5.1 Idempotent upsert keyed on legacyIDs.pbotID, the stable key: update in
+    // place when the ref already exists (preserving its id + permid), otherwise
+    // queue it for insert with a newly minted REF permid. The permid is never
+    // the pbotID or derived from it (prefixed-permids).
     const { rows: existingRows } = await pg.query(
       `SELECT id FROM refs WHERE reference->'legacyIDs'->>'pbotID' = $1`,
       [ref.pbotID]
@@ -342,19 +326,25 @@ async function main() {
         ]
       );
     } else {
-      await pg.query(
-        `INSERT INTO refs (permid, authorizer_person_id, enterer_person_id,
-                                   reference, preceded_by_id, succeeded_by_id, removed)
-         VALUES ($1, $2, $3, $4, NULL, NULL, false)`,
-        [
-          uuidv7(),                // $1 — generated UUIDv7 permid
-          AUTHORIZER_PERSON_ID,    // $2
-          entererPgId,             // $3
-          JSON.stringify(jsonb),   // $4
-        ]
-      );
+      toInsert.push([entererPgId, jsonb]);
     }
     upsertCount++;
+  }
+
+  // New references, in source order, under one mint_permids('REF', …) call.
+  const permids = await mintPermids(pg, 'REF', toInsert.length);
+  for (const [k, [entererPgId, jsonb]] of toInsert.entries()) {
+    await pg.query(
+      `INSERT INTO refs (permid, authorizer_person_id, enterer_person_id,
+                                 reference, preceded_by_id, succeeded_by_id, removed)
+       VALUES ($1, $2, $3, $4, NULL, NULL, false)`,
+      [
+        permids[k],              // $1 — minted REF permid
+        AUTHORIZER_PERSON_ID,    // $2
+        entererPgId,             // $3
+        JSON.stringify(jsonb),   // $4
+      ]
+    );
   }
 
   console.log(`  Upserted ${upsertCount} references`);

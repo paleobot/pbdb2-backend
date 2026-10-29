@@ -29,7 +29,7 @@ import {
 import { descriptorFor, targetFor } from './resource-tables.js';
 import { DEFAULT_LIMIT } from './list-filters.js';
 import { filterOp } from './field-filter-ops.js';
-import { BACKWARD } from './cursor.js';
+import { BACKWARD, permidNumber } from './cursor.js';
 
 const HEAD_FILTER = 'succeeded_by_id IS NULL AND NOT COALESCE(removed, false)';
 
@@ -278,15 +278,19 @@ export function makeReadRepository({ pg, table, jsonbColumn, filters = {}, sourc
      *   - `ids`    → `permid = ANY($n)`               (the multi-entity read)
      *   - `fields` → one predicate per sent filter, from its match kind
      *                (field-filter-ops.js), e.g. `payload->>'<jsonPath>' = $n`
-     *   - `page`   → `permid > $n` / `permid < $n`    (the keyset cursor)
+     *   - `page`   → `permid_no > $n` / `permid_no < $n` (the keyset cursor)
      * Filter *values* are bound as parameters; only declared filters translate
      * (others are ignored). A bare call is the first page of every head.
      *
-     * `ORDER BY permid` is the contract, not an incidental detail: the keyset
+     * `ORDER BY permid_no` is the contract, not an incidental detail: the keyset
      * names a position in that total order, so it is what keeps pages from
      * skipping or repeating records when rows are inserted between requests.
-     * A backward page walks DESC and is reversed before returning, so `records`
-     * ascends by `permid` whichever way the client travelled.
+     * `permid_no` is the number inside the permid (prefixed-permids), one per
+     * head, so the order is numeric (`REF-99-…` before `REF-100-…`): Classic
+     * number order for migrated rows, then creation order. The cursor carries
+     * the permid text; its number is what is bound. A backward page walks DESC
+     * and is reversed before returning, so `records` ascends whichever way the
+     * client travelled.
      *
      * The query asks for `limit + 1` rows: the extra row is never returned as
      * data, it only answers "is there a further page?" without a second query.
@@ -321,14 +325,14 @@ export function makeReadRepository({ pg, table, jsonbColumn, filters = {}, sourc
       const backward = cursor?.direction === BACKWARD;
 
       if (cursor) {
-        values.push(cursor.permid);
-        predicates.push(`permid ${backward ? '<' : '>'} $${values.length}`);
+        values.push(permidNumber(cursor.permid));
+        predicates.push(`permid_no ${backward ? '<' : '>'} $${values.length}`);
       }
 
       values.push(limit + 1);
       const { rows } = await pg.query(
         `${select} WHERE ${predicates.join(' AND ')} ` +
-          `ORDER BY permid ${backward ? 'DESC' : 'ASC'} LIMIT $${values.length}`,
+          `ORDER BY permid_no ${backward ? 'DESC' : 'ASC'} LIMIT $${values.length}`,
         values,
       );
 

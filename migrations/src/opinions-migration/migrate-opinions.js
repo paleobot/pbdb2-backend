@@ -11,7 +11,7 @@
 // See openspec/changes/create-opinions-migration/ for the proposal, design, the
 // opinions-migration capability spec (the behavioral contract), and tasks.
 import { mariadb, pg, closeAll } from '../lib/db.js';
-import { uuidv7 } from '../lib/uuidv7.js';
+import { mintPermids } from '../lib/permids.js';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
@@ -282,7 +282,7 @@ async function main(opts = {}) {
             rec(pair, 'assignment').written++;
             logWarning(src.opinion_no, 'assignment_opinions', 'asserted_rootless',
               'assignment_opinions row inserted with containing_permid = NULL: parent_spelling_no is 0 (Classic asserts no parent)');
-            assignments.push({ permid: uuidv7(), ...base, subjectPermid: childSpellingPermid, containingPermid: null });
+            assignments.push({ ...base, subjectPermid: childSpellingPermid, containingPermid: null });
           } else {
             const containingPermid = nameMap.get(parentSpelling);
             if (!containingPermid) {
@@ -295,7 +295,7 @@ async function main(opts = {}) {
                 `assignment_opinions row skipped: child_spelling_no == parent_spelling_no (${src.child_spelling_no})`);
             } else {
               rec(pair, 'assignment').written++;
-              assignments.push({ permid: uuidv7(), ...base, subjectPermid: childSpellingPermid, containingPermid });
+              assignments.push({ ...base, subjectPermid: childSpellingPermid, containingPermid });
             }
           }
         } else if (primaryKey === 'concept' && status !== 'nomen oblitum') {
@@ -307,7 +307,7 @@ async function main(opts = {}) {
         } else if (primaryKey === 'validity' && status !== 'nomen oblitum') {
           // Validity-3: subject = child_spelling_no, no target.
           rec(pair, 'validity').written++;
-          validities.push({ permid: uuidv7(), ...base, subjectPermid: childSpellingPermid, statusId: validityStatusId[VALIDITY[status]] });
+          validities.push({ ...base, subjectPermid: childSpellingPermid, statusId: validityStatusId[VALIDITY[status]] });
         } else if (status === 'nomen oblitum') {
           // Per-row branch: targeted → concept (reason 'nomen oblitum'); untargeted → validity.
           if (parentSpelling !== 0) {
@@ -316,7 +316,7 @@ async function main(opts = {}) {
               rec(pair, 'concept'), logSkip, nameOpinions);
           } else {
             rec(pair, 'validity').written++;
-            validities.push({ permid: uuidv7(), ...base, subjectPermid: childSpellingPermid, statusId: validityStatusId['nomen oblitum'] });
+            validities.push({ ...base, subjectPermid: childSpellingPermid, statusId: validityStatusId['nomen oblitum'] });
           }
         } else if (primaryKey === 'historical_misspelling') {
           // misspelling of: name-only, reason 'historical misspelling', target = parent_spelling_no.
@@ -331,7 +331,7 @@ async function main(opts = {}) {
               `name (historical misspelling) edge skipped: child_spelling_no == parent_spelling_no (${src.child_spelling_no}) — asserts no actual spelling deviation`);
           } else {
             rec(pair, 'historical_misspelling').written++;
-            nameOpinions.push({ permid: uuidv7(), ...base, subjectPermid: childSpellingPermid, targetPermid, reasonId: historicalMisspellingReasonId, edgeClass: 'name', objective: null });
+            nameOpinions.push({ ...base, subjectPermid: childSpellingPermid, targetPermid, reasonId: historicalMisspellingReasonId, edgeClass: 'name', objective: null });
           }
         }
 
@@ -359,7 +359,7 @@ async function main(opts = {}) {
                 logWarning(src.opinion_no, 'name_opinions', 'mislabeled_original_spelling',
                   `child_spelling_no (${src.child_spelling_no}) != child_no (${src.child_no}) despite spelling_reason='original spelling' — worklist backfill emitted as name edge, reason='${nameToken}'`);
               }
-              nameOpinions.push({ permid: uuidv7(), ...base, subjectPermid: childSpellingPermid, targetPermid, reasonId: crosswalkReasonId[nameToken], edgeClass: 'name', objective: null });
+              nameOpinions.push({ ...base, subjectPermid: childSpellingPermid, targetPermid, reasonId: crosswalkReasonId[nameToken], edgeClass: 'name', objective: null });
             }
           }
         }
@@ -431,18 +431,22 @@ function emitConcept(src, base, parentSpelling, childSpelling, subjectPermid, na
     return;
   }
   c.written++;
-  nameOpinions.push({ permid: uuidv7(), ...base, subjectPermid, targetPermid, reasonId, edgeClass: 'concept', objective });
+  nameOpinions.push({ ...base, subjectPermid, targetPermid, reasonId, edgeClass: 'concept', objective });
 }
 
 // ---------- Batched inserts ----------
+// Each batch mints its own permids in one mint_permids() call, on the run's
+// transaction client: AOP, NOP (non-root name edges) and VOP sequence numbers,
+// never Classic opinion_no, since one opinion can yield several rows.
 async function insertAssignments(client, rows) {
   for (let i = 0; i < rows.length; i += INSERT_BATCH_SIZE) {
     const batch = rows.slice(i, i + INSERT_BATCH_SIZE);
     const values = []; const params = []; let p = 1;
-    for (const r of batch) {
+    const permids = await mintPermids(client, 'AOP', batch.length);
+    for (const [k, r] of batch.entries()) {
       values.push(`($${p},$${p+1},$${p+2},$${p+3},$${p+4},$${p+5},$${p+6},$${p+7},$${p+8},$${p+9},$${p+10})`);
       params.push(
-        r.permid, r.authorizerPersonId, r.entererPersonId, r.subjectPermid, r.containingPermid,
+        permids[k], r.authorizerPersonId, r.entererPersonId, r.subjectPermid, r.containingPermid,
         false, r.referenceId, r.publicationYear,
         r.attribution === null ? null : JSON.stringify(r.attribution), r.evidence, false,
       );
@@ -462,10 +466,11 @@ async function insertNameOpinions(client, rows) {
   for (let i = 0; i < rows.length; i += INSERT_BATCH_SIZE) {
     const batch = rows.slice(i, i + INSERT_BATCH_SIZE);
     const values = []; const params = []; let p = 1;
-    for (const r of batch) {
+    const permids = await mintPermids(client, 'NOP', batch.length);
+    for (const [k, r] of batch.entries()) {
       values.push(`($${p},$${p+1},$${p+2},$${p+3},$${p+4},$${p+5},$${p+6},$${p+7},$${p+8},$${p+9},$${p+10},$${p+11},$${p+12},$${p+13},$${p+14},$${p+15},$${p+16})`);
       params.push(
-        r.permid, r.authorizerPersonId, r.entererPersonId, null, r.subjectPermid,
+        permids[k], r.authorizerPersonId, r.entererPersonId, null, r.subjectPermid,
         r.targetPermid, r.reasonId, r.edgeClass, r.objective, null, null, null,
         r.referenceId, r.publicationYear,
         r.attribution === null ? null : JSON.stringify(r.attribution), r.evidence, false,
@@ -487,10 +492,11 @@ async function insertValidities(client, rows) {
   for (let i = 0; i < rows.length; i += INSERT_BATCH_SIZE) {
     const batch = rows.slice(i, i + INSERT_BATCH_SIZE);
     const values = []; const params = []; let p = 1;
-    for (const r of batch) {
+    const permids = await mintPermids(client, 'VOP', batch.length);
+    for (const [k, r] of batch.entries()) {
       values.push(`($${p},$${p+1},$${p+2},$${p+3},$${p+4},$${p+5},$${p+6},$${p+7},$${p+8},$${p+9})`);
       params.push(
-        r.permid, r.authorizerPersonId, r.entererPersonId, r.subjectPermid, r.statusId,
+        permids[k], r.authorizerPersonId, r.entererPersonId, r.subjectPermid, r.statusId,
         r.referenceId, r.publicationYear,
         r.attribution === null ? null : JSON.stringify(r.attribution), r.evidence, false,
       );

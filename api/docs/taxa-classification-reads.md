@@ -38,7 +38,7 @@ PBDB data, and the structural findings (§4) are exact over all rows.
 
 |            | `refs` / `authorities` / `collections` / `schemas` | `taxa`                                    |
 | ---------- | ------------------------------------------------- | ----------------------------------------- |
-| identity   | `permid` (uuid v7)                                 | `permid` (uuid v7) — same                 |
+| identity   | `permid` (`REF-…`, `AUT-…`, `COL-…`, `SCH-…`)      | `permid`, the name's `NOP-…` permid       |
 | payload    | JSONB column                                       | **none** — typed columns                  |
 | lineage    | `preceded_by_id` / `succeeded_by_id` + triggers    | **none** — `UNIQUE (permid)`              |
 | soft delete| `removed`, honored in `HEAD_FILTER`                | column exists, nothing sets it            |
@@ -160,9 +160,11 @@ Zero disagreement. Reading ancestors from the path is safe **today**.
 
 ### Two traps
 
-**Label encoding.** ltree labels cannot contain `-`, so path elements are permids
-with hyphens replaced by underscores. Round-trip with
-`replace(label, '_', '-')::uuid` — safe because UUIDs contain no underscores.
+**Label encoding.** *(No longer a trap, 2026-10-27.)* When permids were UUIDs,
+path elements had their hyphens replaced by underscores, because these notes
+assumed ltree labels could not contain `-`. PostgreSQL 16+ allows `-` in labels,
+and since `adopt-prefixed-sequence-permids` each element is the concept permid as
+stored (`NOP-526272-68`), with no substitution.
 
 **The last element is a *concept* permid, not the row's permid.** The path is
 built from concept permids and ends at the node's own concept. For the 30.7% of

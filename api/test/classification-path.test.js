@@ -5,29 +5,23 @@ import { ancestorPermids, pathDepth } from '../src/lib/classification-path.js';
 
 /**
  * The path decoder is the single place `classification_path`'s encoding is
- * understood, so these pin both traps it exists to handle: the underscore
- * substitution ltree forces, and the fact that the final element is the taxon's
- * own concept rather than an ancestor.
+ * understood, so these pin what it handles: labels are the permids as stored,
+ * and the final element is the taxon's own concept rather than an ancestor.
  *
- * The fixtures are real rows from the development database (2026-09-11), not
- * invented shapes — the same measurement discipline as
- * `docs/taxa-classification-reads.md`.
+ * The fixtures have the shape of real rows (NOP permids, PostgreSQL 16+ ltree
+ * labels with `-`), with numbers chosen for the test.
  */
 
-// A real depth-3 row. Its permid equals its concept_permid, and the path's last
+// A depth-3 row. Its permid equals its concept_permid, and the path's last
 // element is that concept.
-const DEPTH_3 =
-  '01a08827_6c18_70bb_a61b_537882be2fd1.01a08827_5db4_7561_ba19_a10fe5dbdcc1.01a08827_5ef9_71e5_a761_ba1298b75732';
-const DEPTH_3_OWN_CONCEPT = '01a08827-5ef9-71e5-a761-ba1298b75732';
+const DEPTH_3 = 'NOP-28595-43.NOP-52941-46.NOP-69296-63';
+const DEPTH_3_OWN_CONCEPT = 'NOP-69296-63';
 
-// A real root row: one element, which is its own concept.
-const ROOT = '01a08827_5ecf_740e_8bff_6cd5a54a506a';
+// A root row: one element, which is its own concept.
+const ROOT = 'NOP-1-93';
 
 test('a multi-level path decodes to its ancestors, root-first', () => {
-  assert.deepEqual(ancestorPermids(DEPTH_3), [
-    '01a08827-6c18-70bb-a61b-537882be2fd1',
-    '01a08827-5db4-7561-ba19-a10fe5dbdcc1',
-  ]);
+  assert.deepEqual(ancestorPermids(DEPTH_3), ['NOP-28595-43', 'NOP-52941-46']);
 });
 
 test('the taxon\'s own concept is never among its ancestors', () => {
@@ -37,12 +31,9 @@ test('the taxon\'s own concept is never among its ancestors', () => {
   );
 });
 
-test('labels round-trip to canonical hyphenated permids', () => {
+test('labels are the permids as stored, hyphens included', () => {
   const [first] = ancestorPermids(DEPTH_3);
-  // ltree cannot hold `-`, so the stored label carries `_`; UUIDs contain no
-  // `_` of their own, which is what makes the substitution lossless.
-  assert.match(first, /^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/);
-  assert.ok(!first.includes('_'));
+  assert.equal(first, 'NOP-28595-43');
 });
 
 test('a root taxon has no ancestors', () => {

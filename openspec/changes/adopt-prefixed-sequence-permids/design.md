@@ -128,11 +128,31 @@ Settled while working through the open questions (2026-10-27):
 15. **Only this database mints, and nothing is public yet** (confirmed 2026-10-27). These were the
     backlog's conditions for B and for doing the rewrite now.
 
+Settled while applying (2026-10-27):
+
+16. **One head per number is a deferred exclusion constraint, not a unique index.** A partial unique
+    index on `permid_no` is checked row by row. A new version is inserted as a head while the old
+    head is still open (`handle_new_version()` closes it in its AFTER trigger), so the index rejected
+    every new version (tested). Each versioned table instead has `<table>_one_head_per_number`,
+    `EXCLUDE (permid_no WITH =) WHERE (succeeded_by_id IS NULL) DEFERRABLE INITIALLY DEFERRED`, checked
+    at commit. Its index also serves list ordering. The derived taxa tables, like `persons`, have
+    `permid_no … UNIQUE`.
+17. **Tie-breaks on permids in the taxa functions sort by number.** Under UUIDv7 the last-resort
+    tie-breaks (`original_permid ASC`, `cand.permid`) sorted in minting order; on text they would sort
+    lexically (`NOP-100-…` before `NOP-99-…`). They now sort by `split_part(permid, '-', 2)::bigint`.
+    The union-find representatives (`min(node)`) are only group labels, and take text order.
+18. **Two PBot scripts mint one permid per insert.** `pbot-persons` (a later PBot person can match one
+    inserted earlier in the run) and `pbot-schemas` (which rows insert is only known during the
+    level-by-level parent resolution) can't know their rows up front. Both are small (~70 and ~1,700
+    rows). Every other script registers or mints once per batch.
+19. **`pbot-refs` no longer adds `UNIQUE (permid)` to `refs` at run time.** On a versioned table that
+    constraint would reject every new version; `refs_one_head_per_number` does its job.
+
 ## Risks / Trade-offs
 
 - [Permids carry meaning and are enumerable] → Accepted. The data is public, and citeable
   continuity with Classic is the point.
-- [`NOP-526272-xx` and `AUT-526272-xx` share a number but are different records] → Intended: one
+- [`NOP-526271-xx` and `AUT-526271-xx` share a number but are different records] → Intended: one
   Classic taxon, two pbdb2 views of it. The prefix and check digits keep them apart.
 - [Only this database can mint] → Confirmed that nothing outside it creates entities. If that
   changes, an outside system calls `mint_permids()` or A becomes the fallback.

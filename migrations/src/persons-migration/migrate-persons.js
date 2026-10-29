@@ -1,5 +1,5 @@
 import { mariadb, pg, closeAll } from '../lib/db.js';
-import { uuidv7 } from '../lib/uuidv7.js';
+import { registerPermids } from '../lib/permids.js';
 import { normalizeName, loadAdmin0, resolveCountry } from '../lib/country.js';
 import { personSource } from '../../../payloadSchemas/person.schema.js';
 import { resolveEnums } from '../../../payloadSchemas/lib/enums.js';
@@ -132,6 +132,17 @@ async function main() {
   );
   console.log(`  Read ${sourceRows.length} rows from MariaDB person table`);
 
+  // --- Permids ---
+
+  // PRS-<person_no>-<CC>, registered once for the rows this run creates. A row
+  // that already exists keeps the permid it has (see the upsert below).
+  const { rows: existing } = await pg.query(`SELECT id, permid FROM persons`);
+  const permidById = new Map(existing.map((r) => [r.id, r.permid]));
+  const newIds = sourceRows.map((r) => r.person_no).filter((id) => !permidById.has(id));
+  const newPermids = await registerPermids(pg, 'PRS', newIds);
+  newIds.forEach((id, i) => permidById.set(id, newPermids[i]));
+  console.log(`  Registered ${newPermids.length} PRS permids (${existing.length} rows already had one)`);
+
   // --- Transform and upsert ---
 
   let upsertCount = 0;
@@ -188,9 +199,8 @@ async function main() {
       `  person_no=${id}: role SET='${row.role}' is_authorizer=${row.is_authorizer} superuser=${row.superuser} → role_id=${roleId} (${roleMap[roleId]})`
     );
 
-    // permid is minted on every pass, including passes that resolve to an
-    // update. On the update branch this value is simply discarded -- see the
-    // DO UPDATE SET list below, which deliberately omits permid.
+    // On the update branch the permid passed is the row's own, and it is not
+    // written anyway -- see the DO UPDATE SET list below, which omits permid.
     await pg.query(
       `INSERT INTO persons (id, permid, password, role_id, person, authorizer_person_id, active, total_hours)
        VALUES ($1, $2, NULL, $3, $4, $5, $6, NULL)
@@ -201,16 +211,13 @@ async function main() {
          active = EXCLUDED.active`,
       //   ^ permid is deliberately NOT in this list, and must never be added.
       //     It is written once, when the row is created, and never again.
-      //     This script mints a fresh permid on every run; were permid updated
-      //     here, each re-run would issue every person a brand-new permanent
-      //     identifier, silently invalidating every external reference to them.
-      //     The failure would be invisible -- a re-minted permid satisfies
-      //     NOT NULL, UNIQUE and the UUIDv7 CHECK just as well as the original.
-      //     No other minted-permid table in this project has this hazard,
-      //     because no other one upserts on a surrogate id.
+      //     A permid is a permanent identifier: rewriting it would invalidate
+      //     every external reference to the person. No other permid table in
+      //     this project has this hazard, because no other one upserts on a
+      //     surrogate id.
       [
         id,                  // $1  id
-        uuidv7(),            // $2  permid (insert-only; see above)
+        permidById.get(id),  // $2  permid (insert-only; see above)
         roleId,              // $3  role_id
         personJsonb,         // $4  person (JSONB)
         id,                  // $5  authorizer_person_id (self-reference)

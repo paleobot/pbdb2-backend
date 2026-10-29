@@ -21,10 +21,10 @@ context: |
   migrations/ may use db/, payloadSchemas/ and the root .env.
 
   Spec paths: in migration specs (*-migration, migration-runner, migration-script-layout,
-  permid-uuidv7, payload-audit, db-connection-config) paths are relative to migrations/;
+  payload-audit, db-connection-config) paths are relative to migrations/;
   in API specs (api-discovery, api-foundation, auth-stub, data-access, list-pagination,
-  reference-enrichment, resource-routes, taxa-reads) relative to api/; in every other spec
-  relative to the repository root. A new migration or API spec joins those lists in
+  reference-enrichment, resource-routes, taxa-reads) relative to api/; in every other spec,
+  including prefixed-permids, relative to the repository root. A new migration or API spec joins those lists in
   specs/repository-layout.
 
   Tech stack: Node.js (ESM) everywhere; npm workspaces root with migrations and api as

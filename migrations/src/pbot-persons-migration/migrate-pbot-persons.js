@@ -1,5 +1,5 @@
 import { pg, closePg } from '../lib/pg-pool.js';
-import { uuidv7 } from '../lib/uuidv7.js';
+import { mintPermids } from '../lib/permids.js';
 import { personSource } from '../../../payloadSchemas/person.schema.js';
 import { resolveEnums } from '../../../payloadSchemas/lib/enums.js';
 import { deriveVariant } from '../../../payloadSchemas/lib/variants.js';
@@ -228,20 +228,22 @@ async function main() {
       if (email) personJsonb.email = email;
       if (normalizedOrcid) personJsonb.orcid = normalizedOrcid;
 
-      // A minted permid, NOT the pbotID. pbotID is itself a UUID and is
-      // therefore tempting to reuse here, but permid-uuidv7 forbids adopting an
-      // externally-sourced identifier as a permid; pbotID stays in legacyIDs,
-      // where the cross-entity lookups expect to find it.
+      // A PRS permid from the sequence, NOT the pbotID: prefixed-permids forbids
+      // adopting an externally-sourced identifier as a permid or its number;
+      // pbotID stays in legacyIDs, where the cross-entity lookups expect it.
       //
       // This is the only place this script mints a permid. Persons matched by
       // the ORCID/email/name cascade keep the permid migrate-persons.js gave
-      // them -- minting a second one would contradict the match just made.
+      // them -- minting a second one would contradict the match just made. It
+      // mints one per insert rather than one batch, because a later PBot person
+      // can match a person inserted earlier in this loop (~70 rows a run).
+      const [permid] = await mintPermids(pg, 'PRS', 1);
       const { rows: inserted } = await pg.query(
         `INSERT INTO persons (permid, password, role_id, person, authorizer_person_id, active, total_hours)
          VALUES ($1, NULL, $2, $3, $4, true, NULL)
          RETURNING id`,
         [
-          uuidv7(),                // $1 permid (minted; never the pbotID)
+          permid,                  // $1 permid (minted; never the pbotID)
           PERSON_ROLE_ID,          // $2 role_id
           validated(personJsonb, `PBot ${person.pbotID} (${given} ${surname})`), // $3 person (JSONB)
           AUTHORIZER_PERSON_ID,    // $4 authorizer_person_id

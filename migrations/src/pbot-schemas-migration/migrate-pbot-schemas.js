@@ -1,5 +1,5 @@
 import { pg, closePg } from '../lib/pg-pool.js';
-import { uuidv7 } from '../lib/uuidv7.js';
+import { mintPermids } from '../lib/permids.js';
 import { schemaSource } from '../../../payloadSchemas/schema.schema.js';
 import { characterSource } from '../../../payloadSchemas/character.schema.js';
 import { stateSource } from '../../../payloadSchemas/state.schema.js';
@@ -387,13 +387,15 @@ async function main() {
 
     const jsonb = schemaJsonb.get(schema.pbotID);
 
-    // Insert schema
+    // Insert schema. Schemas, characters and states each mint their permid at
+    // insert, one at a time: which rows insert is only known as the level-by-level
+    // parent resolution goes, and these tables are small (~1,700 rows a run).
     const { rows } = await pg.query(
       `INSERT INTO schemas (permid, authorizer_person_id, enterer_person_id, schema, reference_id, preceded_by_id, succeeded_by_id, removed)
        VALUES ($1, $2, $3, $4, $5, NULL, NULL, false)
        RETURNING id`,
       [
-        uuidv7(), // generated permid; pbotID preserved in schema.legacyIDs.pbotID
+        (await mintPermids(pg, 'SCH', 1))[0], // never the pbotID, which stays in schema.legacyIDs.pbotID
         AUTHORIZER_PERSON_ID,
         entererPgId,
         JSON.stringify(jsonb),
@@ -484,7 +486,7 @@ async function main() {
          VALUES ($1, $2, $3, $4, $5, $6, $7, NULL, NULL)
          RETURNING id`,
         [
-          uuidv7(), // generated permid; pbotID preserved in character.legacyIDs.pbotID
+          (await mintPermids(pg, 'CHR', 1))[0], // never the pbotID, which stays in character.legacyIDs.pbotID
           AUTHORIZER_PERSON_ID,
           entererPgId,
           parentSchemaId,
@@ -573,7 +575,7 @@ async function main() {
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NULL, NULL)
          RETURNING id`,
         [
-          uuidv7(), // generated permid; pbotID preserved in state.legacyIDs.pbotID
+          (await mintPermids(pg, 'STA', 1))[0], // never the pbotID, which stays in state.legacyIDs.pbotID
           AUTHORIZER_PERSON_ID,
           entererPgId,
           parentCharacterId,

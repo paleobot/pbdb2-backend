@@ -1,5 +1,5 @@
 import { mariadb, pg, closeAll } from '../lib/db.js';
-import { uuidv7 } from '../lib/uuidv7.js';
+import { registerPermids } from '../lib/permids.js';
 import { referenceSource } from '../../../payloadSchemas/reference.schema.js';
 import { resolveEnums } from '../../../payloadSchemas/lib/enums.js';
 import { deriveVariant } from '../../../payloadSchemas/lib/variants.js';
@@ -335,7 +335,6 @@ async function main() {
 
     return {
       id: ref.reference_no,
-      permid: uuidv7(),
       authorizer_person_id: authorizerPersonId,
       enterer_person_id: entererPersonId,
       reference: jsonb,
@@ -347,52 +346,69 @@ async function main() {
 
   console.log(`  Transformed ${targetRows.length} rows`);
 
-  // 5.2 Batched upsert
+  // 5.2 Batched upsert. A row's permid is REF-<reference_no>-<CC>, registered in
+  // the batch's transaction for the rows this run creates; a row that already
+  // exists keeps its permid (the upsert never writes it).
+  const { rows: existing } = await pg.query(`SELECT id, permid FROM refs`);
+  const permidById = new Map(existing.map((r) => [Number(r.id), r.permid]));
+
   const BATCH_SIZE = 500;
   let upsertCount = 0;
+  const client = await pg.connect();
+  try {
+    for (let i = 0; i < targetRows.length; i += BATCH_SIZE) {
+      const batch = targetRows.slice(i, i + BATCH_SIZE);
+      const values = [];
+      const params = [];
+      let paramIdx = 1;
 
-  for (let i = 0; i < targetRows.length; i += BATCH_SIZE) {
-    const batch = targetRows.slice(i, i + BATCH_SIZE);
-    const values = [];
-    const params = [];
-    let paramIdx = 1;
+      await client.query('BEGIN');
+      const newIds = batch.map((row) => row.id).filter((id) => !permidById.has(id));
+      const newPermids = await registerPermids(client, 'REF', newIds);
+      newIds.forEach((id, k) => permidById.set(id, newPermids[k]));
 
-    for (const row of batch) {
-      values.push(
-        `($${paramIdx}, $${paramIdx + 1}, $${paramIdx + 2}, $${paramIdx + 3}, $${paramIdx + 4}, $${paramIdx + 5}, $${paramIdx + 6}, $${paramIdx + 7})`
+      for (const row of batch) {
+        values.push(
+          `($${paramIdx}, $${paramIdx + 1}, $${paramIdx + 2}, $${paramIdx + 3}, $${paramIdx + 4}, $${paramIdx + 5}, $${paramIdx + 6}, $${paramIdx + 7})`
+        );
+        params.push(
+          row.id,
+          permidById.get(row.id),
+          row.authorizer_person_id,
+          row.enterer_person_id,
+          JSON.stringify(row.reference),
+          row.preceded_by_id,
+          row.succeeded_by_id,
+          row.removed,
+        );
+        paramIdx += 8;
+      }
+
+      await client.query(
+        `INSERT INTO refs (id, permid, authorizer_person_id, enterer_person_id, reference, preceded_by_id, succeeded_by_id, removed)
+         VALUES ${values.join(', ')}
+         ON CONFLICT (id) DO UPDATE SET
+           authorizer_person_id = EXCLUDED.authorizer_person_id,
+           enterer_person_id = EXCLUDED.enterer_person_id,
+           reference = EXCLUDED.reference,
+           preceded_by_id = EXCLUDED.preceded_by_id,
+           succeeded_by_id = EXCLUDED.succeeded_by_id,
+           removed = EXCLUDED.removed`,
+        params
       );
-      params.push(
-        row.id,
-        row.permid,
-        row.authorizer_person_id,
-        row.enterer_person_id,
-        JSON.stringify(row.reference),
-        row.preceded_by_id,
-        row.succeeded_by_id,
-        row.removed,
-      );
-      paramIdx += 8;
-    }
+      await client.query('COMMIT');
 
-    await pg.query(
-      `INSERT INTO refs (id, permid, authorizer_person_id, enterer_person_id, reference, preceded_by_id, succeeded_by_id, removed)
-       VALUES ${values.join(', ')}
-       ON CONFLICT (id) DO UPDATE SET
-         authorizer_person_id = EXCLUDED.authorizer_person_id,
-         enterer_person_id = EXCLUDED.enterer_person_id,
-         reference = EXCLUDED.reference,
-         preceded_by_id = EXCLUDED.preceded_by_id,
-         succeeded_by_id = EXCLUDED.succeeded_by_id,
-         removed = EXCLUDED.removed`,
-      params
-    );
-
-    upsertCount += batch.length;
-    if ((i / BATCH_SIZE) % 20 === 0) {
-      console.log(`  Upserted ${upsertCount}/${targetRows.length} rows...`);
+      upsertCount += batch.length;
+      if ((i / BATCH_SIZE) % 20 === 0) {
+        console.log(`  Upserted ${upsertCount}/${targetRows.length} rows...`);
+      }
     }
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw err;
+  } finally {
+    client.release();
   }
-
   console.log(`  Upserted ${upsertCount} rows into references`);
 
   // 5.3 Reset identity sequence
