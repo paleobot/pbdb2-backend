@@ -30,7 +30,7 @@ let db;
 let app;
 
 // The fixture tree, root-ward:  Life > Animalia > Calymene > C. blumenbachii.
-// Taxa are identified by their names' NOP permids, minted once the database exists.
+// Taxa are identified by their names' TXN permids, minted once the database exists.
 let life;
 let animalia;
 let calymene;
@@ -40,7 +40,7 @@ let synonym;
 before(async () => {
   db = await setupTestDb();
   if (!db.available) return;
-  [life, animalia, calymene, blumenbachii, synonym] = await mintPermids(db.pool, 'NOP', 5);
+  [life, animalia, calymene, blumenbachii, synonym] = await mintPermids(db.pool, 'TXN', 5);
 
   const personId = await seedPerson(db.pool);
   const ref = await insertRef(db.pool, {
@@ -264,7 +264,7 @@ test('the list paginates and omits the chain unless asked', async (t) => {
 test('a multi-entity read reports missing ids and accepts the chain opt-in', async (t) => {
   if (!db.available) return t.skip(db.reason);
 
-  const absent = await mintPermid(db.pool, 'NOP');
+  const absent = await mintPermid(db.pool, 'TXN');
   const body = (
     await app.inject({
       method: 'GET',

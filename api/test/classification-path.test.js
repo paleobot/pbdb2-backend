@@ -8,20 +8,20 @@ import { ancestorPermids, pathDepth } from '../src/lib/classification-path.js';
  * understood, so these pin what it handles: labels are the permids as stored,
  * and the final element is the taxon's own concept rather than an ancestor.
  *
- * The fixtures have the shape of real rows (NOP permids, PostgreSQL 16+ ltree
+ * The fixtures have the shape of real rows (TXN permids, PostgreSQL 16+ ltree
  * labels with `-`), with numbers chosen for the test.
  */
 
 // A depth-3 row. Its permid equals its concept_permid, and the path's last
 // element is that concept.
-const DEPTH_3 = 'NOP-28595-43.NOP-52941-46.NOP-69296-63';
-const DEPTH_3_OWN_CONCEPT = 'NOP-69296-63';
+const DEPTH_3 = 'TXN-28595-53.TXN-52941-56.TXN-69296-73';
+const DEPTH_3_OWN_CONCEPT = 'TXN-69296-73';
 
 // A root row: one element, which is its own concept.
-const ROOT = 'NOP-1-93';
+const ROOT = 'TXN-1-51';
 
 test('a multi-level path decodes to its ancestors, root-first', () => {
-  assert.deepEqual(ancestorPermids(DEPTH_3), ['NOP-28595-43', 'NOP-52941-46']);
+  assert.deepEqual(ancestorPermids(DEPTH_3), ['TXN-28595-53', 'TXN-52941-56']);
 });
 
 test('the taxon\'s own concept is never among its ancestors', () => {
@@ -33,7 +33,7 @@ test('the taxon\'s own concept is never among its ancestors', () => {
 
 test('labels are the permids as stored, hyphens included', () => {
   const [first] = ancestorPermids(DEPTH_3);
-  assert.equal(first, 'NOP-28595-43');
+  assert.equal(first, 'TXN-28595-53');
 });
 
 test('a root taxon has no ancestors', () => {

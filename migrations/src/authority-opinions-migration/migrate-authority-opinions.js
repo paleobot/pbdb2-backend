@@ -162,7 +162,7 @@ async function main() {
       }
 
       // ---- 2.7 Accumulate root name_opinion ----
-      // Its permid, NOP-<taxon_no>-<CC> from this source row's own taxon_no, is
+      // Its permid, TXN-<taxon_no>-<CC> from this source row's own taxon_no, is
       // registered at insert (3.1) and is both permid and subject_permid.
       nameOpinions.push({
         authorizerPersonId: authNo,
@@ -213,7 +213,7 @@ async function main() {
       const values = [];
       const params = [];
       let p = 1;
-      const permids = await registerPermids(pgClient, 'NOP', batch.map((r) => r.oldpbdbTaxonNo));
+      const permids = await registerPermids(pgClient, 'TXN', batch.map((r) => r.oldpbdbTaxonNo));
       for (const [k, r] of batch.entries()) {
         values.push(`($${p},$${p+1},$${p+2},$${p+3},$${p+4},$${p+5},$${p+6},$${p+7},$${p+8},$${p+9},$${p+10},$${p+11},$${p+12},$${p+13},$${p+14},$${p+15},$${p+16})`);
         params.push(

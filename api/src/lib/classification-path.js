@@ -24,7 +24,7 @@
  * its own iteration guard; this one needs none, because the path is a stored
  * value of fixed length, not a traversal.
  *
- * Each element is a concept permid exactly as stored (`NOP-526272-68`;
+ * Each element is a concept permid exactly as stored (`TXN-526272-71`;
  * PostgreSQL 16+ allows `-` in ltree labels), so no decoding is needed. ONE
  * TRAP, measured and handled here: the last element is the row's own CONCEPT
  * permid, not the row's permid, and the two differ for 30.7% of rows. It is

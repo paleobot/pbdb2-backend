@@ -14,9 +14,9 @@ import { assertPublished, assertEnvelope } from './published.js';
 
 // One depth-3 taxon with a real-shaped ltree path. The last element is its own
 // concept, which must never appear in its own chain.
-const OWN_CONCEPT = 'NOP-69296-63';
-const PARENT = 'NOP-52941-46';
-const GRANDPARENT = 'NOP-28595-43';
+const OWN_CONCEPT = 'TXN-69296-73';
+const PARENT = 'TXN-52941-56';
+const GRANDPARENT = 'TXN-28595-53';
 const PATH = [GRANDPARENT, PARENT, OWN_CONCEPT].join('.');
 
 const TAXON = {
@@ -264,7 +264,7 @@ test('a root taxon has a null chain', async (t) => {
 test('taxa lists are paginated on the same terms as every other group', async (t) => {
   const many = Array.from({ length: 3 }, (_, i) => ({
     ...TAXON,
-    permid: `NOP-${i + 1}-00`,
+    permid: `TXN-${i + 1}-00`,
     classification_path: PATH,
   }));
   const app = build({ pg: fakeTaxaPg({ taxa: many }) });

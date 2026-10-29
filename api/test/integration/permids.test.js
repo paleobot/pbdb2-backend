@@ -51,14 +51,15 @@ test('a permid column rejects a leading zero and bad check digits', async (t) =>
   await rejects(insertRef, ['REF-12345-16', personId], /check constraint/);
 });
 
-test('unknown and reserved prefixes are refused', async (t) => {
+test('unknown and retired prefixes are refused', async (t) => {
   if (!ctx.available) return t.skip(ctx.reason);
   const before = Number((await one('SELECT count(*) AS n FROM permids')).n);
   await rejects(`SELECT mint_permids('XYZ', 1)`, [], /unknown permid prefix XYZ/);
-  await rejects(`SELECT mint_permids('TXL', 1)`, [], /reserved/);
-  await rejects(`SELECT register_permids('TXC', ARRAY[1]::bigint[])`, [], /reserved/);
+  await rejects(`SELECT mint_permids('NOP', 1)`, [], /unknown permid prefix NOP/);
+  await rejects(`SELECT mint_permids('TXL', 1)`, [], /unknown permid prefix TXL/);
+  await rejects(`SELECT register_permids('TXC', ARRAY[1]::bigint[])`, [], /unknown permid prefix TXC/);
   await rejects(`SELECT format_permid('XYZ', 1)`, [], /unknown permid prefix/);
-  await rejects(`SELECT permid_is_valid('TXL-1-00', 'TXL')`, [], /reserved/);
+  await rejects(`SELECT permid_is_valid('TXL-1-00', 'TXL')`, [], /unknown permid prefix/);
   assert.equal(Number((await one('SELECT count(*) AS n FROM permids')).n), before, 'nothing registered');
 });
 

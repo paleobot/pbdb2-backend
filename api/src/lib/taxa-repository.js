@@ -194,7 +194,7 @@ export function makeTaxaRepository({ pg }) {
     /**
      * One page of taxa, ordered by the number in `permid` (`permid_no`) — the
      * same keyset contract every other list read follows, so `pageLinks` and the
-     * shared list handler work unchanged. A taxon's permid is its name's NOP
+     * shared list handler work unchanged. A taxon's permid is its name's TXN
      * permid, so migrated taxa list in Classic `taxon_no` order; a name-ordered
      * compound cursor is the recorded follow-up, kept open by the cursor token
      * being opaque.

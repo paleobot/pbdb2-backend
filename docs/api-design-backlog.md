@@ -766,10 +766,12 @@ The leaning above was adopted, with these decisions the backlog didn't have. The
 
 - **Prefixes.** Classic data-service prefixes where the record type is the same, upper-cased:
   `REF` refs, `PRS` persons, `COL` collections, `SPM` specimens, `INT` intervals, `TSC` timescales.
-  New ones: `AUT` authorities, `NOP` name_opinions, `AOP` assignment_opinions, `VOP`
+  New ones: `AUT` authorities, `TXN` name_opinions, `AOP` assignment_opinions, `VOP`
   validity_opinions, `TAN` taxon_annotations, `SCH` schemas, `CHR` characters, `STA` states.
-  `TXL` and `TXC` are reserved and never minted. Names have no prefix of their own: a taxon is cited
-  by its root name opinion's `NOP` permid, whose number is the Classic `taxon_no`.
+  Names have no prefix of their own: a taxon is cited by its root name opinion's `TXN` permid,
+  whose number is the Classic `taxon_no`. (Revised 2026-10-29: name_opinions was `NOP`, and `TXL`
+  and `TXC` were reserved for the derived taxa tables. `TXN` is Classic's taxon prefix, used so
+  that taxa read as taxa; see design.md decision 20.)
 - **One floor, 1,000,000, for every sequence**, above the largest Classic number that becomes a
   permid (`taxon_no` 526,272). Legacy numbers at or above it are refused.
 - **No runner step.** Each sequence is created with `START WITH 1000000` in the DDL.
@@ -782,6 +784,26 @@ The leaning above was adopted, with these decisions the backlog didn't have. The
   would reject every new version. The deferred constraint is checked at commit.
 - **ltree labels are the permids as stored** (PostgreSQL 16+ allows `-`), with no `_` swap.
 - `homonyms.homonym_group_id` stays an internal UUIDv7.
+
+### Open: one `TXN` permid, two resources (2026-10-29)
+
+A root name opinion and the taxon derived from it share one `TXN` permid, while a spelling or
+synonymy opinion (`TXN-1000123-…`) has a `TXN` permid that is never a taxon. That was true of `NOP`
+and of the UUIDs before it. It is harmless while every link carries its `href` and nothing picks an
+endpoint from a permid's prefix. To decide when it matters:
+
+- **A resolver for a bare permid** (`/permids/{id}`, or a redirect from Classic `txn:`) needs a rule
+  for `TXN`. A candidate: the taxon if one exists, else the opinion.
+- **The docs for taxa and for an opinions endpoint** should say that name opinions share the `TXN`
+  space and only a root opinion's permid is also a taxon, so a 404 on `/taxa/TXN-1000123-…` is
+  expected.
+- **`TXN-n` is not promised to equal Classic `txn:n`.** Our n is the spelling's `taxon_no`. Classic's
+  `txn:` is believed to use `orig_no`, with `var:` for spellings (unverified). The two agree for
+  original combinations and differ for respellings and recombinations. Check this before building a
+  `txn:` resolver.
+
+If the overlap becomes a real problem, a separate `TXN` space for the derived tables (with
+name_opinions back on its own prefix) is the recorded fallback, as a change of its own.
 
 ## Collection reference model
 

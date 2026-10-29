@@ -436,7 +436,7 @@ function emitConcept(src, base, parentSpelling, childSpelling, subjectPermid, na
 
 // ---------- Batched inserts ----------
 // Each batch mints its own permids in one mint_permids() call, on the run's
-// transaction client: AOP, NOP (non-root name edges) and VOP sequence numbers,
+// transaction client: AOP, TXN (non-root name edges) and VOP sequence numbers,
 // never Classic opinion_no, since one opinion can yield several rows.
 async function insertAssignments(client, rows) {
   for (let i = 0; i < rows.length; i += INSERT_BATCH_SIZE) {
@@ -466,7 +466,7 @@ async function insertNameOpinions(client, rows) {
   for (let i = 0; i < rows.length; i += INSERT_BATCH_SIZE) {
     const batch = rows.slice(i, i + INSERT_BATCH_SIZE);
     const values = []; const params = []; let p = 1;
-    const permids = await mintPermids(client, 'NOP', batch.length);
+    const permids = await mintPermids(client, 'TXN', batch.length);
     for (const [k, r] of batch.entries()) {
       values.push(`($${p},$${p+1},$${p+2},$${p+3},$${p+4},$${p+5},$${p+6},$${p+7},$${p+8},$${p+9},$${p+10},$${p+11},$${p+12},$${p+13},$${p+14},$${p+15},$${p+16})`);
       params.push(
