@@ -11,12 +11,12 @@ The schema SHALL define three append-only assertion tables — `name_opinions`, 
 
 #### Scenario: permid columns are foreign keys to the registry
 
-- **WHEN** an opinion row is inserted whose `subject_permid` (or target) is a well-formed `NOP` permid that is not in `permids`
+- **WHEN** an opinion row is inserted whose `subject_permid` (or target) is a well-formed `TXN` permid that is not in `permids`
 - **THEN** PostgreSQL rejects the insert with a foreign-key violation
 
 ### Requirement: Non-derived tables sit outside the stack
 
-The schema SHALL define `taxon_annotations` (versioned curatorial prose: `common_name`, `comments`, `discussion`, `discussed_by_reference_id`) with its own `TAN` permid, keyed by `subject_permid` (`NOP`), and `homonyms` grouping `NOP` permids by an app-minted `homonym_group_id uuid` (uuidv7), with `UNIQUE (homonym_group_id, permid)`. Neither SHALL be reconstructable by `derive()`; `taxa_linnaean` SHALL NOT carry a `has_homonym` flag.
+The schema SHALL define `taxon_annotations` (versioned curatorial prose: `common_name`, `comments`, `discussion`, `discussed_by_reference_id`) with its own `TAN` permid, keyed by `subject_permid` (`TXN`), and `homonyms` grouping `TXN` permids by an app-minted `homonym_group_id uuid` (uuidv7), with `UNIQUE (homonym_group_id, permid)`. Neither SHALL be reconstructable by `derive()`; `taxa_linnaean` SHALL NOT carry a `has_homonym` flag.
 
 #### Scenario: Annotations and homonyms exist independently of the ledger
 
@@ -25,7 +25,7 @@ The schema SHALL define `taxon_annotations` (versioned curatorial prose: `common
 
 #### Scenario: A homonym group spans more than two members
 
-- **WHEN** three `NOP` permids are inserted into `homonyms` sharing one `homonym_group_id`
+- **WHEN** three `TXN` permids are inserted into `homonyms` sharing one `homonym_group_id`
 - **THEN** all three rows are accepted (grouped representation supports n > 2 homonyms)
 
 ### Requirement: classification_path materializes the concept adjacency
@@ -39,8 +39,8 @@ The schema SHALL define `taxon_annotations` (versioned curatorial prose: `common
 
 #### Scenario: Labels are the permids themselves
 
-- **WHEN** a concept with permid `NOP-526272-68` appears in a path
-- **THEN** its label in `classification_path` is `NOP-526272-68`, not `NOP_526272_68`
+- **WHEN** a concept with permid `TXN-526272-71` appears in a path
+- **THEN** its label in `classification_path` is `TXN-526272-71`, not `TXN_526272_71`
 
 ## REMOVED Requirements
 

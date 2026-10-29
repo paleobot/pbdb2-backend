@@ -33,7 +33,7 @@ Each table that creates entities SHALL have exactly one prefix:
 
 | Table | Prefix | | Table | Prefix |
 |---|---|---|---|---|
-| `refs` | `REF` | | `name_opinions` | `NOP` |
+| `refs` | `REF` | | `name_opinions` | `TXN` |
 | `persons` | `PRS` | | `assignment_opinions` | `AOP` |
 | `collections` | `COL` | | `validity_opinions` | `VOP` |
 | `specimens` | `SPM` | | `taxon_annotations` | `TAN` |
@@ -42,16 +42,17 @@ Each table that creates entities SHALL have exactly one prefix:
 | `authorities` | `AUT` | | `states` | `STA` |
 
 `REF`, `PRS`, `COL`, `SPM`, `INT` and `TSC` are the PBDB Classic data service's identifier
-prefixes for the same record types, upper-cased. `TXL` (`taxa_linnaean`) and `TXC`
-(`taxa_clades`) are reserved: they SHALL NOT be minted, because rows in those tables have no
-identity of their own, and no other table SHALL use them.
+prefixes for the same record types, upper-cased. `TXN` reuses Classic's taxon prefix so that a
+taxon, whose permid is its root name opinion's, reads as a taxon; `TXN-<n>` is not promised to
+equal Classic `txn:<n>`. The derived taxa tables have no prefix of their own, because their rows
+have no identity of their own, and no prefix is reserved.
 
 #### Scenario: Unknown prefix is refused
 - **WHEN** `mint_permids('XYZ', 1)` is called
 - **THEN** it raises an error and registers nothing
 
-#### Scenario: Reserved prefix is refused
-- **WHEN** `mint_permids('TXL', 1)` is called
+#### Scenario: The retired names are unknown prefixes
+- **WHEN** `mint_permids('NOP', 1)` or `mint_permids('TXL', 1)` is called
 - **THEN** it raises an error and registers nothing
 
 ### Requirement: The permids registry holds every permid once
@@ -72,14 +73,14 @@ latest version. The registry SHALL NOT carry an entity-type column: the prefix s
 Every column that holds a permid, whether the row's own or a reference to another row's, SHALL be
 `text`, SHALL carry an FK to `permids(permid)`, and SHALL carry a CHECK that the value has the
 column's prefix, the format, and valid check digits. The CHECK SHALL call one SQL function that
-validates the format (for example `permid_is_valid(value, 'NOP')`). This applies to:
+validates the format (for example `permid_is_valid(value, 'TXN')`). This applies to:
 
 - the own `permid` of every table in "Each permid space has one prefix";
 - `name_opinions.subject_permid` and `target_permid`, `assignment_opinions.subject_permid` and
   `containing_permid`, `validity_opinions.subject_permid`, `taxon_annotations.subject_permid`,
-  `homonyms.permid` and `specimens.name_opinions_permid`, all `NOP`;
+  `homonyms.permid` and `specimens.name_opinions_permid`, all `TXN`;
 - every permid column of the derived tables `taxa_linnaean`, `taxa_clades`, `taxa_attachments`,
-  `taxa` and `cycle_cuts`, all `NOP`.
+  `taxa` and `cycle_cuts`, all `TXN`.
 
 `homonyms.homonym_group_id` is not a permid. It SHALL stay a `uuid` with its version-7 CHECK.
 
@@ -99,7 +100,7 @@ validates the format (for example `permid_is_valid(value, 'NOP')`). This applies
 #### Scenario: The homonym group id stays a UUID
 - **WHEN** the DDL is applied
 - **THEN** `homonyms.homonym_group_id` is `uuid` with the version-7 CHECK, and `homonyms.permid` is
-  `text` with the `NOP` CHECK and an FK to `permids`
+  `text` with the `TXN` CHECK and an FK to `permids`
 
 ### Requirement: Legacy numbers are registered, not minted
 The schema SHALL define `register_permids(prefix text, numbers bigint[]) RETURNS text[]`, which
@@ -180,7 +181,7 @@ SHALL remain in `legacyIDs.oldpbdbIDs`.
 #### Scenario: A taxon's name and authority share a number
 - **WHEN** Classic `taxon_no` 526,271 is migrated as an authority survivor and as a root name opinion
 - **THEN** the authority's permid is `AUT-526271-06` and the root name opinion's permid is
-  `NOP-526271-71`
+  `TXN-526271-74`
 
 #### Scenario: Merged authority
 - **WHEN** Classic `taxon_no`s 100, 200 and 300 collapse into one authority
@@ -192,13 +193,18 @@ SHALL remain in `legacyIDs.oldpbdbIDs`.
 
 ### Requirement: Names-as-spelled are identified by their root name opinion's permid
 A name-as-spelled SHALL have no permid space of its own. A root `name_opinions` row SHALL store its
-own `NOP` permid as both `permid` and `subject_permid`. That permid is the name's identity:
+own `TXN` permid as both `permid` and `subject_permid`. That permid is the name's identity:
 `taxa_linnaean.permid`, `taxa_clades.permid` and the derived `original_permid`,
-`accepted_spelling_permid` and `concept_permid` columns all hold `NOP` permids.
+`accepted_spelling_permid` and `concept_permid` columns all hold `TXN` permids.
 
 #### Scenario: A taxon is cited by its name permid
 - **WHEN** a client reads a taxon
-- **THEN** its `permid` has the prefix `NOP`
+- **THEN** its `permid` has the prefix `TXN`
+
+#### Scenario: A non-root name opinion's permid is not a taxon
+- **WHEN** the `opinions` migration mints a permid for a spelling or synonymy `name_opinions` row
+- **THEN** the permid has the prefix `TXN` and a number of at least 1,000,000, and no row of
+  `taxa_linnaean` or `taxa` has that permid
 
 ### Requirement: Each table carries its permid's number for ordering
 Every table with its own permid SHALL have

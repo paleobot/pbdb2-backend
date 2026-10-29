@@ -41,8 +41,8 @@ option B and the 2026-10-22 leaning) and in `design.md`.
 ## Capabilities
 
 ### New Capabilities
-- `prefixed-permids`: the permid format and check digits, the prefix set (including the reserved
-  `TXL` and `TXC`), the registry and its FKs, the per-column CHECKs, the mint and register
+- `prefixed-permids`: the permid format and check digits, the prefix set (`TXN` for
+  name_opinions, shared by the derived taxa tables), the registry and its FKs, the per-column CHECKs, the mint and register
   functions, sequences and the floor, `permid_no`, and the numbering source for each table.
 
 ### Modified Capabilities
@@ -54,7 +54,7 @@ option B and the 2026-10-22 leaning) and in `design.md`.
 - `pbot-refs-migration`, `pbot-person-migration`, `pbot-schema-migration`: permids come from
   `mint_permids`. The rule against reusing `pbotID` stays.
 - `name-opinions-migration`: root rows take the source `authorities` row's own `taxon_no` as their
-  `NOP` number, still
+  `TXN` number, still
   stored as both `permid` and `subject_permid`.
 - `synonymy-opinions-migration`, `assignment-opinions-migration`: permids come from the
   sequence, not `uuidv7()`.

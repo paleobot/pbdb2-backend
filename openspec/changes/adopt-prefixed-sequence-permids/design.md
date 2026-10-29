@@ -84,12 +84,13 @@ Settled while working through the open questions (2026-10-27):
 
 9. **Prefixes.** Where a pbdb2 table means the same thing as a Classic data-service extended
    identifier (`col:12345`, data1.2 "identifiers" doc), it reuses that prefix, uppercased.
-   Classic's `txn`, `var` and `opn` are not reused: Classic opinions are split across three
-   tables here, and the `txn`/`var` split doesn't map onto authorities and name_opinions.
+   Classic's `var` and `opn` are not reused: Classic opinions are split across three tables
+   here, and the `txn`/`var` split doesn't map onto authorities and name_opinions. `txn` is
+   reused for name_opinions, for readability rather than equivalence (revised by 20).
 
    | Table | Prefix | | Table | Prefix |
    |---|---|---|---|---|
-   | refs | `REF` (Classic) | | name_opinions | `NOP` |
+   | refs | `REF` (Classic) | | name_opinions | `TXN` (was `NOP`; 20) |
    | persons | `PRS` (Classic) | | assignment_opinions | `AOP` |
    | collections | `COL` (Classic) | | validity_opinions | `VOP` |
    | specimens | `SPM` (Classic) | | taxon_annotations | `TAN` |
@@ -97,21 +98,21 @@ Settled while working through the open questions (2026-10-27):
    | timescales | `TSC` (Classic) | | characters | `CHR` |
    | authorities | `AUT` | | states | `STA` |
 
-   **Reserved, not minted:** `TXL` (taxa_linnaean) and `TXC` (taxa_clades). Rows in those tables
-   have no identity of their own today. Their `permid` is the name permid (see 10).
+   ~~**Reserved, not minted:** `TXL` (taxa_linnaean) and `TXC` (taxa_clades).~~ Dropped by 20:
+   rows in those tables have no identity of their own, and their `permid` is already `TXN`.
 
    The separator stays `-` (Classic uses `:`, which ltree labels don't allow). A resolver for
    Classic's `col:12345` forms could come later; it's cheap because the number carries over.
-10. **Names use `NOP` permids.** Names-as-spelled have no separate permid space: every root
-    `name_opinions` row has `subject_permid = permid` (525,868 of 525,868 on localhost), and
-    `taxa_linnaean.permid`, `taxa_clades.permid` and the derived `*_permid` columns all hold that
-    value. So a taxon name is cited as `NOP-<taxon_no>-<CC>`. Its number is the Classic `taxon_no`,
-    the same number its authority has under `AUT`.
+10. **Names use name_opinions permids (`TXN`, was `NOP`; 20).** Names-as-spelled have no separate
+    permid space: every root `name_opinions` row has `subject_permid = permid` (525,868 of 525,868
+    on localhost), and `taxa_linnaean.permid`, `taxa_clades.permid` and the derived `*_permid`
+    columns all hold that value. So a taxon name is cited as `TXN-<taxon_no>-<CC>`. Its number is
+    the Classic `taxon_no`, the same number its authority has under `AUT`.
 11. **Other permid columns.** `intervals` and `timescales` get prefixes now (both empty and
     unfinished; on migration, Classic `interval_no` and `scale_no` are their legacy numbers).
     `taxon_annotations` uses the sequence only. `homonyms.permid` is not an identity but a
-    reference to a group member. It gets the CHECK and FK for `NOP`, and no prefix of its own. The
-    derived taxa tables only change type and gain the `NOP` CHECK.
+    reference to a group member. It gets the CHECK and FK for `TXN`, and no prefix of its own. The
+    derived taxa tables only change type and gain the `TXN` CHECK.
 12. **One floor, 1,000,000, for every sequence.** It is above every Classic number that becomes a
     permid (the largest is `taxon_no` at 526,272), so sequence-numbered IDs are visibly one digit
     longer than any legacy ID. Classic `opinion_no` (up to 1,029,177) isn't carried into any
@@ -148,11 +149,47 @@ Settled while applying (2026-10-27):
 19. **`pbot-refs` no longer adds `UNIQUE (permid)` to `refs` at run time.** On a versioned table that
     constraint would reject every new version; `refs_one_head_per_number` does its job.
 
+Revised after applying (2026-10-29):
+
+20. **name_opinions uses `TXN`, not `NOP`.** A taxon's permid is its root opinion's permid (10), so
+    the API's `/taxa` cited every taxon as `NOP-…`, which reads as "name opinion". This was always
+    the case: the UUID version set `subject_permid = permid` on root rows too, but a bare UUID didn't
+    show it. Renaming the prefix fixes how it reads and nothing else changes: same numbering (5),
+    same sequence floor (12), and still one prefix per table that creates permids (4). `TXL` and
+    `TXC` are dropped, not reserved. Verified on localhost before the revision: all 525,805 `taxa`
+    and `taxa_linnaean` rows match a live root opinion, and no non-root opinion is a taxon.
+
+    The name_opinions `*_permid` columns keep the name_opinions prefix. `subject_permid` and
+    `target_permid` are read as pointing at a root opinion, not at a separate name entity; the
+    data supports that, since every subject or target is a root row's permid.
+
+    **What's left:** one `TXN` permid can mean two things. A root opinion and its taxon share one
+    (`/taxa/TXN-n` and a future opinions endpoint), while a non-root opinion (`TXN-1000123-…`, a
+    spelling or synonymy edge) is never a taxon. That was true of `NOP` and of UUIDs. It is
+    harmless while links carry their `href` and nothing picks an endpoint from a permid's prefix.
+    Two consequences to handle when they come up:
+    - A resolver that takes a bare permid (`/permids/{id}`, Classic `txn:` redirects) needs a rule,
+      e.g. a taxon if one exists, else the opinion. That's an API design decision for
+      `docs/api-design-backlog.md`, not DDL.
+    - The API docs should say that name opinions share the `TXN` space and only a root opinion's
+      permid is also a taxon, so a 404 on `/taxa/TXN-1000123-…` is expected.
+
+    **`TXN-n` is not promised to equal Classic `txn:n`.** Our n is the spelling's `taxon_no`.
+    Classic's `txn:` is believed to use `orig_no` (unverified), with `var:` for spellings. They
+    agree for original combinations and differ for respellings and recombinations. A Classic
+    `txn:` resolver must check this first.
+
+    **Rejected: a separate `TXN` permid space for the derived tables only** (opinions keep `NOP`,
+    taxa map `NOP-n` → `TXN-n` in each `derive_*` and register `TXN` from a trigger on root
+    inserts). It separates names from opinions at the prefix, but it's a lot of machinery for
+    what is a readability fix. It stays open as a later change if the overlap becomes a real
+    problem.
+
 ## Risks / Trade-offs
 
 - [Permids carry meaning and are enumerable] → Accepted. The data is public, and citeable
   continuity with Classic is the point.
-- [`NOP-526271-xx` and `AUT-526271-xx` share a number but are different records] → Intended: one
+- [`TXN-526271-xx` and `AUT-526271-xx` share a number but are different records] → Intended: one
   Classic taxon, two pbdb2 views of it. The prefix and check digits keep them apart.
 - [Only this database can mint] → Confirmed that nothing outside it creates entities. If that
   changes, an outside system calls `mint_permids()` or A becomes the fallback.
@@ -173,4 +210,5 @@ legacy-numbered permids are identical across two rebuilds. Do localhost first, t
 
 ## Open Questions
 
-None. All seven were settled on 2026-10-27 (Decisions 9 to 15).
+None. All seven were settled on 2026-10-27 (Decisions 9 to 15). The `NOP` → `TXN` rename (20)
+was settled on 2026-10-29; implementing it is still to do.

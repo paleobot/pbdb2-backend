@@ -5,7 +5,7 @@
 The `taxa` list endpoint SHALL accept `limit` and `cursor` and return a bounded
 page with pagination links, on the same terms as every other list endpoint, using
 the stable numeric `permid` ordering the pagination capability defines. Taxa
-permids are `NOP` permids, so for migrated taxa this is Classic `taxon_no` order.
+permids are `TXN` permids, so for migrated taxa this is Classic `taxon_no` order.
 The `taxa` list SHALL NOT be unbounded.
 
 #### Scenario: Taxa list is bounded and paginated
@@ -17,4 +17,4 @@ The `taxa` list SHALL NOT be unbounded.
 #### Scenario: Taxa are ordered by taxon number
 
 - **WHEN** a client pages through the `taxa` list
-- **THEN** a taxon whose permid is `NOP-99-…` is returned before one whose permid is `NOP-100-…`
+- **THEN** a taxon whose permid is `TXN-99-…` is returned before one whose permid is `TXN-100-…`
