@@ -53,17 +53,21 @@ Settled in the backlog (2026-10-22, 2026-10-26). Repeated briefly here:
 
 1\. **The code is the permid (B), not a handle beside a UUID (A).** Under the committee's rules a
 handle would be a second permid of equal standing.
+
 2\. **Format `<PREFIX>-<number>-<CC>`**: decimal, no padding. `CC` is ISO 7064 MOD 97-10 over the
 whole uppercased ID with hyphens removed (A=10 … Z=35). Including the prefix catches a mistyped
 prefix. Zero-padding and a prefix in the middle were rejected.
+
 3\. **Storage**: `permid text`, plus `permid_no bigint GENERATED ALWAYS AS
 (split_part(permid, '-', 2)::bigint) STORED`. Versioned tables get a unique index on
 `permid_no` over heads. The text is the source of truth and FK target. Rejected for ordering:
 ICU numeric collation, plain `C` collation on the text, `created_at`.
+
 4\. **Registry** `permids(permid text COLLATE "C" PK, created_at)`. There is no `entity_type`
 column: the prefix already says it. Each permid column gets a CHECK on its own prefix, the
 format and the check digits, plus an FK to `permids`. `mint_permid(prefix)` refuses unknown
 prefixes. `created_at` is when the entity was created.
+
 5\. **Numbering by table**: refs, persons, collections and specimens use the Classic number.
 Authorities use `taxon_no`; a merged authority takes the lowest absorbed number, and the rest
 stay in `legacyIDs.oldpbdbIDs`. name_opinions uses the source `authorities` row's own `taxon_no` (one
@@ -71,13 +75,16 @@ root row per source row, so an absorbed `taxon_no` still names its own name) for
 root rows and the sequence for everything else. assignment/validity opinions, schemas,
 characters and states use the sequence only. PBot rows, sentinels and anything else with no
 Classic row use the sequence.
+
 6\. **Sequences**: one per prefix, starting at a fixed floor well above the Classic maximum (not
 max + 1, because Classic may keep taking writes). Each sequence is created with its
 start in the DDL, so a database built from the DDL can mint at once and the runner needs no
 setup step (decided while writing the specs, 2026-10-27; the backlog had a runner step).
+
 7\. **One change, not a sequence by layer.** The DDL, the migrations and the API reads have to
 switch together: the new schema rejects the old migration output, and the API can't read the
 new IDs without its changes. Tasks are grouped by layer within this change.
+
 8\. **`homonym_group_id` stays a UUID.** It is internal and never exposed.
 
 Settled while working through the open questions (2026-10-27):
@@ -103,29 +110,35 @@ rows in those tables have no identity of their own, and their `permid` is alread
 
 The separator stays `-` (Classic uses `:`, which ltree labels don't allow). A resolver for
 Classic's `col:12345` forms could come later; it's cheap because the number carries over.
+
 10\. **Names use name_opinions permids (`TXN`, was `NOP`; 20).** Names-as-spelled have no separate
 permid space: every root `name_opinions` row has `subject_permid = permid` (525,868 of 525,868
 on localhost), and `taxa_linnaean.permid`, `taxa_clades.permid` and the derived `*_permid`
 columns all hold that value. So a taxon name is cited as `TXN-<taxon_no>-<CC>`. Its number is
 the Classic `taxon_no`, the same number its authority has under `AUT`.
+
 11\. **Other permid columns.** `intervals` and `timescales` get prefixes now (both empty and
 unfinished; on migration, Classic `interval_no` and `scale_no` are their legacy numbers).
 `taxon_annotations` uses the sequence only. `homonyms.permid` is not an identity but a
 reference to a group member. It gets the CHECK and FK for `TXN`, and no prefix of its own. The
 derived taxa tables only change type and gain the `TXN` CHECK.
+
 12\. **One floor, 1,000,000, for every sequence.** It is above every Classic number that becomes a
 permid (the largest is `taxon_no` at 526,272), so sequence-numbered IDs are visibly one digit
 longer than any legacy ID. Classic `opinion_no` (up to 1,029,177) isn't carried into any
 table, so it doesn't constrain the floor.
+
 13\. **ltree labels hold permids as-is.** PG16+ allows `-` in labels, and permids contain only
 letters, digits and `-`. The `-`↔`_` swap goes from `db/03-taxa.sql` and
 `api/src/lib/classification-path.js`.
+
 14\. **The check-digit algorithm lives only in SQL.** Every permid needs a registry row before
 anything can reference it, so the migrations have to make a database round trip anyway. JS asks
 for formatted IDs in batches: `register_permids(prefix, bigint[])` for legacy numbers and
 `mint_permids(prefix, n)` for sequence numbers, both returning the text. The API never
 computes check digits (cursors use `permid_no`, and lookups go by the text), and the fixtures
 mint through SQL. There's one implementation and no cross-check test.
+
 15\. **Only this database mints, and nothing is public yet** (confirmed 2026-10-27). These were the
 backlog's conditions for B and for doing the rewrite now.
 
@@ -138,14 +151,17 @@ every new version (tested). Each versioned table instead has `<table>_one_head_p
 `EXCLUDE (permid_no WITH =) WHERE (succeeded_by_id IS NULL) DEFERRABLE INITIALLY DEFERRED`, checked
 at commit. Its index also serves list ordering. The derived taxa tables, like `persons`, have
 `permid_no … UNIQUE`.
+
 17\. **Tie-breaks on permids in the taxa functions sort by number.** Under UUIDv7 the last-resort
 tie-breaks (`original_permid ASC`, `cand.permid`) sorted in minting order; on text they would sort
 lexically (`NOP-100-…` before `NOP-99-…`). They now sort by `split_part(permid, '-', 2)::bigint`.
 The union-find representatives (`min(node)`) are only group labels, and take text order.
+
 18\. **Two PBot scripts mint one permid per insert.** `pbot-persons` (a later PBot person can match one
 inserted earlier in the run) and `pbot-schemas` (which rows insert is only known during the
 level-by-level parent resolution) can't know their rows up front. Both are small (~70 and ~1,700
 rows). Every other script registers or mints once per batch.
+
 19\. **`pbot-refs` no longer adds `UNIQUE (permid)` to `refs` at run time.** On a versioned table that
 constraint would reject every new version; `refs_one_head_per_number` does its job.
 
@@ -168,6 +184,7 @@ data supports that, since every subject or target is a root row's permid.
 spelling or synonymy edge) is never a taxon. That was true of `NOP` and of UUIDs. It is
 harmless while links carry their `href` and nothing picks an endpoint from a permid's prefix.
 Two consequences to handle when they come up:
+
 - A resolver that takes a bare permid (`/permids/{id}`, Classic `txn:` redirects) needs a rule,
    e.g. a taxon if one exists, else the opinion. That's an API design decision for
    `docs/api-design-backlog.md`, not DDL.
