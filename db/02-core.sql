@@ -159,7 +159,9 @@ $$ LANGUAGE plpgsql;
 -- ============================================================
 
 -- One row per entity, written once when its permid is created. Every permid
--- column in the schema is an FK to it. No entity-type column: the prefix says.
+-- column in the schema is an FK to it, and is COLLATE "C" like it: permids are
+-- ASCII codes, so comparisons are bytewise. Neither collation orders permids by
+-- number; that is permid_no's job. No entity-type column: the prefix says.
 CREATE TABLE permids (
     permid text COLLATE "C" PRIMARY KEY,
     created_at timestamptz NOT NULL DEFAULT now()
@@ -183,24 +185,43 @@ CREATE SEQUENCE permid_sch_seq START WITH 1000000;
 CREATE SEQUENCE permid_chr_seq START WITH 1000000;
 CREATE SEQUENCE permid_sta_seq START WITH 1000000;
 
+-- The ELSE of permid_prefix_digits: a SQL function can't raise by itself.
+CREATE OR REPLACE FUNCTION permid_unknown_prefix(prefix text)
+RETURNS text AS $$
+BEGIN
+    RAISE EXCEPTION 'unknown permid prefix %', prefix;
+END;
+$$ LANGUAGE plpgsql IMMUTABLE PARALLEL SAFE;
+
+-- The prefix written as digits (A=10 ... Z=35), e.g. TXN → 293323. This is the
+-- one list of mintable prefixes; anything else, NULL included, raises. Plain SQL
+-- so a call with a literal prefix folds to a constant.
+CREATE OR REPLACE FUNCTION permid_prefix_digits(prefix text)
+RETURNS text AS $$
+    SELECT CASE prefix
+        WHEN 'REF' THEN '271415'  WHEN 'PRS' THEN '252728'  WHEN 'COL' THEN '122421'
+        WHEN 'SPM' THEN '282522'  WHEN 'INT' THEN '182329'  WHEN 'TSC' THEN '292812'
+        WHEN 'AUT' THEN '103029'  WHEN 'TXN' THEN '293323'  WHEN 'AOP' THEN '102425'
+        WHEN 'VOP' THEN '312425'  WHEN 'TAN' THEN '291023'  WHEN 'SCH' THEN '281217'
+        WHEN 'CHR' THEN '121727'  WHEN 'STA' THEN '282910'
+        ELSE permid_unknown_prefix(prefix)
+    END
+$$ LANGUAGE sql IMMUTABLE PARALLEL SAFE;
+
 -- Raises unless prefix is one of the mintable prefixes above.
 CREATE OR REPLACE FUNCTION permid_check_prefix(prefix text)
 RETURNS void AS $$
 BEGIN
-    IF prefix IS NULL OR prefix NOT IN ('REF', 'PRS', 'COL', 'SPM', 'INT', 'TSC', 'AUT',
-                                        'TXN', 'AOP', 'VOP', 'TAN', 'SCH', 'CHR', 'STA') THEN
-        RAISE EXCEPTION 'unknown permid prefix %', prefix;
-    END IF;
+    PERFORM permid_prefix_digits(prefix);
 END;
 $$ LANGUAGE plpgsql IMMUTABLE PARALLEL SAFE;
 
--- The MOD 97-10 check digits for prefix + number, as two characters.
+-- The MOD 97-10 check digits for prefix + number, as two characters. Not STRICT,
+-- so it can be inlined into permid_is_valid.
 CREATE OR REPLACE FUNCTION permid_check_digits(prefix text, number bigint)
 RETURNS text AS $$
-    SELECT lpad((98 - ((SELECT string_agg((ascii(c) - 55)::text, '' ORDER BY i)
-                          FROM unnest(string_to_array(prefix, NULL)) WITH ORDINALITY AS u(c, i))
-                       || number::text || '00')::numeric % 97)::text, 2, '0')
-$$ LANGUAGE sql IMMUTABLE STRICT PARALLEL SAFE;
+    SELECT lpad((98 - (permid_prefix_digits(prefix) || number::text || '00')::numeric % 97)::text, 2, '0')
+$$ LANGUAGE sql IMMUTABLE PARALLEL SAFE;
 
 -- (prefix, number) → '<PREFIX>-<number>-<CC>'.
 CREATE OR REPLACE FUNCTION format_permid(prefix text, number bigint)
@@ -215,17 +236,19 @@ END;
 $$ LANGUAGE plpgsql IMMUTABLE PARALLEL SAFE;
 
 -- The CHECK on every permid column: value has this prefix, a number with no
--- leading zero, and correct check digits. Registration is the FK's job.
+-- leading zero, and correct check digits. Registration is the FK's job. Plain SQL
+-- and not STRICT, so PostgreSQL inlines it into each CHECK and folds the literal
+-- prefix's parts to constants; a NULL value still gives NULL. The first arm only
+-- makes an unknown prefix raise whatever the value; the CASE keeps the bigint
+-- cast away from values that fail the format.
 CREATE OR REPLACE FUNCTION permid_is_valid(value text, prefix text)
 RETURNS boolean AS $$
-BEGIN
-    PERFORM permid_check_prefix(prefix);
-    IF value !~ ('^' || prefix || '-[1-9][0-9]{0,17}-[0-9]{2}$') THEN
-        RETURN false;
-    END IF;
-    RETURN split_part(value, '-', 3) = permid_check_digits(prefix, split_part(value, '-', 2)::bigint);
-END;
-$$ LANGUAGE plpgsql IMMUTABLE STRICT PARALLEL SAFE;
+    SELECT CASE
+        WHEN permid_prefix_digits(prefix) IS NULL THEN NULL
+        WHEN value !~ ('^' || prefix || '-[1-9][0-9]{0,17}-[0-9]{2}$') THEN false
+        ELSE split_part(value, '-', 3) = permid_check_digits(prefix, split_part(value, '-', 2)::bigint)
+    END
+$$ LANGUAGE sql IMMUTABLE PARALLEL SAFE;
 
 -- Registers Classic numbers as permids and returns them in input order. All or
 -- nothing: refuses numbers outside [1, floor), repeats within the call, and
@@ -291,7 +314,7 @@ CREATE TABLE persons (
     -- call below), so there is no succession chain to carry that guarantee and
     -- UNIQUE carries "one row per permid" directly -- the same reasoning
     -- taxa_linnaean states inline in 03-taxa.sql.
-    permid text NOT NULL UNIQUE REFERENCES permids CHECK (permid_is_valid(permid, 'PRS')),
+    permid text COLLATE "C" NOT NULL UNIQUE REFERENCES permids CHECK (permid_is_valid(permid, 'PRS')),
     permid_no bigint GENERATED ALWAYS AS (split_part(permid, '-', 2)::bigint) STORED UNIQUE,
     password text,
     role_id integer REFERENCES dictionaries.roles("id") NOT NULL,
@@ -304,7 +327,7 @@ CREATE TABLE persons (
     
  CREATE TABLE refs (
     id bigint GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY, --This is the id of the reference record. It will be unique for each version of the reference.
-    permid text NOT NULL REFERENCES permids CHECK (permid_is_valid(permid, 'REF')),
+    permid text COLLATE "C" NOT NULL REFERENCES permids CHECK (permid_is_valid(permid, 'REF')),
     permid_no bigint GENERATED ALWAYS AS (split_part(permid, '-', 2)::bigint) STORED,
     authorizer_person_id integer REFERENCES persons("id") NOT NULL, -- Whoever was the authorizer of the enterer
     enterer_person_id integer REFERENCES persons("id") NOT NULL, -- Whoever made the entry or edit
@@ -320,7 +343,7 @@ SELECT install_version_triggers('refs');
 -- from scale_data in original
 CREATE TABLE timescales (
     id integer GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
-    permid text NOT NULL REFERENCES permids CHECK (permid_is_valid(permid, 'TSC')),
+    permid text COLLATE "C" NOT NULL REFERENCES permids CHECK (permid_is_valid(permid, 'TSC')),
     permid_no bigint GENERATED ALWAYS AS (split_part(permid, '-', 2)::bigint) STORED,
     authorizer_person_id integer REFERENCES persons("id"),
     enterer_person_id integer REFERENCES persons("id"),
@@ -337,7 +360,7 @@ SELECT install_version_triggers('timescales');
 -- From interval_data in original
 CREATE TABLE intervals (
     id integer GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
-    permid text NOT NULL REFERENCES permids CHECK (permid_is_valid(permid, 'INT')),
+    permid text COLLATE "C" NOT NULL REFERENCES permids CHECK (permid_is_valid(permid, 'INT')),
     permid_no bigint GENERATED ALWAYS AS (split_part(permid, '-', 2)::bigint) STORED,
     authorizer_person_id integer REFERENCES persons("id"),
     enterer_person_id integer REFERENCES persons("id"),
@@ -362,7 +385,7 @@ CREATE TABLE lookup.intervals_timescales (
 
 CREATE TABLE collections (
     id bigint GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY, --This is the id of the collection record. It will be unique for each version of the collection.
-    permid text NOT NULL REFERENCES permids CHECK (permid_is_valid(permid, 'COL')),
+    permid text COLLATE "C" NOT NULL REFERENCES permids CHECK (permid_is_valid(permid, 'COL')),
     permid_no bigint GENERATED ALWAYS AS (split_part(permid, '-', 2)::bigint) STORED,
     authorizer_person_id integer REFERENCES persons("id") NOT NULL, -- Whoever was the authorizer of the enterer
     enterer_person_id integer REFERENCES persons("id") NOT NULL, -- Whoever made the entry or edit
@@ -391,13 +414,13 @@ CREATE INDEX additional_collection_refs_collection_idx ON additional_collection_
 
 CREATE TABLE specimens (
     id bigint GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY, --This is the id of the specimen record. It will be unique for each version of the reference.
-    permid text NOT NULL REFERENCES permids CHECK (permid_is_valid(permid, 'SPM')),
+    permid text COLLATE "C" NOT NULL REFERENCES permids CHECK (permid_is_valid(permid, 'SPM')),
     permid_no bigint GENERATED ALWAYS AS (split_part(permid, '-', 2)::bigint) STORED,
     --specimen_type_id integer REFERENCES dictionaries.specimen_types("id"),
     authorizer_person_id integer REFERENCES persons("id") NOT NULL, -- Whoever was the authorizer of the enterer
     enterer_person_id integer REFERENCES persons("id") NOT NULL, -- Whoever made the entry or edit
     specimen jsonb NOT NULL, 
-    name_opinions_permid text REFERENCES permids CHECK (permid_is_valid(name_opinions_permid, 'TXN')),
+    name_opinions_permid text COLLATE "C" REFERENCES permids CHECK (permid_is_valid(name_opinions_permid, 'TXN')),
     oldpbdb_occurrence_no integer, -- For migration. Can be dropped after.
     collection_id bigint REFERENCES collections("id"), 
     reference_id bigint REFERENCES refs("id") NOT NULL, -- NOT NULL, but during migration from PBOT or 1.0 may be inherited from collection
@@ -411,7 +434,7 @@ SELECT install_version_triggers('specimens');
 
 CREATE TABLE schemas (
     id bigint GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
-    permid text NOT NULL REFERENCES permids CHECK (permid_is_valid(permid, 'SCH')),
+    permid text COLLATE "C" NOT NULL REFERENCES permids CHECK (permid_is_valid(permid, 'SCH')),
     permid_no bigint GENERATED ALWAYS AS (split_part(permid, '-', 2)::bigint) STORED,
     authorizer_person_id integer REFERENCES persons("id") NOT NULL, -- Whoever was the authorizer of the enterer
     enterer_person_id integer REFERENCES persons("id") NOT NULL, -- Whoever made the entry or edit
@@ -435,7 +458,7 @@ CREATE TABLE additional_schema_refs (
 
 CREATE TABLE characters (
     id bigint GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
-    permid text NOT NULL REFERENCES permids CHECK (permid_is_valid(permid, 'CHR')),
+    permid text COLLATE "C" NOT NULL REFERENCES permids CHECK (permid_is_valid(permid, 'CHR')),
     permid_no bigint GENERATED ALWAYS AS (split_part(permid, '-', 2)::bigint) STORED,
     authorizer_person_id integer REFERENCES persons("id") NOT NULL, -- Whoever was the authorizer of the enterer
     enterer_person_id integer REFERENCES persons("id") NOT NULL, -- Whoever made the entry or edit
@@ -458,7 +481,7 @@ SELECT install_version_triggers('characters');
 
 CREATE TABLE states (
     id bigint GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
-    permid text NOT NULL REFERENCES permids CHECK (permid_is_valid(permid, 'STA')),
+    permid text COLLATE "C" NOT NULL REFERENCES permids CHECK (permid_is_valid(permid, 'STA')),
     permid_no bigint GENERATED ALWAYS AS (split_part(permid, '-', 2)::bigint) STORED,
     authorizer_person_id integer REFERENCES persons("id") NOT NULL, -- Whoever was the authorizer of the enterer
     enterer_person_id integer REFERENCES persons("id") NOT NULL, -- Whoever made the entry or edit
@@ -485,7 +508,7 @@ SELECT install_version_triggers('states');
 -- It is now exlusivley a table of authorities, and the taxonomic names themselves are stored in the taxa table.
 CREATE TABLE authorities (
     id bigint GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
-    permid text NOT NULL REFERENCES permids CHECK (permid_is_valid(permid, 'AUT')),
+    permid text COLLATE "C" NOT NULL REFERENCES permids CHECK (permid_is_valid(permid, 'AUT')),
     permid_no bigint GENERATED ALWAYS AS (split_part(permid, '-', 2)::bigint) STORED,
     authorizer_person_id integer REFERENCES persons("id") NOT NULL, -- Whoever was the authorizer of the enterer
     enterer_person_id integer REFERENCES persons("id") NOT NULL, -- Whoever made the entry or edit
@@ -534,7 +557,7 @@ SELECT install_version_triggers('authorities');
 -- assignment_opinions / rename_opinions / homonyms block that stood here.
 --
 -- Conventions inherited from elsewhere in this file:
---   * permid text, an FK to permids, CHECK permid_is_valid(permid, '<PREFIX>'),
+--   * permid text COLLATE "C", an FK to permids, CHECK permid_is_valid(permid, '<PREFIX>'),
 --     and a generated permid_no — permids come from register_permids() and
 --     mint_permids() (prefixed-permids). Each versioned table also has a
 --     <table>_one_head_per_number constraint (end of this file).
@@ -581,14 +604,14 @@ SELECT install_version_triggers('authorities');
 -- original (the migration ignores orig_no and rebuilds the lineage from these edges).
 CREATE TABLE name_opinions (
     id bigint GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
-    permid text NOT NULL REFERENCES permids CHECK (permid_is_valid(permid, 'TXN')),  -- opinion identity across transcription corrections
+    permid text COLLATE "C" NOT NULL REFERENCES permids CHECK (permid_is_valid(permid, 'TXN')),  -- opinion identity across transcription corrections
     permid_no bigint GENERATED ALWAYS AS (split_part(permid, '-', 2)::bigint) STORED,
     authorizer_person_id integer REFERENCES persons("id") NOT NULL,
     enterer_person_id integer REFERENCES persons("id") NOT NULL,
     oldpbdb_taxon_no integer,
 
-    subject_permid text NOT NULL REFERENCES permids CHECK (permid_is_valid(subject_permid, 'TXN')),  -- the name-as-spelled this opinion is about
-    target_permid text REFERENCES permids CHECK (permid_is_valid(target_permid, 'TXN')),  -- what subject defers to; NULL only for edge_class 'root' ('original')
+    subject_permid text COLLATE "C" NOT NULL REFERENCES permids CHECK (permid_is_valid(subject_permid, 'TXN')),  -- the name-as-spelled this opinion is about
+    target_permid text COLLATE "C" REFERENCES permids CHECK (permid_is_valid(target_permid, 'TXN')),  -- what subject defers to; NULL only for edge_class 'root' ('original')
     reason_id integer NOT NULL,            -- FK is composite with edge_class, below
     edge_class text NOT NULL,              -- pinned copy of the reason's edge_class (Way 2 / A1). Lets the
                                            -- shape CHECK run as a plain same-row CHECK; the composite FK
@@ -667,13 +690,13 @@ CREATE TABLE name_opinions (
 -- never "we couldn't figure out which."
 CREATE TABLE assignment_opinions (
     id bigint GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
-    permid text NOT NULL REFERENCES permids CHECK (permid_is_valid(permid, 'AOP')),  -- opinion identity across transcription corrections
+    permid text COLLATE "C" NOT NULL REFERENCES permids CHECK (permid_is_valid(permid, 'AOP')),  -- opinion identity across transcription corrections
     permid_no bigint GENERATED ALWAYS AS (split_part(permid, '-', 2)::bigint) STORED,
     authorizer_person_id integer REFERENCES persons("id") NOT NULL,
     enterer_person_id integer REFERENCES persons("id") NOT NULL,
 
-    subject_permid text NOT NULL REFERENCES permids CHECK (permid_is_valid(subject_permid, 'TXN')),
-    containing_permid text REFERENCES permids CHECK (permid_is_valid(containing_permid, 'TXN')),  -- NULL = Classic asserted no containing taxon (see above)
+    subject_permid text COLLATE "C" NOT NULL REFERENCES permids CHECK (permid_is_valid(subject_permid, 'TXN')),
+    containing_permid text COLLATE "C" REFERENCES permids CHECK (permid_is_valid(containing_permid, 'TXN')),  -- NULL = Classic asserted no containing taxon (see above)
     questioned boolean NOT NULL DEFAULT false,   -- incertae sedis
 
     reference_id bigint REFERENCES refs("id") NOT NULL,
@@ -717,12 +740,12 @@ CREATE TABLE assignment_opinions (
 -- all — recorded for the historical record only (mapping doc §5.2).
 CREATE TABLE validity_opinions (
     id bigint GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
-    permid text NOT NULL REFERENCES permids CHECK (permid_is_valid(permid, 'VOP')),  -- opinion identity across transcription corrections
+    permid text COLLATE "C" NOT NULL REFERENCES permids CHECK (permid_is_valid(permid, 'VOP')),  -- opinion identity across transcription corrections
     permid_no bigint GENERATED ALWAYS AS (split_part(permid, '-', 2)::bigint) STORED,
     authorizer_person_id integer REFERENCES persons("id") NOT NULL,
     enterer_person_id integer REFERENCES persons("id") NOT NULL,
 
-    subject_permid text NOT NULL REFERENCES permids CHECK (permid_is_valid(subject_permid, 'TXN')),
+    subject_permid text COLLATE "C" NOT NULL REFERENCES permids CHECK (permid_is_valid(subject_permid, 'TXN')),
     nomenclatural_status_id integer NOT NULL REFERENCES dictionaries.nomenclatural_statuses("id"),
 
     reference_id bigint REFERENCES refs("id") NOT NULL,
@@ -756,12 +779,12 @@ CREATE TABLE validity_opinions (
 -- content whose edits are genuine changes of content.
 CREATE TABLE taxon_annotations (
     id bigint GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
-    permid text NOT NULL REFERENCES permids CHECK (permid_is_valid(permid, 'TAN')),
+    permid text COLLATE "C" NOT NULL REFERENCES permids CHECK (permid_is_valid(permid, 'TAN')),
     permid_no bigint GENERATED ALWAYS AS (split_part(permid, '-', 2)::bigint) STORED,
     authorizer_person_id integer REFERENCES persons("id") NOT NULL,
     enterer_person_id integer REFERENCES persons("id") NOT NULL,
 
-    subject_permid text NOT NULL REFERENCES permids CHECK (permid_is_valid(subject_permid, 'TXN')),  -- the taxon being annotated
+    subject_permid text COLLATE "C" NOT NULL REFERENCES permids CHECK (permid_is_valid(subject_permid, 'TXN')),  -- the taxon being annotated
     common_name text,
     comments text,
     discussion text,
@@ -788,7 +811,7 @@ CREATE INDEX taxon_annotations_head_subject_idx
 CREATE TABLE homonyms (
     id bigint GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
     homonym_group_id uuid NOT NULL CHECK ((get_byte(uuid_send(homonym_group_id), 6) >> 4) = 7),
-    permid text NOT NULL REFERENCES permids CHECK (permid_is_valid(permid, 'TXN')),  -- a member name, not an identity of its own
+    permid text COLLATE "C" NOT NULL REFERENCES permids CHECK (permid_is_valid(permid, 'TXN')),  -- a member name, not an identity of its own
     created_at timestamptz DEFAULT NOW(),
     UNIQUE (homonym_group_id, permid)
 );

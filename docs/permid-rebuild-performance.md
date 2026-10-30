@@ -1,6 +1,7 @@
 # Prefixed Permids and Rebuild Performance: Measured Findings
 
-**Status:** Design reference (measured; no change proposed yet)
+**Status:** Design reference (measured; options A and B adopted by `collate-c-permids`,
+2026-10-30)
 **Audience:** PBDB2 backend contributors
 **Subject:** What the switch from UUIDv7 to prefixed text permids
 (`adopt-prefixed-sequence-permids`) cost in bulk write performance, where the cost
@@ -13,8 +14,9 @@ comes from, and the options for getting it back
 After `adopt-prefixed-sequence-permids` was applied, the migration runner and the taxa
 rebuild were visibly slower than before. This document records the measurements taken on
 2026-10-29 so a later decision (fix now, fix with the opinion write path, or accept) can
-cite numbers instead of re-deriving them. No change has been created to act on them. If
-one is, its own `design.md` will hold the decisions; this document is the evidence.
+cite numbers instead of re-deriving them. `collate-c-permids` (2026-10-30) adopted
+options A and B (§7) and added its own measurements here; its `design.md` holds the
+decisions, and this document is the evidence.
 
 "Decision n" below refers to the numbered decisions in the design of
 `adopt-prefixed-sequence-permids`:
@@ -23,7 +25,7 @@ one is, its own `design.md` will hold the decisions; this document is the eviden
 The short version: **reads are unaffected; bulk writes are slower.** A full taxa rebuild
 takes 539 s against 315 s with UUIDs (+71%). About half of that is the database collation
 used to compare text permids, and about a third is the per-row CHECK and FK on the derived
-taxa tables.
+taxa tables. With A and B adopted, the rebuild takes 396–421 s (§5).
 
 ## 2. Setup
 
@@ -57,20 +59,26 @@ Seconds per step, from `migrations/src/run-migrations.log`. The log doesn't reco
 target, so each run is attributed from its `persons` time (about 2 s on localhost, about
 100 s on Aurora).
 
-| Step | Localhost UUID (10-19) | Localhost text (10-28, 10-28, 10-29) | Aurora UUID (10-20) | Aurora TXN (10-29) |
-|---|---|---|---|---|
-| persons | 2 | 3, 3, 2 | 106 | 105 |
-| refs | 7 | 14, 14, 11 | 42 | 92 |
-| pbot-schemas | 6 | 12, 8, 7 | 260 | 387 |
-| authorities | 11 | 22, 20, 17 | 38 | 60 |
-| authority-opinions | 23 | 55, 52, 45 | 120 | 280 |
-| opinions | 39 | 118, 120, 99 | 225 | 539 |
-| collections | 36 | 54, 46, 43 | 158 | 323 |
-| specimens | 14 | 25, 21, 20 | 50 | 90 |
-| taxa (step alone) | 364 (10-21) | 610, 551, 549 | 548 (10-21) | 739 |
+| Step | Localhost UUID (10-19) | Localhost text (10-28, 10-28, 10-29) | Localhost B only, A + B (10-30) | Aurora UUID (10-20) | Aurora TXN (10-29) |
+|---|---|---|---|---|---|
+| persons | 2 | 3, 3, 2 | 2, 2 | 106 | 105 |
+| refs | 7 | 14, 14, 11 | 10, 9 | 42 | 92 |
+| pbot-schemas | 6 | 12, 8, 7 | 8, 7 | 260 | 387 |
+| authorities | 11 | 22, 20, 17 | 17, 14 | 38 | 60 |
+| authority-opinions | 23 | 55, 52, 45 | 46, 39 | 120 | 280 |
+| opinions | 39 | 118, 120, 99 | 77, 70 | 225 | 539 |
+| collections | 36 | 54, 46, 43 | 41, 40 | 158 | 323 |
+| specimens | 14 | 25, 21, 20 | 18, 17 | 50 | 90 |
+| taxa (step alone) | 364 (10-21) | 610, 551, 549 | 519, 382 | 548 (10-21) | 739 |
 
 The full Aurora run went from roughly 20 to 46 minutes. The 10-19 localhost run predates
 the taxa runner step, so its taxa figure is the standalone UUID taxa run from 10-21.
+
+The two 10-30 runs are the builds `collate-c-permids` compared: "B only" has the inlined
+CHECK function and `cycle_members` sorted by number, with the permid columns still
+default-collated; "A + B" adds `COLLATE "C"`. Every migration step is faster under A + B,
+most of all `opinions` (99 → 70 s, of which B alone gives 99 → 77 s) and `taxa` (549 →
+382 s, almost all of it A).
 
 Aurora's migration steps roughly doubled, more than localhost's did. The likely reason is
 extra round trips: `register_permids` and `mint_permids` add a call per batch, and
@@ -91,10 +99,26 @@ Every run produced 525,805 / 3,346 / 20,264 / 525,805 rows.
 | TXN without permid CHECKs on derived tables | 95.2 | 6.8 | 3.7 | 380.3 | 486 |
 | TXN without permid CHECKs or FKs on derived tables | 81.2 | 6.6 | 3.4 | 363.8 | 455 |
 | TXN with all 41 permid columns `COLLATE "C"` (constraints kept) | 93.3 | 6.7 | 3.0 | 317.7 | **421** |
+| TXN, B only (10-30) | 102.5 | 7.2 | 4.0 | 416.8 | 530 |
+| TXN, A + B, as adopted (10-30, two runs) | 81.6, 78.7 | 6.6, 6.9 | 2.7, 2.5 | 329.7, 307.8 | **421, 396** |
 
 "Derived tables" means the five tables above: 18 permid CHECKs and 18 FKs to `permids`.
 The collation variant changes every public `*permid` text column, opinion tables included,
 and nothing else.
+
+The 10-30 rows are copies of full builds from the DDL, not altered copies: "B only" is
+`collate-c-permids` without the `COLLATE "C"` declarations, "A + B" is the change as
+adopted. The two A + B runs, on the same copy, differ by 25 s, almost all of it in
+`rebuild_taxa`, so a single run's total is good to about that much. What they show:
+
+- A + B lands at 396–421 s, about what A alone gave (421 s), not the ~370 s that A's 118 s
+  plus B's share of 53 s would suggest.
+- B recovers little. On its own it saved 9 s, within the noise. `rebuild_linnaean` did
+  improve both times (120 → 102 s without A, 93 → 79–82 s with it); `rebuild_taxa` did not
+  move outside the noise. Measured alone, the new function is 4.6 times cheaper (1.90 s →
+  0.41 s over 525,805 values in a `SELECT`), so most of the 53 s that dropping the CHECKs
+  saved was something other than the function's own cost. What it was was not
+  investigated.
 
 ### Where the 224 s goes
 
@@ -107,8 +131,8 @@ UUID build                                              315 s
 = TXN build, as is                                      539 s
 ```
 
-The parts were measured one at a time. Whether they add up, i.e. whether all three fixes
-together reach about 335 s, has not been tested.
+The parts were measured one at a time, and they don't simply add up: A + B together
+measured 396–421 s (above). A + B + C has not been measured.
 
 ## 6. The causes
 
@@ -137,6 +161,10 @@ digit string with `string_agg` over `unnest(string_to_array(prefix, NULL))`. Mea
 derived tables have 18 such CHECKs, so a full rebuild makes several million calls. The same
 function guards every permid column on every table, so the migrations pay it too.
 
+`collate-c-permids` replaced it with a plain SQL function that PostgreSQL inlines into
+each CHECK, with the prefix's digits looked up in `permid_prefix_digits` (option B). §5
+has what that recovered.
+
 ### 6.3 Registry FKs (31 s on the derived tables)
 
 Each inserted permid value is a separate lookup into the 2.45-million-row `permids` table,
@@ -151,17 +179,19 @@ tie-break sorts (decision 17).
 
 | | What | Recovers (taxa rebuild) | Also helps | Cost / trade-off |
 |---|---|---|---|---|
-| **A** | Declare every permid column `COLLATE "C"` in `db/02-core.sql` and `db/03-taxa.sql` | ~118 s (measured) | migrations, future opinion writes, any permid sort or join | Small DDL edit. PG16 blocks `ALTER TYPE` under a generated column, but the DDL is always rebuilt, so the columns are just declared that way. Needs a full-content diff (see below). |
-| **B** | Rewrite `permid_is_valid` as a plain SQL function with precomputed prefix digits | part of 53 s (not measured) | every table's inserts, so all migrations | Small. One function; the SQL permid tests already cover it. |
+| **A** | **Adopted** (`collate-c-permids`). Declare every permid column `COLLATE "C"` in `db/02-core.sql` and `db/03-taxa.sql` | ~118 s (measured); A + B: 118–143 s | migrations, future opinion writes, any permid sort or join | Small DDL edit. PG16 blocks `ALTER TYPE` under a generated column, but the DDL is always rebuilt, so the columns are just declared that way. Needs a full-content diff (see below). |
+| **B** | **Adopted** (`collate-c-permids`). Rewrite `permid_is_valid` as a plain SQL function with precomputed prefix digits | 9 s alone, within noise (§5) | every table's inserts, so all migrations | Small. One function; the SQL permid tests already cover it. |
 | **C** | Drop the permid CHECKs and FKs on the derived taxa tables | up to 84 s (measured together) | partial re-derivations on opinion writes | Reverses part of decision 11. The tables are rebuildable caches, every value comes from opinion columns that are already checked, and `assert_*_invariant()` re-checks them. But a derive bug would surface at assert time instead of insert time. |
 | **D** | Fewer round trips: batch the per-insert mints in `pbot-persons`/`pbot-schemas`, or register permids in the same statement as the insert | Aurora migration time | Aurora runs only | Script changes. Decision 18 chose per-insert minting because those scripts can't know their rows up front. |
 | **E** | Accept | — | — | Costs fall on rebuilds and migrations today. They will matter once the opinion write path exists, since every opinion write reruns part of the derivation. |
 
-A and B are cheap and independent of each other. C is a design decision and is easier to
-judge after A and B, when what's left to gain is known.
+A and B were adopted together by `collate-c-permids` (2026-10-30), which leaves the
+rebuild at 396–421 s against 315 s with UUIDs. C is a design decision and is still open;
+what it can recover on top of A + B has not been measured.
 
 ### Correctness caveat for A
 
+This section is the analysis `collate-c-permids` started from; the outcome is at its end.
 The collation variant's row counts matched, but its contents were not compared. The two
 collations order permids differently, because en_US largely ignores the hyphens and `"C"`
 compares bytes (`-` sorts before every digit):
@@ -183,28 +213,35 @@ output (checked 2026-10-30):
 | 1 | Union-find representatives, `lin_rep`/`con_rep` = `min(node)`, in all three derive functions | yes | No. They are only join and partition keys and are never stored (no derived table has a `_rep` column). A different member may become the label, but the groups are the same. |
 | 2 | Contest orderings (accepted spelling, original, senior lineage, winning assignment) | no | They end in `opinion_id` or the permid number (decision 17), so every tie has the same winner. |
 | 3 | `array_agg(DISTINCT concept_permid)`, stored as `cycle_cuts.cycle_members` | yes | Yes, but only the element order. `DISTINCT` sorts by the collation; the set of members is unchanged. 72 rows today (54 `taxa`, 18 `taxa_clades`). |
-| 4 | `derive_taxa`'s cycle walk starts from `FROM _dtu_peel p LIMIT 1`, with no `ORDER BY` | indirectly | Possibly. The start row depends on the query plan and on the order rows were stored in, and the collation can change both (merge joins on permids). When several cycles exist at once, a different start can cut them in a different order. The code comment accepts this. `derive_linnaean` and `derive_taxa_clades` find all cycle members at once and have no start row. |
+| 4 | `derive_taxa`'s cycle walk starts from `FROM _dtu_peel p LIMIT 1`, with no `ORDER BY` | indirectly | No. The start row depends on the query plan and the stored row order, and so may the order in which coexisting cycles are cut, but that order can't change the result (below). |
 | 5 | `classification_path` (ltree) | no | ltree compares labels bytewise, whatever the collation. |
 
 The API orders lists by `permid_no`, never by permid text.
 
-Only 4 can change the taxonomy (`containing_concept_permid`, `classification_path`), and
-only when two cycles interact, so that cutting one changes which edge wins in the other.
-One piece of evidence says it doesn't happen on current data: the UUID → text switch
-changed every representative, every text order and likely the plans, yet the graph
-snapshot keyed by `taxon_no` came out byte-identical (2026-10-28). That is evidence, not
-proof, and says nothing about future data.
+Only 3 reached stored output. 4 looked like it could change the taxonomy
+(`containing_concept_permid`, `classification_path`) when several cycles exist at once,
+but it can't, as `collate-c-permids` (design decision 5) showed:
 
-A change adopting A should:
+- `_dtu_node` gives each concept exactly one container, so the containment graph is
+  functional and its cycles never share a node.
+- Cutting one cycle's weakest edge changes only that node's own edge. Its replacement is
+  its next-best assignment, which depends only on its own opinions and the excluded set.
+  Every other cycle is still there with the same weakest edge.
+- So two cuts give the same state in either order. The loop always terminates, so every
+  order ends at the same set of cuts, and each logged cycle has the same members. The same
+  holds for the seeded path's loop over `_dtu_seed_con_reps`.
 
-- give the walk start in 4 an `ORDER BY` (for example the number of `concept_permid`), so
-  the cut order depends on neither the plan nor the collation. This is worth doing
-  without A too, since partial re-derivations on opinion writes need to be repeatable;
-- sort `cycle_members` by number, as decision 17 does for the tie-breaks;
-- then diff the full contents of `taxa_linnaean`, `taxa_clades`, `taxa_attachments`,
-  `taxa` and `cycle_cuts`, not just the counts. Compare a build with the two fixes under
-  en_US against the same build under `"C"`, so that only the collation differs. With the
-  fixes in place, any difference is a bug.
+The walk start therefore keeps its `LIMIT 1` with no `ORDER BY`. `collate-c-permids`:
+
+- sorted `cycle_members` by number in all five places that build it (`derive_linnaean` and
+  `derive_taxa`, full and seeded; `derive_taxa_clades`), as decision 17 does for the
+  tie-breaks;
+- built localhost twice from the DDL, once with the permid columns under en_US and once
+  under `"C"`, and diffed the full contents of `taxa_linnaean`, `taxa_clades`,
+  `taxa_attachments`, `taxa` and `cycle_cuts` (every column but `id` and `created_at`).
+  They were identical, including the 72 `cycle_cuts` rows, 45 of which list their members
+  in a different order by text than by number;
+- checked the seeded paths, which the profile doesn't run (§8).
 
 ## 8. Method, for reproducing
 
@@ -236,6 +273,24 @@ SELECT rebuild_taxa();
   table, recreate the saved definitions, and `ANALYZE`. (PG16 refuses to change a column a
   generated column depends on, hence the drop and re-add.)
 - *UUID baseline:* the same run on a copy of `pbdb_pre_permids`.
+- *B only, A + B (10-30):* the same run on a copy of a full `--createdb` build, without and
+  with the `COLLATE "C"` declarations.
+
+**Seeded paths** (`collate-c-permids`, on the A + B build). The derive functions' seeded
+paths run nowhere in the rebuild, so they were checked directly: a seed set of every
+`cycle_cuts.cycle_members` element plus 1,000 other taxa permids (1,056 in all), then for
+each of `derive_linnaean`, `derive_taxa_clades` and `derive_taxa`:
+
+```sql
+CREATE TEMP TABLE full_rows AS SELECT * FROM derive_taxa(NULL);
+CREATE TEMP TABLE seed_rows AS SELECT * FROM derive_taxa(:seed);
+SELECT * FROM seed_rows
+EXCEPT SELECT * FROM full_rows WHERE permid IN (SELECT permid FROM seed_rows);
+SELECT * FROM full_rows WHERE permid = ANY (:seed) OR permid IN (SELECT permid FROM seed_rows)
+EXCEPT SELECT * FROM seed_rows;
+```
+
+Both directions were empty for all three, and no call raised a collation error.
 
 **Micro-benchmarks** (§3, §6) ran on `pbdb` with `max_parallel_workers_per_gather = 0`.
 Expressions such as `permid || ''` keep the planner from answering a sort from the unique
@@ -243,11 +298,14 @@ index.
 
 ## 9. Open questions
 
-- Do A, B and C add up? Measure A + B, then A + B + C, before deciding C.
-- How much of the 53 s does B recover? Measure `permid_is_valid` before and after on the
-  same 525,805 values.
+- Do A, B and C add up? A + B: 396–421 s, about what A alone gave (§5). A + B + C is
+  still to be measured before deciding C.
+- How much of the 53 s does B recover? Answered: little (§5). The function itself is 4.6
+  times cheaper; why that barely shows in the rebuild is not known.
 - What is the unattributed ~22 s?
 - How large are the partial re-derivations an opinion write will trigger, and do the
   per-row costs matter at that size? That depends on the write-path design.
 - Aurora's taxa step went from 548 s to 739 s (+35%), a smaller relative increase than
-  localhost's. Not investigated; Aurora's database collation was not checked.
+  localhost's. Not investigated; Aurora's database collation was not checked. With A, the
+  permid columns are `"C"` whatever the default, so it matters less; it is to be checked
+  at the next Aurora rebuild.
