@@ -101,6 +101,7 @@ Every run produced 525,805 / 3,346 / 20,264 / 525,805 rows.
 | TXN with all 41 permid columns `COLLATE "C"` (constraints kept) | 93.3 | 6.7 | 3.0 | 317.7 | **421** |
 | TXN, B only (10-30) | 102.5 | 7.2 | 4.0 | 416.8 | 530 |
 | TXN, A + B, as adopted (10-30, two runs) | 81.6, 78.7 | 6.6, 6.9 | 2.7, 2.5 | 329.7, 307.8 | **421, 396** |
+| TXN, A + B + C (10-30, two runs) | 59.7, 61.1 | 6.9, 6.7 | 2.1, 1.9 | 290.3, 286.2 | **359, 356** |
 
 "Derived tables" means the five tables above: 18 permid CHECKs and 18 FKs to `permids`.
 The collation variant changes every public `*permid` text column, opinion tables included,
@@ -118,7 +119,13 @@ adopted. The two A + B runs, on the same copy, differ by 25 s, almost all of it 
   move outside the noise. Measured alone, the new function is 4.6 times cheaper (1.90 s →
   0.41 s over 525,805 values in a `SELECT`), so most of the 53 s that dropping the CHECKs
   saved was something other than the function's own cost. What it was was not
-  investigated.
+  investigated. Dropping the derived-table CHECKs and FKs together (C) saved 84 s before
+  A + B and about 50 s after, so the constraints did get cheaper; how much of that is the
+  CHECKs and how much the FKs was not measured.
+- C on top of A + B saves about 50 s (37–65 s, depending on which A + B run it is compared
+  with): about 20 s in `rebuild_linnaean` and 30 s in `rebuild_taxa`. A + B + C lands at
+  356–359 s, still about 42 s above the UUID build. The two C runs differ by 3 s, against
+  25 s for the A + B runs.
 
 ### Where the 224 s goes
 
@@ -132,7 +139,7 @@ UUID build                                              315 s
 ```
 
 The parts were measured one at a time, and they don't simply add up: A + B together
-measured 396–421 s (above). A + B + C has not been measured.
+measured 396–421 s, and A + B + C 356–359 s (above).
 
 ## 6. The causes
 
@@ -181,13 +188,15 @@ tie-break sorts (decision 17).
 |---|---|---|---|---|
 | **A** | **Adopted** (`collate-c-permids`). Declare every permid column `COLLATE "C"` in `db/02-core.sql` and `db/03-taxa.sql` | ~118 s (measured); A + B: 118–143 s | migrations, future opinion writes, any permid sort or join | Small DDL edit. PG16 blocks `ALTER TYPE` under a generated column, but the DDL is always rebuilt, so the columns are just declared that way. Needs a full-content diff (see below). |
 | **B** | **Adopted** (`collate-c-permids`). Rewrite `permid_is_valid` as a plain SQL function with precomputed prefix digits | 9 s alone, within noise (§5) | every table's inserts, so all migrations | Small. One function; the SQL permid tests already cover it. |
-| **C** | Drop the permid CHECKs and FKs on the derived taxa tables | up to 84 s (measured together) | partial re-derivations on opinion writes | Reverses part of decision 11. The tables are rebuildable caches, every value comes from opinion columns that are already checked, and `assert_*_invariant()` re-checks them. But a derive bug would surface at assert time instead of insert time. |
+| **C** | Drop the permid CHECKs and FKs on the derived taxa tables | 84 s before A + B; about 50 s after (§5) | partial re-derivations on opinion writes | Reverses part of decision 11. The tables are rebuildable caches, and every value is copied from opinion columns that are already checked; the derive functions never build a permid. `assert_*_invariant()` compares the tables with a fresh derive, not permid validity, so it would not catch a bad permid, and nothing calls it today. A derive bug that wrote one would go unnoticed instead of failing the insert. |
 | **D** | Fewer round trips: batch the per-insert mints in `pbot-persons`/`pbot-schemas`, or register permids in the same statement as the insert | Aurora migration time | Aurora runs only | Script changes. Decision 18 chose per-insert minting because those scripts can't know their rows up front. |
 | **E** | Accept | — | — | Costs fall on rebuilds and migrations today. They will matter once the opinion write path exists, since every opinion write reruns part of the derivation. |
 
 A and B were adopted together by `collate-c-permids` (2026-10-30), which leaves the
-rebuild at 396–421 s against 315 s with UUIDs. C is a design decision and is still open;
-what it can recover on top of A + B has not been measured.
+rebuild at 396–421 s against 315 s with UUIDs. C would bring it to about 357 s. C is
+tabled (2026-10-30) until the opinion write path exists and the cost of its partial
+re-derivations is known: C's case rests on those, and per-row constraint costs are
+microseconds at that size, while the 50 s it measurably saves is on a full rebuild.
 
 ### Correctness caveat for A
 
@@ -274,7 +283,8 @@ SELECT rebuild_taxa();
   generated column depends on, hence the drop and re-add.)
 - *UUID baseline:* the same run on a copy of `pbdb_pre_permids`.
 - *B only, A + B (10-30):* the same run on a copy of a full `--createdb` build, without and
-  with the `COLLATE "C"` declarations.
+  with the `COLLATE "C"` declarations. *A + B + C:* the A + B copy with the derived-table
+  constraints dropped as in *Without CHECKs / FKs* (18 CHECKs, 18 FKs).
 
 **Seeded paths** (`collate-c-permids`, on the A + B build). The derive functions' seeded
 paths run nowhere in the rebuild, so they were checked directly: a seed set of every
@@ -298,8 +308,8 @@ index.
 
 ## 9. Open questions
 
-- Do A, B and C add up? A + B: 396–421 s, about what A alone gave (§5). A + B + C is
-  still to be measured before deciding C.
+- Do A, B and C add up? A + B: 396–421 s, about what A alone gave; A + B + C: 356–359 s
+  (§5). Whether to adopt C waits on the opinion write path (§7).
 - How much of the 53 s does B recover? Answered: little (§5). The function itself is 4.6
   times cheaper; why that barely shows in the rebuild is not known.
 - What is the unattributed ~22 s?
