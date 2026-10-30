@@ -59,20 +59,21 @@ Seconds per step, from `migrations/src/run-migrations.log`. The log doesn't reco
 target, so each run is attributed from its `persons` time (about 2 s on localhost, about
 100 s on Aurora).
 
-| Step | Localhost UUID (10-19) | Localhost text (10-28, 10-28, 10-29) | Localhost B only, A + B (10-30) | Aurora UUID (10-20) | Aurora TXN (10-29) |
-|---|---|---|---|---|---|
-| persons | 2 | 3, 3, 2 | 2, 2 | 106 | 105 |
-| refs | 7 | 14, 14, 11 | 10, 9 | 42 | 92 |
-| pbot-schemas | 6 | 12, 8, 7 | 8, 7 | 260 | 387 |
-| authorities | 11 | 22, 20, 17 | 17, 14 | 38 | 60 |
-| authority-opinions | 23 | 55, 52, 45 | 46, 39 | 120 | 280 |
-| opinions | 39 | 118, 120, 99 | 77, 70 | 225 | 539 |
-| collections | 36 | 54, 46, 43 | 41, 40 | 158 | 323 |
-| specimens | 14 | 25, 21, 20 | 18, 17 | 50 | 90 |
-| taxa (step alone) | 364 (10-21) | 610, 551, 549 | 519, 382 | 548 (10-21) | 739 |
+| Step | Localhost UUID (10-19) | Localhost text (10-28, 10-28, 10-29) | Localhost B only, A + B (10-30) | Aurora UUID (10-20) | Aurora TXN (10-29) | Aurora A + B (10-30) |
+|---|---|---|---|---|---|---|
+| persons | 2 | 3, 3, 2 | 2, 2 | 106 | 105 | 105 |
+| refs | 7 | 14, 14, 11 | 10, 9 | 42 | 92 | 85 |
+| pbot-schemas | 6 | 12, 8, 7 | 8, 7 | 260 | 387 | 386 |
+| authorities | 11 | 22, 20, 17 | 17, 14 | 38 | 60 | 57 |
+| authority-opinions | 23 | 55, 52, 45 | 46, 39 | 120 | 280 | 181 |
+| opinions | 39 | 118, 120, 99 | 77, 70 | 225 | 539 | 362 |
+| collections | 36 | 54, 46, 43 | 41, 40 | 158 | 323 | 202 |
+| specimens | 14 | 25, 21, 20 | 18, 17 | 50 | 90 | 67 |
+| taxa (step alone) | 364 (10-21) | 610, 551, 549 | 519, 382 | 548 (10-21) | 739 | 556 |
 
-The full Aurora run went from roughly 20 to 46 minutes. The 10-19 localhost run predates
-the taxa runner step, so its taxa figure is the standalone UUID taxa run from 10-21.
+The full Aurora run went from roughly 20 to 46 minutes, and back to 36 with A + B. The
+10-19 localhost run predates the taxa runner step, so its taxa figure is the standalone
+UUID taxa run from 10-21.
 
 The two 10-30 runs are the builds `collate-c-permids` compared: "B only" has the inlined
 CHECK function and `cycle_members` sorted by number, with the permid columns still
@@ -84,6 +85,12 @@ Aurora's migration steps roughly doubled, more than localhost's did. The likely 
 extra round trips: `register_permids` and `mint_permids` add a call per batch, and
 `pbot-persons` and `pbot-schemas` mint one permid per insert (decision 18), at about 70 ms
 per round trip over the VPN. This was inferred, not profiled.
+
+With A + B, Aurora's taxa step is back to about its UUID time (556 s against 548 s), and
+the opinion-heavy steps lost a third or more (`opinions` 539 → 362 s, `authority-opinions`
+280 → 181 s). The steps dominated by round trips (`persons`, `pbot-schemas`) did not move,
+which fits the round-trip explanation above. The A + B build's contents match localhost's:
+identical counts in every table, and the five derived tables identical row for row.
 
 ## 5. The taxa rebuild, profiled
 
@@ -316,6 +323,6 @@ index.
 - How large are the partial re-derivations an opinion write will trigger, and do the
   per-row costs matter at that size? That depends on the write-path design.
 - Aurora's taxa step went from 548 s to 739 s (+35%), a smaller relative increase than
-  localhost's. Not investigated; Aurora's database collation was not checked. With A, the
-  permid columns are `"C"` whatever the default, so it matters less; it is to be checked
-  at the next Aurora rebuild.
+  localhost's. Partly answered: Aurora's default collation is `en_US.UTF-8` (libc), the
+  same as localhost's, so the collation does not explain the difference. With A + B the
+  step takes 556 s (§4). Why Aurora was hit less than localhost was not investigated.
