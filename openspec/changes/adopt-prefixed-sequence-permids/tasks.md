@@ -60,7 +60,7 @@
 - [x] 6.5 Rebuild a second time and diff the legacy-numbered permids (`permid_no < 1000000`) with the first build. They must be identical
 - [x] 6.6 Run the payload audit with `--round-trip`. It shows zero differences
 - [x] 6.7 Compare step durations with the baseline. If the `taxa` step or any bulk step is much slower (registry FKs, batched minting), record why and decide whether it matters
-- [ ] 6.8 Rebuild Aurora `pbdb2_migration_test` (VM on VPN) and confirm the counts match localhost
+- [x] 6.8 Rebuild Aurora `pbdb2_migration_test` (VM on VPN) and confirm the counts match localhost
 - [x] 6.9 Rollback check: rebuilding from the previous branch's DDL and runner still works (the change is rebuild-only, no conversion)
 
 ## 7. Docs and config
