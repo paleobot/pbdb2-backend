@@ -117,7 +117,7 @@ Whether `refs` is pre-loaded depends on the entity, not the table. For collectio
 each source's `additionalReferences` is annotated `{ table, codec: "referenceLinks" }`, a child-table codec
 that reads `refs`, so `codecKeyColumns` leaves `refs` out even though `primaryReference` (`referencePermid`)
 names `reference_id`. The refs a batch cites are split between the parent's `reference_id` and the child rows.
-Reading it whole is also the cheaper choice there: the lookup is 93,944 rows of `(bigint, uuid)`, while
+Reading it whole is also the cheaper choice there: the lookup is 93,944 rows of `(bigint, text)`, while
 selecting it per batch would issue 56 queries across a collections audit. Schema pre-loads it for the same
 reason, the annotation, although its few rows would make either choice cheap. For authority it is selected per batch: `referencePermid` is annotated
 with `column: "reference_id"`, so `codecKeyColumns` names the column the batch's keys come from.
@@ -169,4 +169,3 @@ with `column: "reference_id"`, so `codecKeyColumns` names the column the batch's
 #### Scenario: State round trip rebuilds quantitative
 - **WHEN** `--round-trip` runs on state
 - **THEN** each head row's `permid` and `quantitative` are rebuilt from their columns, the payload validates against `out`, and splitting it back yields the stored jsonb and the same `quantitative`; no codec source is loaded, because neither the character nor the state source declares one
-

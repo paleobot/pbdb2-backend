@@ -190,18 +190,14 @@ The script SHALL leave `early_age_id` and `late_age_id` NULL, and SHALL NOT popu
 - **THEN** `early_age_id` and `late_age_id` are NULL and the jsonb has no `ages.intervals`, `environment`, or `paleontology` keys
 
 ### Requirement: Generate a fresh permid per collection
-The script SHALL generate a fresh UUIDv7 `permid` for each inserted collection, obtaining it from the shared
-UUIDv7 helper module rather than generating a UUID inline, and inserting rows as single versions
+The script SHALL give each inserted collection the permid `COL-<collection_no>-<CC>`, obtained in
+batches from `register_permids('COL', …)` (`prefixed-permids`), and insert rows as single versions
 (`succeeded_by_id IS NULL`).
 
-This requirement previously specified a `randomUUID()` permid. That was superseded by the `permid-uuidv7`
-capability, which forbids `crypto.randomUUID()` for permid generation; the superseding change did not correct
-this text, leaving the two specifications in direct contradiction. The script has generated UUIDv7 values
-since that change landed.
-
-#### Scenario: Unique permid assigned
-- **WHEN** a collection is inserted
-- **THEN** it receives a fresh UUIDv7 `permid` and no `preceded_by_id`/`succeeded_by_id`
+#### Scenario: Permid from the Classic number
+- **WHEN** Classic collection 12345 is inserted
+- **THEN** its `permid` is `COL-12345-70`, its `permid_no` is 12345, and it has no
+  `preceded_by_id`/`succeeded_by_id`
 
 ### Requirement: Insert within a transaction and report outcomes
 The migration SHALL insert `collections` and `additional_collection_refs` within a transaction (rolling back on failure), reset the identity sequences afterward, and report counters for inserted collections, inserted secondary refs, and each skip/flag category (orphan primary ref, no toponym match, dropped altitude, orphan secondary ref).
@@ -213,4 +209,3 @@ The migration SHALL insert `collections` and `additional_collection_refs` within
 #### Scenario: Rollback on failure
 - **WHEN** an insert fails mid-run
 - **THEN** the transaction rolls back and no partial data remains
-

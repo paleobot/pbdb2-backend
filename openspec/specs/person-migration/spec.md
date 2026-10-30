@@ -304,9 +304,9 @@ route its writes through `split()`.
 - **WHEN** a `countryCode` is produced that is not among `dictionaries.admin0.iso`
 - **THEN** validation fails for that row and it is reported, rather than being written with a country nothing recognises
 ### Requirement: Mint a permid for every person
-The script SHALL mint a `permid` for every person row it inserts, using the UUIDv7 generator exported by
-`src/lib/uuidv7.js`. The permid SHALL be freshly generated and SHALL NOT be derived from `person_no`,
-`legacyIDs.oldpbdbID`, `legacyIDs.pbotID`, the person's email, or any other source value.
+The script SHALL give every person row it inserts the permid `PRS-<person_no>-<CC>`, obtained in
+batches from `register_permids('PRS', …)` (`prefixed-permids`). The number SHALL be the Classic
+`person_no` and nothing else: not `legacyIDs.pbotID`, the person's email, or any other source value.
 
 The permid is a flat column on `persons`, not a property of the `person` JSONB. It joins — and does not
 replace — the identifiers the row already carries: `id` (seeded from `person_no`) remains the key every
@@ -315,12 +315,12 @@ the record of where the row came from.
 
 #### Scenario: Every migrated person has a permid
 - **WHEN** the migration completes
-- **THEN** all 1,304 rows in `persons` have a non-NULL `permid` whose version nibble is 7
+- **THEN** all 1,304 rows in `persons` have a non-NULL `permid` with the prefix `PRS` and valid check digits
 
 #### Scenario: Permids are distinct
 - **WHEN** the migration completes
 - **THEN** the number of distinct `permid` values in `persons` equals the number of rows
 
-#### Scenario: Permid is not derived from source values
+#### Scenario: Permid carries the Classic number
 - **WHEN** a person with `person_no = 42` is migrated
-- **THEN** the row's `permid` is a generated UUIDv7 unrelated to `42`, and `person->legacyIDs->>'oldpbdbID'` is still `'42'`
+- **THEN** the row's `permid` is `PRS-42-70`, and `person->legacyIDs->>'oldpbdbID'` is still `'42'`

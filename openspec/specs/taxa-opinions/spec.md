@@ -7,17 +7,17 @@ TBD - created by archiving change taxa-opinions-schema. Update Purpose after arc
 
 ### Requirement: Layer 1 assertion tables exist
 
-The schema SHALL define three append-only assertion tables — `name_opinions`, `assignment_opinions`, and `validity_opinions` — each carrying a `bigint` identity primary key, a `permid uuid`, `authorizer_person_id`/`enterer_person_id` FKs to `persons`, `reference_id` FK to `refs`, an `evidence boolean NOT NULL`, an optional `pubyr integer` and `attribution jsonb`, a `removed boolean`, and `preceded_by_id`/`succeeded_by_id` self-referencing FKs. All `*_permid` columns SHALL be plain `uuid` pointers, NOT SQL foreign keys (there is no permid registry table).
+The schema SHALL define three append-only assertion tables — `name_opinions`, `assignment_opinions`, and `validity_opinions` — each carrying a `bigint` identity primary key, a `permid text`, `authorizer_person_id`/`enterer_person_id` FKs to `persons`, `reference_id` FK to `refs`, an `evidence boolean NOT NULL`, an optional `pubyr integer` and `attribution jsonb`, a `removed boolean`, and `preceded_by_id`/`succeeded_by_id` self-referencing FKs. All `*_permid` columns SHALL be `text` with an FK to the `permids` registry and a CHECK on their prefix (`prefixed-permids`).
 
 #### Scenario: The three opinion tables are present with their key columns
 
 - **WHEN** the DDL is applied to an empty database
 - **THEN** `name_opinions`, `assignment_opinions`, and `validity_opinions` each exist with the columns above, and no `rank_opinions`, `rename_opinions`, `type_opinions`, or `trait_opinions` table exists
 
-#### Scenario: permid columns are not foreign keys
+#### Scenario: permid columns are foreign keys to the registry
 
-- **WHEN** an opinion row is inserted whose `subject_permid` (or target) references a uuid that appears in no other row
-- **THEN** the insert succeeds — there is no FK or registry table to violate
+- **WHEN** an opinion row is inserted whose `subject_permid` (or target) is a well-formed `TXN` permid that is not in `permids`
+- **THEN** PostgreSQL rejects the insert with a foreign-key violation
 
 ### Requirement: name_opinions models typed edges with a minting shape
 
@@ -159,18 +159,9 @@ Each `name_opinions` row SHALL carry an `edge_class text NOT NULL` copy of its r
 - **WHEN** the schema is inspected after applying the DDL
 - **THEN** no version triggers exist on `name_opinions`, `assignment_opinions`, or `validity_opinions`, and each has a hand-created partial index on `(permid) WHERE succeeded_by_id IS NULL`
 
-### Requirement: permid columns enforce uuidv7
-
-Every `permid`-bearing column (the opinion tables, `taxa_linnaean`, `taxon_annotations`) and `homonyms.homonym_group_id` SHALL enforce version 7 via `CHECK ((get_byte(uuid_send(<col>), 6) >> 4) = 7)`, consistent with the `permid-uuidv7` convention already in the DDL.
-
-#### Scenario: A non-v7 uuid is rejected
-
-- **WHEN** a row is inserted with a `permid` whose UUID version nibble is not 7
-- **THEN** the v7 CHECK rejects the insert
-
 ### Requirement: Non-derived tables sit outside the stack
 
-The schema SHALL define `taxon_annotations` (versioned curatorial prose: `common_name`, `comments`, `discussion`, `discussed_by_reference_id`) keyed by `subject_permid`, and `homonyms` grouping permids by an app-minted `homonym_group_id uuid` (uuidv7), with `UNIQUE (homonym_group_id, permid)`. Neither SHALL be reconstructable by `derive()`; `taxa_linnaean` SHALL NOT carry a `has_homonym` flag.
+The schema SHALL define `taxon_annotations` (versioned curatorial prose: `common_name`, `comments`, `discussion`, `discussed_by_reference_id`) with its own `TAN` permid, keyed by `subject_permid` (`TXN`), and `homonyms` grouping `TXN` permids by an app-minted `homonym_group_id uuid` (uuidv7), with `UNIQUE (homonym_group_id, permid)`. Neither SHALL be reconstructable by `derive()`; `taxa_linnaean` SHALL NOT carry a `has_homonym` flag.
 
 #### Scenario: Annotations and homonyms exist independently of the ledger
 
@@ -179,7 +170,7 @@ The schema SHALL define `taxon_annotations` (versioned curatorial prose: `common
 
 #### Scenario: A homonym group spans more than two members
 
-- **WHEN** three permids are inserted into `homonyms` sharing one `homonym_group_id`
+- **WHEN** three `TXN` permids are inserted into `homonyms` sharing one `homonym_group_id`
 - **THEN** all three rows are accepted (grouped representation supports n > 2 homonyms)
 
 ### Requirement: Dictionaries are reconciled to the settled vocabularies
@@ -450,12 +441,17 @@ Third, for a concept where the veto excludes some but not all lineages (its cand
 
 ### Requirement: classification_path materializes the concept adjacency
 
-`derive_linnaean()` SHALL produce `classification_path` as an `ltree` of concept permids from root to node, consistent with `containing_concept_permid` (adjacency is primary; the path is derived from it).
+`derive_linnaean()` SHALL produce `classification_path` as an `ltree` of concept permids from root to node, consistent with `containing_concept_permid` (adjacency is primary; the path is derived from it). Each label SHALL be the concept permid exactly as stored, hyphens included; no character substitution SHALL be applied, because PostgreSQL 16 and later accept `-` in ltree labels.
 
 #### Scenario: The path matches the adjacency chain
 
 - **WHEN** concept C is contained by B which is contained by root A
 - **THEN** C's `classification_path` is the ltree `A.B.C` (and `containing_concept_permid = B`)
+
+#### Scenario: Labels are the permids themselves
+
+- **WHEN** a concept with permid `TXN-526272-71` appears in a path
+- **THEN** its label in `classification_path` is `TXN-526272-71`, not `TXN_526272_71`
 
 ### Requirement: The rename preserves derive_taxa() output exactly
 

@@ -21,23 +21,20 @@ The script SHALL insert each ref's `reference_no` as the `id` column in PostgreS
 - **WHEN** all ref records have been inserted
 - **THEN** the script resets the `references` identity sequence to `MAX(id) + 1`
 
-### Requirement: Generate permid UUID
-The script SHALL generate a UUIDv7 for each reference and store it as the `permid` column, obtaining it from
-the shared UUIDv7 helper module rather than generating a UUID inline. On idempotent re-runs, the `permid`
-MUST NOT be overwritten.
-
-This requirement previously specified a v4 UUID from `crypto.randomUUID()`. That was superseded by the
-`permid-uuidv7` capability, which forbids `crypto.randomUUID()` for permid generation; the superseding change
-did not correct this text, leaving the two specifications in direct contradiction. The script has generated
-UUIDv7 values since that change landed.
+### Requirement: Give each reference its Classic reference number as permid
+The script SHALL give each reference the permid `REF-<reference_no>-<CC>`, obtained in batches from
+`register_permids('REF', …)` (`prefixed-permids`), and store it as the `permid` column. On idempotent
+re-runs, the `permid` MUST NOT be overwritten, and the script SHALL register only the permids of rows
+it newly inserts.
 
 #### Scenario: First insertion
-- **WHEN** a reference is inserted for the first time
-- **THEN** a new UUIDv7 is generated and stored as `permid`
+- **WHEN** reference 12345 is inserted for the first time
+- **THEN** its `permid` is `REF-12345-15` and `permids` holds that value
 
 #### Scenario: Idempotent re-run preserves permid
 - **WHEN** the script is re-run and a reference with the same `id` already exists
-- **THEN** the existing `permid` value is preserved (not overwritten by the upsert)
+- **THEN** the existing `permid` value is preserved (not overwritten by the upsert), and no second
+  registration of it is attempted
 
 ### Requirement: Publication type mapping
 The script SHALL map legacy `publication_type` values to the jsonb `publicationType` string using the following mapping. It SHALL NOT write a `reference_type_id` column, which no longer exists: the reference source's inline `publicationType` enum is the only vocabulary for publication types.
@@ -274,7 +271,7 @@ The script SHALL set:
 - **THEN** `preceded_by_id` and `succeeded_by_id` are NULL and `removed` is false
 
 ### Requirement: Batched upsert
-The script SHALL insert rows in batches (e.g. 500 per batch) using multi-value INSERT into the `refs` table with `ON CONFLICT (id) DO UPDATE SET ...`. The `permid` column MUST be excluded from the UPDATE SET to preserve UUIDs on re-runs.
+The script SHALL insert rows in batches (e.g. 500 per batch) using multi-value INSERT into the `refs` table with `ON CONFLICT (id) DO UPDATE SET ...`. The `permid` column MUST be excluded from the UPDATE SET to preserve permids on re-runs.
 
 #### Scenario: Batch processing
 - **WHEN** 93,863 rows are migrated
@@ -343,4 +340,3 @@ The script SHALL build the jsonb and the column values separately and SHALL NOT 
 #### Scenario: Every written ref validates
 - **WHEN** the migration completes
 - **THEN** every `reference` object written validated against the `db` variant, and none was written without validating
-

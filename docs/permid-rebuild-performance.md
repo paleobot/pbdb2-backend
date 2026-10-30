@@ -13,8 +13,12 @@ comes from, and the options for getting it back
 After `adopt-prefixed-sequence-permids` was applied, the migration runner and the taxa
 rebuild were visibly slower than before. This document records the measurements taken on
 2026-10-29 so a later decision (fix now, fix with the opinion write path, or accept) can
-cite numbers instead of re-deriving them. No change has been created. If one is, its
-`design.md` holds the decisions; this document is the evidence.
+cite numbers instead of re-deriving them. No change has been created to act on them. If
+one is, its own `design.md` will hold the decisions; this document is the evidence.
+
+"Decision n" below refers to the numbered decisions in the design of
+`adopt-prefixed-sequence-permids`:
+[`openspec/changes/archive/2026-10-30-adopt-prefixed-sequence-permids/design.md`](../openspec/changes/archive/2026-10-30-adopt-prefixed-sequence-permids/design.md).
 
 The short version: **reads are unaffected; bulk writes are slower.** A full taxa rebuild
 takes 539 s against 315 s with UUIDs (+71%). About half of that is the database collation
@@ -158,14 +162,49 @@ judge after A and B, when what's left to gain is known.
 
 ### Correctness caveat for A
 
-The collation variant's row counts matched, but its contents were not compared. Under
-`en_US.UTF-8`, `TXN-100-…` and `TXN-99-…` (and permids generally) sort differently than
-under `"C"`, because en_US largely ignores the hyphens. Decision 17 moved the derivation's
-tie-breaks to numeric order, but union-find representatives (`min(node)`) still take text
-order. Decision 17 calls them internal labels only, but any text ordering on permids that
-does reach the output would change. A change adopting A must diff the full contents of
-`taxa_linnaean`, `taxa_clades`, `taxa_attachments` and `taxa` against the current build,
-not just the counts.
+The collation variant's row counts matched, but its contents were not compared. The two
+collations order permids differently, because en_US largely ignores the hyphens and `"C"`
+compares bytes (`-` sorts before every digit):
+
+| en_US.UTF-8 | `"C"` |
+|---|---|
+| `TXN-1000-05` | `TXN-100-12` |
+| `TXN-100-12` | `TXN-1000-05` |
+| `TXN-99-40` | `TXN-99-40` |
+
+Neither is numeric order. Equality does not change: en_US is a deterministic collation,
+so two strings are equal only when their bytes are. Joins, `GROUP BY`, `DISTINCT`,
+`PARTITION BY`, CHECKs and FKs give the same results under both. Only ordering can differ.
+These are the places in `db/03-taxa.sql` where ordering on permid text could reach the
+output (checked 2026-10-30):
+
+| | Where | Text order? | Reaches output? |
+|---|---|---|---|
+| 1 | Union-find representatives, `lin_rep`/`con_rep` = `min(node)`, in all three derive functions | yes | No. They are only join and partition keys and are never stored (no derived table has a `_rep` column). A different member may become the label, but the groups are the same. |
+| 2 | Contest orderings (accepted spelling, original, senior lineage, winning assignment) | no | They end in `opinion_id` or the permid number (decision 17), so every tie has the same winner. |
+| 3 | `array_agg(DISTINCT concept_permid)`, stored as `cycle_cuts.cycle_members` | yes | Yes, but only the element order. `DISTINCT` sorts by the collation; the set of members is unchanged. 72 rows today (54 `taxa`, 18 `taxa_clades`). |
+| 4 | `derive_taxa`'s cycle walk starts from `FROM _dtu_peel p LIMIT 1`, with no `ORDER BY` | indirectly | Possibly. The start row depends on the query plan and on the order rows were stored in, and the collation can change both (merge joins on permids). When several cycles exist at once, a different start can cut them in a different order. The code comment accepts this. `derive_linnaean` and `derive_taxa_clades` find all cycle members at once and have no start row. |
+| 5 | `classification_path` (ltree) | no | ltree compares labels bytewise, whatever the collation. |
+
+The API orders lists by `permid_no`, never by permid text.
+
+Only 4 can change the taxonomy (`containing_concept_permid`, `classification_path`), and
+only when two cycles interact, so that cutting one changes which edge wins in the other.
+One piece of evidence says it doesn't happen on current data: the UUID → text switch
+changed every representative, every text order and likely the plans, yet the graph
+snapshot keyed by `taxon_no` came out byte-identical (2026-10-28). That is evidence, not
+proof, and says nothing about future data.
+
+A change adopting A should:
+
+- give the walk start in 4 an `ORDER BY` (for example the number of `concept_permid`), so
+  the cut order depends on neither the plan nor the collation. This is worth doing
+  without A too, since partial re-derivations on opinion writes need to be repeatable;
+- sort `cycle_members` by number, as decision 17 does for the tie-breaks;
+- then diff the full contents of `taxa_linnaean`, `taxa_clades`, `taxa_attachments`,
+  `taxa` and `cycle_cuts`, not just the counts. Compare a build with the two fixes under
+  en_US against the same build under `"C"`, so that only the collation differs. With the
+  fixes in place, any difference is a bug.
 
 ## 8. Method, for reproducing
 

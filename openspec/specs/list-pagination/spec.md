@@ -11,10 +11,13 @@ so no endpoint returns a whole table.
 ### Requirement: Keyset pagination on list endpoints
 
 The system SHALL paginate every list endpoint using a keyset (cursor) over a
-total, stable ordering of `permid`. A list request SHALL accept an optional
-`limit` parameter bounding the page size and an optional `cursor` parameter
-identifying the position to resume from. The cursor SHALL compose with the
-existing list filters: a paginated request narrows the same set of current,
+total, stable ordering of `permid` by the number it contains (the table's
+`permid_no`, `prefixed-permids`): numerically, so `COL-99-…` precedes
+`COL-100-…`. For migrated data this is Classic number order, followed by records
+numbered from the sequence in creation order. A list request SHALL accept an
+optional `limit` parameter bounding the page size and an optional `cursor`
+parameter identifying the position to resume from. The cursor SHALL compose with
+the existing list filters: a paginated request narrows the same set of current,
 non-removed heads that `ids` and field filters produce.
 
 Offset- or page-number-based pagination SHALL NOT be offered, and the sort order
@@ -25,7 +28,12 @@ depends on.
 
 - **WHEN** a client sends GET to a DB-backed list endpoint with no `cursor`
 - **THEN** the system responds with HTTP 200
-- **AND** `data` contains at most `limit` records, ordered by `permid`
+- **AND** `data` contains at most `limit` records, ordered by the number in their `permid`
+
+#### Scenario: Numeric, not textual, order
+
+- **WHEN** a list contains records with permids `REF-99-…` and `REF-100-…`
+- **THEN** `REF-99-…` is returned before `REF-100-…`
 
 #### Scenario: Resuming from a cursor
 
@@ -73,9 +81,9 @@ travel. Clients SHALL NOT construct or parse cursors. A cursor that cannot be
 decoded SHALL be rejected with HTTP 400.
 
 A cursor SHALL remain usable when the underlying data changes: because it encodes
-a position in a stable `permid` ordering rather than an offset, records inserted
-or removed between requests SHALL NOT cause other records to be skipped or
-repeated.
+a position in the stable numeric `permid` ordering rather than an offset, records
+inserted or removed between requests SHALL NOT cause other records to be skipped
+or repeated.
 
 #### Scenario: Malformed cursor is rejected
 
@@ -171,4 +179,3 @@ a single page with `null` pagination links.
   resource
 - **THEN** the system responds with HTTP 200
 - **AND** `links.next` and `links.prev` are both `null`
-

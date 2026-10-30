@@ -274,13 +274,14 @@ validator indicates a transformation bug rather than unexpected source data.
 - **WHEN** a built payload `{ name, identifiers, paleontology }` is validated
 - **THEN** it is passed to the validator as-is, not wrapped as `{ specimen: ... }`
 
-### Requirement: Generate a UUIDv7 permid per row
-The script SHALL generate `permid` as a UUIDv7 using `src/lib/uuidv7.js`, satisfying the target table's
-version CHECK constraint. Each source row SHALL receive exactly one new permid.
+### Requirement: Give each row its Classic specimen number as permid
+The script SHALL give each source row the permid `SPM-<specimen_no>-<CC>`, obtained in batches from
+`register_permids('SPM', …)` (`prefixed-permids`), satisfying the target table's permid CHECK. Each
+source row SHALL receive exactly one permid.
 
-#### Scenario: Permid satisfies the version check
-- **WHEN** a row is inserted
-- **THEN** its `permid` is a UUIDv7 and the table's `get_byte(uuid_send(permid), 6) >> 4 = 7` constraint holds
+#### Scenario: Permid satisfies the permid check
+- **WHEN** Classic specimen 1 is inserted
+- **THEN** its `permid` is `SPM-1-04`, and the table's prefix and check-digit CHECK holds
 
 ### Requirement: Record anomalies and write a run summary
 The script SHALL record anomalies to a ledger in its own directory, and SHALL write a run summary reporting
@@ -315,4 +316,3 @@ the five that do not, so that the unguarded set does not grow.
 #### Scenario: Direct invocation runs the migration
 - **WHEN** the script is invoked as `node src/specimens-migration/migrate-specimens.js`
 - **THEN** `main()` runs
-

@@ -50,12 +50,13 @@ The script SHALL then look up the enterer's PG `persons.id` by querying the `per
 - **WHEN** the resolved enterer has `pbotID = 'xyz-999'` and no PG person has a matching `legacyIDs.pbotID`
 - **THEN** the reference is skipped and a warning is logged with the PBot reference `pbotID` and the unmatched enterer `pbotID`
 
-### Requirement: Generate UUIDv7 permid
-The script SHALL generate a fresh UUIDv7 (via the shared UUIDv7 helper) as the `permid` for each PBot reference. The script SHALL NOT use the reference's `pbotID` as the permid.
+### Requirement: Mint a sequence permid
+The script SHALL mint the `permid` of each PBot reference it inserts from `mint_permids('REF', …)`
+(`prefixed-permids`). The script SHALL NOT use the reference's `pbotID` as the permid or its number.
 
 #### Scenario: permid assignment
 - **WHEN** a PBot Reference with `pbotID = 'ec4353ee-467a-43cc-8383-524bd63987a7'` is inserted
-- **THEN** the resulting `refs` row has a generated UUIDv7 `permid` (not `ec4353ee-...`), and the JSONB still contains `legacyIDs.pbotID = 'ec4353ee-467a-43cc-8383-524bd63987a7'`
+- **THEN** the resulting `refs` row has a minted `REF` permid numbered from 1,000,000 up, and the JSONB still contains `legacyIDs.pbotID = 'ec4353ee-467a-43cc-8383-524bd63987a7'`
 
 ### Requirement: Set authorizer_person_id to Douglas Meredith
 The script SHALL set `authorizer_person_id = 1106` (Douglas Meredith) for all PBot-sourced reference records.
@@ -162,15 +163,15 @@ The script SHALL NOT set explicit `id` values for PBot references. IDs SHALL be 
 - **THEN** the script executes `SELECT setval(pg_get_serial_sequence('refs', 'id'), (SELECT MAX(id) FROM refs))`
 
 ### Requirement: Idempotent upsert on legacyIDs.pbotID
-The script SHALL make re-runs idempotent by keying on the reference's stable `legacyIDs.pbotID` rather than on `permid`. If a `refs` row already exists whose `reference->'legacyIDs'->>'pbotID'` matches the incoming PBot reference, the script SHALL update the `authorizer_person_id`, `enterer_person_id`, `reference`, and `removed` columns while preserving the existing `id` and `permid`. A new row (with a newly generated permid) SHALL be inserted only when no such existing row is found.
+The script SHALL make re-runs idempotent by keying on the reference's stable `legacyIDs.pbotID` rather than on `permid`. If a `refs` row already exists whose `reference->'legacyIDs'->>'pbotID'` matches the incoming PBot reference, the script SHALL update the `authorizer_person_id`, `enterer_person_id`, `reference`, and `removed` columns while preserving the existing `id` and `permid`. A new row (with a newly minted permid) SHALL be inserted only when no such existing row is found.
 
 #### Scenario: First run
 - **WHEN** no `refs` row has `reference->'legacyIDs'->>'pbotID'` equal to the incoming pbotID
-- **THEN** a new row is inserted with a freshly generated UUIDv7 permid
+- **THEN** a new row is inserted with a freshly minted `REF` permid
 
 #### Scenario: Re-run preserves permid and id
 - **WHEN** a `refs` row already exists with `reference->'legacyIDs'->>'pbotID'` equal to the incoming pbotID
-- **THEN** that row is updated in place and its existing `permid` and `id` are preserved (no duplicate row, no new permid)
+- **THEN** that row is updated in place and its existing `permid` and `id` are preserved (no duplicate row, no new permid minted)
 
 #### Scenario: Target table name
 - **WHEN** the script executes INSERT/UPDATE statements
@@ -244,4 +245,3 @@ abort the migration.
 #### Scenario: Validation failure aborts the run
 - **WHEN** a built payload fails `db`-variant validation
 - **THEN** the offending `pbotID`, errors, and payload are logged and the migration aborts before writing it
-

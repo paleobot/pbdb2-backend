@@ -761,7 +761,7 @@ the ID long without making it readable. The 2026-10-22 leaning came from a later
 ### Decided (2026-10-27)
 
 The leaning above was adopted, with these decisions the backlog didn't have. The full record is
-`openspec/changes/adopt-prefixed-sequence-permids/design.md` (archived with the change) and the spec
+`openspec/changes/archive/2026-10-30-adopt-prefixed-sequence-permids/design.md` and the spec
 `prefixed-permids`.
 
 - **Prefixes.** Classic data-service prefixes where the record type is the same, upper-cased:

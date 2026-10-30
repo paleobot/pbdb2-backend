@@ -256,18 +256,19 @@ The script SHALL use `authorizer_no` and `enterer_no` directly as `persons.id` v
 - **THEN** both `authorizer_person_id` and `enterer_person_id` resolve from person_no=5
 
 ### Requirement: Generate fresh permid per inserted authority
-The script SHALL generate a UUIDv7 for each inserted authority row and store it as the `permid` column,
-obtaining it from the shared UUIDv7 helper module rather than generating a UUID inline. Same pattern as
-`migrate-refs.js`.
+The script SHALL give each inserted authority the permid `AUT-<taxon_no>-<CC>`, where `taxon_no` is
+the survivor's (the lowest `taxon_no` that collapsed into the row), obtained in batches from
+`register_permids('AUT', …)` (`prefixed-permids`), and store it as the `permid` column. The other
+absorbed `taxon_no`s stay in `legacyIDs.oldpbdbIDs` and are not permids.
 
-This requirement previously specified a v4 UUID from `crypto.randomUUID()`. That was superseded by the
-`permid-uuidv7` capability, which forbids `crypto.randomUUID()` for permid generation; the superseding change
-did not correct this text, leaving the two specifications in direct contradiction. The script has generated
-UUIDv7 values since that change landed.
+#### Scenario: Permid from the survivor's taxon_no
+- **WHEN** a survivor row with `taxon_no = 526271` is inserted
+- **THEN** its `permid` is `AUT-526271-06`, distinct from all other rows in the table, and the
+  `authorities` table's permid CHECK accepts it
 
-#### Scenario: UUID assignment
-- **WHEN** a survivor row is inserted
-- **THEN** its `permid` is a newly-generated UUIDv7, distinct from all other rows in the table, and the `authorities` table's version-nibble CHECK constraint accepts it
+#### Scenario: Merged authority keeps the lowest number
+- **WHEN** `taxon_no`s 100, 200 and 300 collapse into one survivor
+- **THEN** its `permid` has number 100, and `authority.legacyIDs.oldpbdbIDs` is `['100', '200', '300']`
 
 ### Requirement: Migrate scenario ④ rows with sentinel authority
 The script SHALL migrate every scenario ④ row (`ref_is_authority != 'YES'` AND empty `author1last`) by building an `authority` payload with fixed sentinel values, then flowing it through the same reference lookup, person resolution, dedup, payload validation, and transaction-wrapped insert pipeline as scenarios ②/③. The sentinel payload SHALL be:
@@ -341,4 +342,3 @@ The script SHALL wrap the entire bulk insert of survivor rows in a single Postgr
 #### Scenario: Re-run after abort needs no manual cleanup
 - **WHEN** a prior run aborted (either pre-insert validation failure or mid-insert rollback)
 - **THEN** re-running the script on the same source data produces the same result without requiring a `TRUNCATE` or other cleanup step
-

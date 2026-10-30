@@ -53,17 +53,16 @@ For every in-scope `opinions` row that resolves cleanly, the script SHALL insert
 - **THEN** they receive distinct `permid` values (each is a distinct published statement, not a version of the other)
 
 
-### Requirement: permid is a freshly minted uuidv7
-The script SHALL generate a fresh uuidv7 for each `assignment_opinions` row using the project's `uuidv7()` helper. Each classic opinion is its own opinion identity; the script SHALL NOT collapse multiple in-scope opinions on the same taxon into one permid.
+### Requirement: permid is minted from the AOP sequence
+The script SHALL mint the `permid` of each `assignment_opinions` row it inserts from `mint_permids('AOP', …)` (`prefixed-permids`), in batches. Classic `opinion_no` SHALL NOT be used as the number. Each classic opinion is its own opinion identity; the script SHALL NOT collapse multiple in-scope opinions on the same taxon into one permid.
 
-#### Scenario: v7 permid accepted
-- **WHEN** an `assignment_opinions` row is inserted with a `uuidv7()` permid
-- **THEN** it satisfies the version-7 CHECK on `permid`
+#### Scenario: Minted permid accepted
+- **WHEN** an `assignment_opinions` row is inserted with a permid from `mint_permids('AOP', …)`
+- **THEN** it satisfies the `AOP` CHECK and the FK to `permids`, and its number is at least 1,000,000
 
 #### Scenario: Multiple placements on one taxon are separate rows
 - **WHEN** a taxon has two in-scope `belongs to` original-spelling opinions from different references
 - **THEN** two `assignment_opinions` rows are inserted with distinct `permid` values
-
 
 ### Requirement: Resolve reference_id from the migrated refs
 The script SHALL resolve `reference_id` from the migrated `refs` record whose `reference.legacyIDs.oldpbdbID` equals the source `reference_no` (current head). A row whose `reference_no` does not resolve SHALL be skipped and logged (per the skip requirement).

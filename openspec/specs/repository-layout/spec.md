@@ -46,7 +46,7 @@ The purpose is that `migrations/` and its specs can be deleted in one change whe
 and nothing else breaks.
 
 #### Scenario: The API imports a migration helper
-- **WHEN** a file under `api/src/` contains `import { uuidv7 } from '../../migrations/src/lib/uuidv7.js'`
+- **WHEN** a file under `api/src/` contains `import { pg } from '../../migrations/src/lib/pg-pool.js'`
 - **THEN** the rule is broken
 
 #### Scenario: The runner reads the DDL
@@ -132,12 +132,12 @@ and `api/`, with placeholder values.
 
 ### Requirement: Paths in a spec are relative to the area that owns it
 A path written in a spec SHALL be read relative to the area the spec belongs to:
-- Migration specs (`migration-script-layout`, `migration-runner`, `permid-uuidv7`, `payload-audit`,
+- Migration specs (`migration-script-layout`, `migration-runner`, `payload-audit`,
   `db-connection-config`, and every spec named `*-migration`): relative to `migrations/`. In these specs,
   "the repository root" means `migrations/`.
 - API specs (`api-discovery`, `api-foundation`, `auth-stub`, `data-access`, `list-pagination`,
   `reference-enrichment`, `resource-routes`, `taxa-reads`): relative to `api/`.
-- Every other spec: relative to the repository root.
+- Every other spec, including `prefixed-permids`: relative to the repository root.
 
 A path that crosses areas SHALL be written from the repository root and say so (for example, "`db/`
 at the repository root"). A new spec SHALL follow the convention of the area it belongs to, and a new

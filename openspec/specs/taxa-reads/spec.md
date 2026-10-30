@@ -185,14 +185,20 @@ carries list semantics.
 
 The `taxa` list endpoint SHALL accept `limit` and `cursor` and return a bounded
 page with pagination links, on the same terms as every other list endpoint, using
-the stable `permid` ordering the pagination capability defines. The `taxa` list
-SHALL NOT be unbounded.
+the stable numeric `permid` ordering the pagination capability defines. Taxa
+permids are `TXN` permids, so for migrated taxa this is Classic `taxon_no` order.
+The `taxa` list SHALL NOT be unbounded.
 
 #### Scenario: Taxa list is bounded and paginated
 
 - **WHEN** a client sends GET to the `taxa` list endpoint with no parameters
 - **THEN** `data` contains at most the default page size
 - **AND** `links.next` is a URL when further taxa exist
+
+#### Scenario: Taxa are ordered by taxon number
+
+- **WHEN** a client pages through the `taxa` list
+- **THEN** a taxon whose permid is `TXN-99-…` is returned before one whose permid is `TXN-100-…`
 
 ### Requirement: Taxa declare no field filters
 

@@ -77,9 +77,10 @@ The list pagination slots (`links.next`, `links.prev`) SHALL carry real values:
 a URL when a further page exists in that direction, and `null` when it does not.
 They SHALL NOT be permanent placeholders.
 
-A collection response SHALL be returned in a total, stable order of `permid`.
-This ordering is a guarantee of the list contract, not an implementation detail:
-cursor pagination depends on it to avoid skipping or repeating records.
+A collection response SHALL be returned in a total, stable order of `permid` by
+the number it contains (`list-pagination`). This ordering is a guarantee of the
+list contract, not an implementation detail: cursor pagination depends on it to
+avoid skipping or repeating records.
 
 #### Scenario: Single resource response shape
 
@@ -98,7 +99,7 @@ cursor pagination depends on it to avoid skipping or repeating records.
 #### Scenario: Collection response shape
 
 - **WHEN** a client successfully requests a list of resources
-- **THEN** `data` is an array ordered by `permid`
+- **THEN** `data` is an array ordered by the number in each record's `permid`
 - **AND** `meta` includes result counts for the returned page
 - **AND** `links` includes `next` and `prev`, each either a URL or `null`
 
@@ -199,4 +200,3 @@ unchanged by the base.
 
 - **WHEN** a client requests `/api/v1`
 - **THEN** `links.self` and every child link begin with the base
-

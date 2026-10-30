@@ -68,7 +68,7 @@ connection.
 - **THEN** the guard test passes
 
 #### Scenario: New violation caught
-- **WHEN** a contributor adds a `payloadSchemas/lib/` module that imports `../../migrations/src/lib/uuidv7.js`
+- **WHEN** a contributor adds a `payloadSchemas/lib/` module that imports `../../migrations/src/lib/pg-pool.js`
 - **THEN** the root `npm test` fails at the guard test, naming that module and specifier
 
 #### Scenario: Runs without a database
@@ -107,4 +107,3 @@ is the only check on the dictionary seeds in `db/01-dictionaries.sql`.
 #### Scenario: Closing an unused pool
 - **WHEN** a test file's `after` hook closes the pool and no test requested a connection
 - **THEN** the close succeeds without creating a pool or raising an error
-
