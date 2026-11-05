@@ -17,8 +17,11 @@ retire. `docs/monorepo-plan.md` explains the layout.
 
 ## Setup
 
-1. `npm install` at the root (an npm workspaces root; `migrations` and `api` are workspaces).
-2. Copy `.env.example` to `.env` at the root and fill it in. It is the one `.env` for every area,
+1. Node.js 26.12.1 or later (`engines.node` in the root `package.json`); below it is exposed to
+   CVE-2026-111497, and the API refuses to start. `nvm install` at the root reads `.nvmrc` and installs
+   the latest Node 26.
+2. `npm install` at the root (an npm workspaces root; `migrations` and `api` are workspaces).
+3. Copy `.env.example` to `.env` at the root and fill it in. It is the one `.env` for every area,
    found whatever directory a command starts in.
 
 ## Commands (from the root)

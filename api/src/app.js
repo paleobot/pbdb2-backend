@@ -8,8 +8,40 @@ import { normalizePublicBaseUrl } from './config.js';
 import { createAjv } from '../../payloadSchemas/lib/ajv.js';
 import { normalizeQuery, formatQueryErrors } from './lib/query-schemas.js';
 import { publishedComponents } from './lib/published-schemas.js';
+import pkg from '../../package.json' with { type: 'json' };
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
+
+/**
+ * The minimum Node.js version in an `engines.node` value. Only
+ * `>=MAJOR.MINOR.PATCH` is accepted, so the guard never interprets a general
+ * semver range; any other form throws, naming the value.
+ */
+export function readMinimumNode(range) {
+  const match = /^>=(\d+\.\d+\.\d+)$/.exec(range ?? '');
+  if (!match) {
+    throw new Error(`engines.node must be ">=MAJOR.MINOR.PATCH", got ${JSON.stringify(range)}`);
+  }
+  return match[1];
+}
+
+/** Whether `version` is at least `minimum`, comparing major, minor, patch as numbers. */
+export function isAtLeast(version, minimum) {
+  const v = version.split('.').map(Number);
+  const m = minimum.split('.').map(Number);
+  for (let i = 0; i < 3; i++) {
+    if (v[i] !== m[i]) return v[i] > m[i];
+  }
+  return true;
+}
+
+// Refuse to load below the root package.json's minimum (CVE-2026-111497). The
+// check runs here, at module load, because the server entry and every API test
+// import this module.
+const minimumNode = readMinimumNode(pkg.engines?.node);
+if (!isAtLeast(process.versions.node, minimumNode)) {
+  throw new Error(`Node.js ${process.versions.node} is running; the API requires ${minimumNode} or later`);
+}
 
 /**
  * The public base URL `build()` uses when none is passed. Fixed rather than read

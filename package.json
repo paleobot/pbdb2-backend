@@ -2,6 +2,9 @@
   "name": "pbdb2-backend",
   "private": true,
   "type": "module",
+  "engines": {
+    "node": ">=26.12.1"
+  },
   "workspaces": [
     "migrations",
     "api"
