@@ -24,6 +24,7 @@ Classic serves CSV by URL suffix. A live request for `colls/list.csv?base_name=D
 **Non-Goals:**
 
 - A format selector in the URL. If one is requested later, use `?format=csv`: unknown parameters are a 400 today, so the name is free and the addition is compatible. A `.csv` suffix would need an extra route per list.
+- RIS for references. D1, D2, D6 and D9 are written so that it can be added without changing them.
 - TSV, classification columns, and CSV for single reads. `?ids=<permid>` already gives a one-row CSV.
 - CSV for `schemas`, whose value is the character and state tree, and for `specimens`, a stub until it has a real read.
 - A UTF-8 byte order mark. It disturbs concatenation and some parsers; the cost is that double-clicking the file in Excel may show accented names wrongly until it is imported as UTF-8.
@@ -31,17 +32,23 @@ Classic serves CSV by URL suffix. A live request for `colls/list.csv?base_name=D
 
 ## Decisions
 
-### D1. One function decides the format, and only `text/csv` changes the outcome
+### D1. One function decides the format, and JSON is the default
 
-`wantsCsv(acceptHeader)` is a small pure function, used by both the 406 hook and the list handler. CSV is chosen when `text/csv` is named with a non-zero `q` that is strictly greater than any `q` explicitly given to `application/json`. A tie goes to JSON. Wildcards never select CSV, so browsers and `*/*` clients get JSON, and other media types carry on getting JSON as they do today.
+`negotiate(acceptHeader, formats)` is a small pure function, used by both the 406 hook and the list handler. It returns the media type to serve: the format the request ranks highest when that format's non-zero `q` is strictly greater than any `q` explicitly given to `application/json`, and JSON otherwise. A tie goes to JSON. Wildcards never select a non-JSON format, so browsers and `*/*` clients get JSON.
+
+The API's non-JSON formats are one registry, `text/csv` only for now. RIS (`application/x-research-info-systems`, which Classic serves for references) is the likely second, so nothing here names CSV in particular.
 
 *Alternative:* `@fastify/accepts`. It answers a more general question than this API asks, and costs a dependency for about fifteen lines.
 
-### D2. A route opts in, and the 406 is a hook
+### D2. A route lists its formats, and the 406 is a hook
 
-CSV list routes set `config: { csv: true }`. An `onRequest` hook handles `GET` and `HEAD` for every route: it sets `Vary: Accept`, and answers 406 when `wantsCsv` is true and the route has not opted in. Running at `onRequest` means a non-CSV route answers 406 before query validation. Write verbs are outside the hook, because `Accept` says nothing useful about their stubbed bodies.
+A route declares the non-JSON formats it offers as `config: { formats: ['text/csv'] }`. The four list routes do so; nothing else declares any. An `onRequest` hook handles `GET` and `HEAD` for every route. It sets `Vary: Accept`, and answers 406 when the request selects a format from the registry that the route does not list. So CSV requested of a single read is a 406, and so would RIS requested of `collections` be.
+
+A media type the API never produces keeps getting JSON, as it does today. Running at `onRequest` means a 406 comes before query validation. Write verbs are outside the hook, because `Accept` says nothing useful about their stubbed bodies.
 
 Answering such a request with JSON would be legal HTTP, but a CSV reader would then parse JSON as a table.
+
+A RIS format would add itself to the registry and to the `references` list and single read. It would bring its own serializer: a hand-written field-to-tag mapping, unlike CSV's schema-derived columns (D3, D4).
 
 ### D3. Columns come from the `out` variant
 
@@ -84,6 +91,8 @@ Agreed 2026-11-09.
 
 With no `limit` and no `ids`, the handler loops over `readHeads` in forward batches of `MAX_LIMIT`, hydrating each batch, and streams through `Readable.from` over an async generator, which gives backpressure. Each batch borrows a pooled connection only for its query. A destroyed response ends the generator.
 
+The batch loop yields hydrated records and knows nothing about CSV. A serializer for the chosen format turns records into text. CSV writes a header line and one line per record, and another format plugs in its own serializer with the same streaming, paging, cap and error handling.
+
 This deliberately differs from JSON. Most CSV tools don't follow a `Link` header, so a 100-row default would hand a researcher a truncated file with no error.
 
 A sent `limit` means one page, exactly as in JSON. A forward `cursor` without `limit` streams from that position. A backward `cursor` without `limit` is a 400, because a backward stream has no useful meaning and the `prev` links the API issues always carry a `limit`.
@@ -98,7 +107,7 @@ When a client sends `limit`, the existing `pageLinks` result becomes `Link: <url
 
 ### D9. A per-instance cap on unbounded exports
 
-An in-process counter limits concurrent unbounded exports (`CSV_MAX_CONCURRENT_EXPORTS`, default 4, to be revisited after the Aurora timing). Over the cap the response is 503 with `Retry-After`, and JSON like any error. The counter is released when the response closes, however it closes. Bounded and `ids` CSV reads don't count, because their work is the same as a JSON page.
+An in-process counter limits concurrent unbounded exports in any non-JSON format (`MAX_CONCURRENT_EXPORTS`, default 4, to be revisited after the Aurora timing). The name carries no format, because a later RIS export of every reference shares the same slots. Over the cap the response is 503 with `Retry-After`, and JSON like any error. The counter is released when the response closes, however it closes. Bounded and `ids` CSV reads don't count, because their work is the same as a JSON page.
 
 It's a 503, not a 429, because the limit is on the instance and not on the caller. A per-client limit needs an identity the API doesn't have yet.
 
@@ -126,7 +135,7 @@ RFC 4180: CRLF between records, fields quoted when they contain `"`, a comma, CR
 
 ## Migration Plan
 
-Additive and deployed with the API. Run the Aurora timing (tasks) first and set `CSV_MAX_CONCURRENT_EXPORTS` from it. Rollback is reverting the change: `text/csv` requests then get JSON again.
+Additive and deployed with the API. Run the Aurora timing (tasks) first and set `MAX_CONCURRENT_EXPORTS` from it. Rollback is reverting the change: `text/csv` requests then get JSON again.
 
 ## Open Questions
 

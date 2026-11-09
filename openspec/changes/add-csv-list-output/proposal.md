@@ -7,11 +7,11 @@ Classic PBDB's users are largely R and Python scientists who rely on tabular exp
 - `GET` lists and `?ids=` reads of `references`, `authorities`, `collections` and `taxa` return CSV when the request's `Accept` header asks for `text/csv`. JSON stays the default, and existing clients see no change.
 - A CSV list with no `limit` returns the whole result, streamed, as Classic does. `limit` and `cursor` are honoured when sent, with further pages named in a `Link` header.
 - Columns are derived from each resource's `out` schema, never from the rows, so a resource's header does not vary by page or filter. Complex fields follow one set of flattening rules: dotted paths for objects, delimited values for arrays.
-- `text/csv` on a route that offers no CSV is a 406. Errors are always JSON.
+- Each route declares the non-JSON formats it offers. Asking for one on a route that doesn't offer it is a 406. Errors are always JSON. Negotiation, streaming and the export cap are not specific to CSV, so RIS for `references` (which Classic serves) can be added later as a format with its own serializer.
 - Concurrent unbounded exports are capped per API instance; a request over the cap gets a 503 with `Retry-After`.
 - The OpenAPI document describes the `text/csv` response on the four lists.
 
-Not in this change: a format selector in the URL (`?format=csv` is the recorded route if one is asked for), TSV, classification columns (`phylum`, `class`, `order`, `family`), and CSV for single reads, `schemas` or the stubbed `specimens`.
+Not in this change: RIS, a format selector in the URL (`?format=csv` is the recorded route if one is asked for), TSV, classification columns (`phylum`, `class`, `order`, `family`), and CSV for single reads, `schemas` or the stubbed `specimens`.
 
 ## Capabilities
 

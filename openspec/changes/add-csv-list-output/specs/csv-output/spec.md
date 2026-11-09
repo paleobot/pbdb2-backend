@@ -45,7 +45,7 @@ Every response to a `GET` or `HEAD` SHALL carry `Vary: Accept`.
 
 ### Requirement: Which reads offer CSV
 
-The list and `ids` reads of `references`, `authorities`, `collections` and `taxa` SHALL offer CSV. Any other `GET` or `HEAD` route whose request selects CSV SHALL be answered with HTTP 406 in the standard error shape, before its query is validated.
+The list and `ids` reads of `references`, `authorities`, `collections` and `taxa` SHALL offer CSV. Each route SHALL declare the non-JSON formats it offers. A `GET` or `HEAD` request that selects a format the API produces, on a route that does not offer it, SHALL be answered with HTTP 406 in the standard error shape, before its query is validated. A request selects a format under the same rule by which it selects CSV. A media type the API never produces SHALL be answered with JSON.
 
 #### Scenario: A single read does not offer CSV
 
@@ -61,6 +61,11 @@ The list and `ids` reads of `references`, `authorities`, `collections` and `taxa
 
 - **WHEN** a client sends `GET /api/v1` with `Accept: text/csv`
 - **THEN** the system responds with HTTP 406 in the standard error shape
+
+#### Scenario: A media type the API never produces
+
+- **WHEN** a client sends `GET /api/v1/collections` with `Accept: application/xml`
+- **THEN** the response is the JSON envelope
 
 #### Scenario: An ids read offers CSV
 
@@ -227,7 +232,7 @@ A CSV request that sets an expansion to true SHALL be rejected with HTTP 400 nam
 
 ### Requirement: Concurrent unbounded exports are capped
 
-Each API instance SHALL run at most `CSV_MAX_CONCURRENT_EXPORTS` unbounded CSV exports at once, defaulting to 4. A request beyond the cap SHALL be answered with HTTP 503 in the standard error shape and a `Retry-After` header. A slot SHALL be released when its response closes for any reason. Reads with `limit` or `ids` SHALL NOT count toward the cap.
+Each API instance SHALL run at most `MAX_CONCURRENT_EXPORTS` unbounded exports at once, in any non-JSON format, defaulting to 4. A request beyond the cap SHALL be answered with HTTP 503 in the standard error shape and a `Retry-After` header. A slot SHALL be released when its response closes for any reason. Reads with `limit` or `ids` SHALL NOT count toward the cap.
 
 #### Scenario: Over the cap
 
