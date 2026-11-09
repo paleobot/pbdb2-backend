@@ -34,15 +34,9 @@ const schemaProperties = {
 		"x-storage": { column: "permid" },
 		description: "Permanent identifier, constant across versions"
 	},
-	legacyIDs: {
-		type: "object",
-		readOnly: true,
-		properties: {
-			pbotID: {
-				type: "string",
-				description: "Legacy ID for schemas migrated from PBot"
-			}
-		}
+	title: {
+		type: "string",
+		description: "Name of the schema"
 	},
 	primaryReference: {
 		...link({ target: "references", label: "title" }),
@@ -54,10 +48,6 @@ const schemaProperties = {
 		items: link({ target: "references", label: "title" }),
 		"x-storage": { table: "additional_schema_refs", codec: "referenceLinks" },
 		description: "further references this schema is recorded from, unordered; may include the primary"
-	},
-	title: {
-		type: "string",
-		description: "Name of the schema"
 	},
 	year: {
 		type: "string",
@@ -98,6 +88,16 @@ const schemaProperties = {
 		items: {
 			type: "string",
 			"x-enumFrom": { table: "notable_features", column: "name" }
+		}
+	},
+	legacyIDs: {
+		type: "object",
+		readOnly: true,
+		properties: {
+			pbotID: {
+				type: "string",
+				description: "Legacy ID for schemas migrated from PBot"
+			}
 		}
 	}
 };

@@ -56,7 +56,7 @@ test('a link to a non-references target resolves via that target and hydrates it
   // The target registry supplies the table, payload column and label key.
   assert.match(
     expr,
-    /json_build_object\('citation', r\.authority->>'citation', 'permid', r\.permid\) FROM authorities r/,
+    /json_build_object\('permid', r\.permid, 'citation', r\.authority->>'citation'\) FROM authorities r/,
   );
   assert.match(expr, /WHERE r\.id = "taxa"\."authority_id"/);
 
@@ -89,7 +89,7 @@ test('a plain-column target reads its label from the column, not a payload', () 
 
   // The label comes straight off the column; there is no `->>` dereference,
   // because `taxa` has no JSONB payload column to dereference.
-  assert.match(expr, /json_build_object\('name', r\.name, 'permid', r\.permid\) FROM taxa r/);
+  assert.match(expr, /json_build_object\('permid', r\.permid, 'name', r\.name\) FROM taxa r/);
   assert.doesNotMatch(expr, /->>/);
   assert.doesNotMatch(expr, /taxon/, 'no payload column is referenced');
 });

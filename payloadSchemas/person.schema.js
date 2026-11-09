@@ -29,20 +29,6 @@ const personProperties = {
 		"x-storage": { column: "permid" },
 		description: "Permanent identifier, minted by the server"
 	},
-	legacyIDs: {
-		type: "object",
-		readOnly: true,
-		properties: {
-			oldpbdbID: {
-				type: "string",
-				description: "Legacy ID for persons migrated from old PBDB"
-			},
-			pbotID: {
-				type: "string",
-				description: "Legacy ID for persons migrated from PBot"
-			}
-		}
-	},
 	givenName: {type: "string"},
 	familyName: {type: "string"},
 	middle: {type: "string"},
@@ -84,6 +70,20 @@ const personProperties = {
 		readOnly: true,
 		"x-storage": { column: "total_hours" },
 		description: "Accumulated by the server; not client-settable"
+	},
+	legacyIDs: {
+		type: "object",
+		readOnly: true,
+		properties: {
+			oldpbdbID: {
+				type: "string",
+				description: "Legacy ID for persons migrated from old PBDB"
+			},
+			pbotID: {
+				type: "string",
+				description: "Legacy ID for persons migrated from PBot"
+			}
+		}
 	}
 };
 

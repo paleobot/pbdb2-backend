@@ -183,7 +183,7 @@ test('specimen example is a valid stored payload', () => {
 // ---------- person ----------
 
 const PERSON_STORED_ELSEWHERE = ['permid', 'role', 'authorizer', 'active', 'totalHours'];
-const PERSON_READ_ONLY = ['permid', 'legacyIDs', 'totalHours'];
+const PERSON_READ_ONLY = ['permid', 'totalHours', 'legacyIDs'];
 
 const createPerson = () => ({ givenName: 'g', familyName: 'f', gender: 'Other', email: 'g@example.com' });
 
@@ -191,7 +191,7 @@ test('person db drops every stored-elsewhere property and keeps the rest', () =>
   const db = deriveVariant(applyEnums(sources.person, enums), 'db');
   for (const name of PERSON_STORED_ELSEWHERE) assert.equal(name in db.properties, false, name);
   assert.deepEqual(Object.keys(db.properties), [
-    'legacyIDs', 'givenName', 'familyName', 'middle', 'email', 'orcid', 'countryCode', 'institution', 'gender',
+    'givenName', 'familyName', 'middle', 'email', 'orcid', 'countryCode', 'institution', 'gender', 'legacyIDs',
   ]);
   assert.deepEqual(db.required, ['familyName', 'givenName', 'gender']);
   assert.equal('allOf' in db, false, 'x-create not merged into db');
@@ -380,7 +380,7 @@ const createAuthority = () => ({ reference: { permid: 'r-1' }, citation: 'Gaudry
 
 test('authority db declares neither permid nor reference and requires only the legacy two', () => {
   const db = deriveVariant(sources.authority, 'db');
-  assert.deepEqual(Object.keys(db.properties), ['legacyIDs', 'citation', 'descriptors', 'year', 'publishedInReference']);
+  assert.deepEqual(Object.keys(db.properties), ['citation', 'descriptors', 'year', 'publishedInReference', 'legacyIDs']);
   assert.deepEqual(db.required, ['citation', 'publishedInReference']);
   assert.equal('allOf' in db, false, 'x-create not merged into db');
 });
@@ -459,7 +459,7 @@ const withoutUndefined = (o) => JSON.parse(JSON.stringify(o));
 
 test('schema db declares neither permid nor a reference field and requires only title and year', () => {
   const db = deriveVariant(sources.schema, 'db');
-  assert.deepEqual(Object.keys(db.properties), ['legacyIDs', 'title', 'year', 'purpose', 'authors', 'acknowledgments', 'partsPreserved', 'notableFeatures']);
+  assert.deepEqual(Object.keys(db.properties), ['title', 'year', 'purpose', 'authors', 'acknowledgments', 'partsPreserved', 'notableFeatures', 'legacyIDs']);
   assert.deepEqual(db.required, ['title', 'year']);
   assert.equal('allOf' in db, false, 'x-create not merged into db');
 });
@@ -563,7 +563,7 @@ for (const entity of ['character', 'state']) {
 
   test(`${entity} db declares legacyIDs, name and definition and requires only name`, () => {
     const db = deriveVariant(sources[entity], 'db');
-    assert.deepEqual(Object.keys(db.properties), ['legacyIDs', 'name', 'definition']);
+    assert.deepEqual(Object.keys(db.properties), ['name', 'definition', 'legacyIDs']);
     assert.deepEqual(db.required, ['name']);
     assert.equal('allOf' in db, false, 'x-create not merged into db');
   });

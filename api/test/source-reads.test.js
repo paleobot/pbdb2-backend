@@ -3,6 +3,10 @@ import assert from 'node:assert/strict';
 
 import { build, DEFAULT_PUBLIC_BASE_URL as BASE } from '../src/app.js';
 import { assertPublished, assertEnvelope } from './published.js';
+import { authoritySource } from '../../payloadSchemas/authority.schema.js';
+import { collectionSource } from '../../payloadSchemas/collection.schema.js';
+import { referenceSource } from '../../payloadSchemas/reference.schema.js';
+import { schemaSource } from '../../payloadSchemas/schema.schema.js';
 
 /**
  * Reads through a payload source (authorities, collections, references, schemas), driven with a fake
@@ -532,4 +536,50 @@ test('schema stub reads honour the contract (no DB configured)', async (t) => {
   assertSchemaTreeContract(data);
   assert.equal(data.characters[0].states[0].quantitative, false);
   assertSchemaContract((await app.inject({ method: 'GET', url: '/api/v1/schemas' })).json().data);
+});
+
+// Key order is invisible to deep-equal and to schema validation, so it is
+// asserted directly (api-foundation, "Response entities present permid first").
+const SOURCES_BY_ROUTE = [
+  { route: 'authorities', id: 'aut-1', source: authoritySource, label: 'citation', pg: fakePg },
+  { route: 'collections', id: 'col-1', source: collectionSource, label: 'name', pg: collectionsPg },
+  { route: 'references', id: 'ref-1', source: referenceSource, label: 'title', pg: referencesPg },
+  { route: 'schemas', id: 'sch-1', source: schemaSource, label: 'title', pg: schemasPg },
+];
+
+function assertFieldOrder(record, { source, label }, extras = []) {
+  const keys = Object.keys(record).filter((k) => !extras.includes(k));
+  assert.deepEqual(keys, Object.keys(source.properties).filter((k) => k in record));
+  assert.deepEqual(keys.slice(0, 2), ['permid', label]);
+}
+
+for (const entry of SOURCES_BY_ROUTE) {
+  test(`${entry.route} records list permid, then ${entry.label}, then schema order, with legacyIDs after the rest`, async (t) => {
+    const app = build({ pg: entry.pg() });
+    t.after(() => app.close());
+
+    assert.equal(Object.keys(entry.source.properties).at(-1), 'legacyIDs');
+    const single = (await app.inject({ method: 'GET', url: `/api/v1/${entry.route}/${entry.id}` })).json().data;
+    assertFieldOrder(single, entry, ['characters']);
+    const [item] = (await app.inject({ method: 'GET', url: `/api/v1/${entry.route}?ids=${entry.id}` })).json().data;
+    assertFieldOrder(item, entry);
+  });
+}
+
+test('characters and states in a schema tree list permid first, then name', async (t) => {
+  const app = build({ pg: schemasPg() });
+  t.after(() => app.close());
+  const { data } = (await app.inject({ method: 'GET', url: '/api/v1/schemas/sch-1' })).json();
+
+  let visited = 0;
+  const walk = (nodes = []) => {
+    for (const node of nodes) {
+      visited++;
+      assert.deepEqual(Object.keys(node).slice(0, 2), ['permid', 'name']);
+      walk(node.characters);
+      walk(node.states);
+    }
+  };
+  walk(data.characters);
+  assert.ok(visited > 0, 'the fixture has a tree to check');
 });

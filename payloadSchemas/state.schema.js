@@ -26,6 +26,13 @@ const stateProperties = {
 		"x-storage": { column: "permid" },
 		description: "Permanent identifier, constant across versions"
 	},
+	name: {type: "string"},
+	definition: {type: "string"},
+	quantitative: {
+		type: "boolean",
+		"x-storage": { column: "quantitative" },
+		description: "Whether an observation of this state records a measured value"
+	},
 	legacyIDs: {
 		type: "object",
 		readOnly: true,
@@ -35,13 +42,6 @@ const stateProperties = {
 				description: "Legacy ID for states migrated from PBot"
 			}
 		}
-	},
-	name: {type: "string"},
-	definition: {type: "string"},
-	quantitative: {
-		type: "boolean",
-		"x-storage": { column: "quantitative" },
-		description: "Whether an observation of this state records a measured value"
 	}
 };
 

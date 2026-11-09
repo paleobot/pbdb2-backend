@@ -23,6 +23,8 @@ const characterProperties = {
 		"x-storage": { column: "permid" },
 		description: "Permanent identifier, constant across versions"
 	},
+	name: {type: "string"},
+	definition: {type: "string"},
 	legacyIDs: {
 		type: "object",
 		readOnly: true,
@@ -32,9 +34,7 @@ const characterProperties = {
 				description: "Legacy ID for characters migrated from PBot"
 			}
 		}
-	},
-	name: {type: "string"},
-	definition: {type: "string"}
+	}
 };
 
 export const characterSource = {

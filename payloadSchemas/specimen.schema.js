@@ -21,20 +21,6 @@ const specimenProperties = {
 		type: "string",
 		enum: ['holotype','paratype','some paratypes']
 	},
-	legacyIDs: {
-		type: "object",
-		readOnly: true,
-		properties: {
-			oldpbdbID: {
-				type: "string",
-				description: "Legacy ID for specimens migrated from old PBDB"
-			},
-			pbotID: {
-				type: "string",
-				description: "Legacy ID for specimens migrated from PBot"
-			},
-		}
-	},
 	identifiers: {
 		type: "object",
 		properties: {
@@ -78,6 +64,20 @@ const specimenProperties = {
 		}
 	},
 	notes: {type: "string"},
+	legacyIDs: {
+		type: "object",
+		readOnly: true,
+		properties: {
+			oldpbdbID: {
+				type: "string",
+				description: "Legacy ID for specimens migrated from old PBDB"
+			},
+			pbotID: {
+				type: "string",
+				description: "Legacy ID for specimens migrated from PBot"
+			},
+		}
+	},
 }
 
 export const specimenSource = {

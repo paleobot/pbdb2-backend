@@ -35,6 +35,21 @@ const authorityProperties = {
 		"x-storage": { column: "permid" },
 		description: "Permanent identifier, constant across versions"
 	},
+	citation: {type: "string"},
+	reference: {
+		...link({ target: "references", label: "title" }),
+		"x-storage": { column: "reference_id", codec: "referencePermid" },
+		description: "the reference this authority is recorded from"
+	},
+	descriptors: {
+		type: "array",
+		items: { type: "string" }
+	},
+	year: {
+		type: "string",
+		maxLength: 4
+	},
+	publishedInReference: {type: "boolean"},
 	legacyIDs: {
 		type: "object",
 		readOnly: true,
@@ -45,22 +60,7 @@ const authorityProperties = {
 				description: "Legacy IDs for authorities migrated from old PBDB"
 			}
 		}
-	},
-	reference: {
-		...link({ target: "references", label: "title" }),
-		"x-storage": { column: "reference_id", codec: "referencePermid" },
-		description: "the reference this authority is recorded from"
-	},
-	citation: {type: "string"},
-	descriptors: {
-		type: "array",
-		items: { type: "string" }
-	},
-	year: {
-		type: "string",
-		maxLength: 4
-	},
-	publishedInReference: {type: "boolean"}
+	}
 };
 
 export const authoritySource = {

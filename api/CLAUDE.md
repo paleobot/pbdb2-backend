@@ -130,6 +130,12 @@ docs/                   design notes (e.g. response-envelope rationale)
   repository; its response is described by the read-only
   `payloadSchemas/taxon.schema.js`. `specimens` is a stub (see
   `api/docs/response-contracts.md`).
+- **Field order is the schema's.** `merge()` emits a record's fields in the order
+  its payload source declares them (undeclared keys after), so `permid`, then
+  `name`/`title`/`citation`, comes first and `legacyIDs` last. Reordering a
+  schema's properties reorders responses and the description. It is a convention
+  for people reading in a browser, asserted directly in the tests because deep
+  equality and schema validation ignore key order.
 - **Route schemas validate queries and document responses.** Every GET route
   declares a `querystring` schema built from its descriptor's `filters` and
   `expansions` (`lib/query-schemas.js`) and, for documented resources, a 200

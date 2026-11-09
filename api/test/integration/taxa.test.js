@@ -231,6 +231,8 @@ test('the authority link resolves across groups', async (t) => {
 
   assert.equal(data.authority.citation, 'Brongniart 1822');
   assert.ok(data.authority.href.startsWith(`${BASE}/api/v1/authorities/`), data.authority.href);
+  assert.deepEqual(Object.keys(data.authority), ['permid', 'citation', 'href']);
+  assert.deepEqual(Object.keys(data.accepted), ['permid', 'name', 'href']);
 });
 
 test('a taxon with no authority reads as null', async (t) => {

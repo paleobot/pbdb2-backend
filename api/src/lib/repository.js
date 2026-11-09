@@ -74,7 +74,7 @@ function bareIdent(name) {
 }
 
 /**
- * Build the embedded `{ <label>, permid }` object for one link target, reading
+ * Build the embedded `{ permid, <label> }` object for one link target, reading
  * the label from whichever source the target declares: a key inside a JSONB
  * payload column, or a plain column on the table. The emitted shape is
  * identical either way, so a citing resource cannot tell which kind of target
@@ -91,12 +91,12 @@ function labelObject(target, group) {
     // Plain-column label (a derived table with no payload): the column name is
     // also the emitted field name, mirroring how `label` doubles up below.
     const name = literal(target.labelColumn);
-    return `json_build_object(${name}, r.${bareIdent(target.labelColumn)}, 'permid', r.permid)`;
+    return `json_build_object('permid', r.permid, ${name}, r.${bareIdent(target.labelColumn)})`;
   }
 
   if (target.payloadColumn && target.label) {
     const label = literal(target.label);
-    return `json_build_object(${label}, r.${bareIdent(target.payloadColumn)}->>${label}, 'permid', r.permid)`;
+    return `json_build_object('permid', r.permid, ${label}, r.${bareIdent(target.payloadColumn)}->>${label})`;
   }
 
   throw new Error(

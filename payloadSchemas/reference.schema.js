@@ -25,20 +25,6 @@ const fieldSchemas = {
 		"x-storage": { column: "permid" },
 		description: "Permanent identifier, minted by the server"
 	},
-	legacyIDs: {
-		type: "object",
-		readOnly: true,
-		properties: {
-			oldpbdbID: {
-				type: "string",
-				description: "Legacy ID for references migrated from old PBDB"
-			},
-			pbotID: {
-				type: "string",
-				description: "Legacy ID for references migrated from PBot"
-			},
-		}
-	},
 	title: {type: "string"},
 	authors: {
 		type: "array",
@@ -111,6 +97,20 @@ const fieldSchemas = {
 		maxLength: 80
 	},
 	description: {type: "string"},
+	legacyIDs: {
+		type: "object",
+		readOnly: true,
+		properties: {
+			oldpbdbID: {
+				type: "string",
+				description: "Legacy ID for references migrated from old PBDB"
+			},
+			pbotID: {
+				type: "string",
+				description: "Legacy ID for references migrated from PBot"
+			},
+		}
+	},
 };
 
 // Fields every type may carry. publicationType itself is added below.
@@ -165,6 +165,8 @@ const typeRule = ([type, { fields, required, unrestricted }]) => {
 	};
 };
 
+const { permid, title, ...otherFieldSchemas } = fieldSchemas;
+
 export const referenceSource = {
 	$schema: "https://json-schema.org/draft/2020-12/schema",
 	$id: "https://pbdb2.example.com/schemas/reference.json",
@@ -172,11 +174,13 @@ export const referenceSource = {
 	description: "A reference payload in the PBDB database",
 	type: "object",
 	properties: {
+		permid,
+		title,
 		publicationType: {
 			type: "string",
 			enum: Object.keys(PUBLICATION_TYPES),
 		},
-		...fieldSchemas,
+		...otherFieldSchemas,
 	},
 	required: ["publicationType", "publicationYear"],
 	// title is required on create only: 541 migrated PBDB refs have none, because

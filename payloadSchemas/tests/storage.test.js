@@ -530,3 +530,29 @@ test('a versioned source is read from heads only, alone or with a selection', as
     /versioned flag, when given, must be true/,
   );
 });
+
+const orderedSource = {
+  type: 'object',
+  properties: {
+    permid: { type: 'string', 'x-storage': { column: 'permid' } },
+    title: { type: 'string' },
+    meta: { type: 'object', properties: { first: { type: 'string' }, second: { type: 'string' } } },
+    legacyIDs: { type: 'object' },
+  },
+};
+
+test('merge lists declared properties in schema order, ahead of the JSONB key order and column-backed fields', () => {
+  const merged = merge(orderedSource, { jsonb: { legacyIDs: {}, meta: {}, title: 't' }, columns: { permid: 'p-1' } });
+  assert.deepEqual(Object.keys(merged), ['permid', 'title', 'meta', 'legacyIDs']);
+});
+
+test('merge keeps an undeclared key, after every declared one', () => {
+  const merged = merge(orderedSource, { jsonb: { a: 1, legacyIDs: {}, title: 't' }, columns: { permid: 'p-1' } });
+  assert.deepEqual(Object.keys(merged), ['permid', 'title', 'legacyIDs', 'a']);
+  assert.equal(merged.a, 1);
+});
+
+test('merge orders a declared nested object by its own schema', () => {
+  const merged = merge(orderedSource, { jsonb: { meta: { second: '2', first: '1' } }, columns: { permid: 'p-1' } });
+  assert.deepEqual(Object.keys(merged.meta), ['first', 'second']);
+});

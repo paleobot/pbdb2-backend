@@ -33,20 +33,6 @@ const collectionProperties = {
         type: "string",
         description: "Alternative name of the collection"
     },
-    legacyIDs: {
-        type: "object",
-        readOnly: true,
-        properties: {
-            oldpbdbID: {
-                type: "string",
-                description: "Legacy ID for collections migrated from old PBDB"
-            },
-            pbotID: {
-                type: "string",
-                description: "Legacy ID for collections migrated from PBot"
-            },
-        }
-    },
     context : {
         type: "object",
         properties: {
@@ -432,7 +418,7 @@ const collectionProperties = {
                 description: "Size classes of specimens in collection"
             },
         }
-    }
+    },
 };
 
 // References, as they are stored now: the primary in collections.reference_id,
@@ -454,6 +440,22 @@ collectionProperties.additionalReferences = {
     items: link({ target: "references", label: "title" }),
     "x-storage": { table: "additional_collection_refs", codec: "referenceLinks" },
     description: "further references this collection is recorded from, unordered; usually includes the primary"
+};
+
+// Last, so a response lists it after the record's own fields.
+collectionProperties.legacyIDs = {
+    type: "object",
+    readOnly: true,
+    properties: {
+        oldpbdbID: {
+            type: "string",
+            description: "Legacy ID for collections migrated from old PBDB"
+        },
+        pbotID: {
+            type: "string",
+            description: "Legacy ID for collections migrated from PBot"
+        },
+    }
 };
 
 export const collectionSource = {

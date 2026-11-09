@@ -311,6 +311,14 @@ export function split(source, payload, ctx) {
   return { jsonb, ...parts };
 }
 
+// A node's keys in the order its schema declares them, then any it does not
+// declare, so a response reads in schema order rather than JSONB key order.
+function inDeclaredOrder(schema, out) {
+  const declared = {};
+  for (const name of Object.keys(schema.properties ?? {})) if (name in out) declared[name] = out[name];
+  return { ...declared, ...out };
+}
+
 function mergeNode(schema, value, parts, ctx) {
   const out = value === undefined ? {} : { ...value };
   for (const { storage, names } of storageGroups(schema.properties)) {
@@ -328,7 +336,7 @@ function mergeNode(schema, value, parts, ctx) {
     const child = mergeNode(prop, out[name], parts, ctx);
     if (child !== undefined) out[name] = child;
   }
-  return value === undefined && Object.keys(out).length === 0 ? undefined : out;
+  return value === undefined && Object.keys(out).length === 0 ? undefined : inDeclaredOrder(schema, out);
 }
 
 export function merge(source, { jsonb, columns = {}, children = {} }, ctx) {
