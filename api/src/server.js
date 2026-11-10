@@ -35,7 +35,11 @@ if (!process.env.PUBLIC_BASE_URL && config.nodeEnv !== 'development') {
   process.exit(1);
 }
 
-const app = build({ logger: true, publicBaseUrl: config.publicBaseUrl });
+const app = build({
+  logger: true,
+  publicBaseUrl: config.publicBaseUrl,
+  ...(config.maxConcurrentExports ? { maxConcurrentExports: config.maxConcurrentExports } : {}),
+});
 app.log.info(`Links use public base URL ${app.publicBaseUrl}`);
 
 try {

@@ -353,6 +353,28 @@ link is written.
 *Reasoning:* discussion of 2026-10-06, during `authority-reads-from-payload-schemas` (design D6);
 `openspec/changes/absolute-link-urls/design.md`.
 
+## Output formats beyond CSV
+
+**Deferred** (`add-csv-list-output`, 2026-11-09). The lists and `ids` reads of references,
+authorities, collections and taxa return CSV when `Accept` asks for `text/csv`
+(`api/docs/csv-output.md`). Left out on purpose:
+
+- **A format selector in the URL.** Formats are chosen by `Accept` only. If one is asked for (for a
+  plain `<a href>` download, or `read.csv(url)` with no headers), use `?format=csv`: unknown
+  parameters are a 400 today, so the name is free and adding it breaks nothing. A `.csv` suffix
+  would need an extra route per list.
+- **RIS for references**, list and single read. Classic serves it (`refs/list.ris`,
+  `application/x-research-info-systems`). The negotiation, the 406 rule, the streaming and the
+  export cap already take another format; RIS needs a registry entry in `api/src/lib/formats.js`
+  and its own serializer. Open: the `TY` mapping per publication type, author formatting (Classic
+  writes `AU  - Bone,D.A.`), whether to write Classic's preamble lines (`Provider:`, `Database:`),
+  and whether `ID` holds the permid.
+- **TSV** (`text/tab-separated-values`). Nearly free, since only the separator and quoting differ.
+  Waits for someone to ask.
+- **Classification columns** (`phylum`, `class`, `order`, `family`) on taxa, as Classic's
+  `show=class` gives. A new feature built from the containing chain, not a flattening rule.
+- **CSV for single reads.** `?ids=<permid>` already gives one row.
+
 ## Version history (`/versions`)
 
 **Open; needs a public version identifier first.** Reads serve only a lineage's current,

@@ -75,6 +75,21 @@ test('a list documents its filters and bounds; an expansion is a boolean', () =>
   assert.equal(taxa.schema.type, 'boolean');
 });
 
+test('the four large lists document a CSV response beside JSON; nothing else does', () => {
+  const CSV_LISTS = ['/api/v1/authorities', '/api/v1/collections', '/api/v1/references', '/api/v1/taxa'];
+  for (const [path, { get }] of Object.entries(doc.paths)) {
+    const content = get.responses['200'].content ?? {};
+    if (CSV_LISTS.includes(path)) {
+      assert.deepEqual(Object.keys(content), ['application/json', 'text/csv'], path);
+      assert.equal(content['text/csv'].schema.type, 'string', path);
+      assert.match(content['text/csv'].schema.description, /Without `limit` the response holds the whole result/, path);
+      assert.match(get.responses['200'].description, /whole result unless `limit` is sent/, path);
+    } else {
+      assert.equal('text/csv' in content, false, path);
+    }
+  }
+});
+
 test('each shared-field filter on references documents its match rule', () => {
   const params = Object.fromEntries(doc.paths['/api/v1/references'].get.parameters.map((p) => [p.name, p]));
   assert.equal(params.publicationYear.schema.type, 'string');

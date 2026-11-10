@@ -26,10 +26,11 @@ Not in this change: RIS, a format selector in the URL (`?format=csv` is the reco
 - `resource-routes`: the `meta.requested` / `meta.missing` report belongs to the JSON form of an `ids` read.
 - `api-description`: the four CSV lists document their `text/csv` response.
 - `repository-layout`: `csv-output` joins the list of API specs whose paths are relative to `api/`.
+- `data-access`: the connection pool grows from 5 to 10, so concurrent exports leave room for other reads (design D13).
 
 ## Impact
 
-- **Code:** `api/src/lib/crud-routes.js` (the shared list handler and route schemas), the four resources' route registration, new modules for negotiation and CSV writing under `api/src/lib/`, `api/src/app.js` (the 406 and `Vary` hook) and `api/src/config.js` (the export cap). No new dependency.
+- **Code:** `api/src/lib/crud-routes.js` (the shared list handler and route schemas), the four resources' route registration, new modules for negotiation and CSV writing under `api/src/lib/`, `api/src/app.js` (the 406 and `Vary` hook), `api/src/config.js` (the export cap) and `api/src/plugins/postgres.js` (a pool of 10 instead of 5). No new dependency.
 - **API:** additive. A client that sends no `Accept: text/csv` gets what it gets today, plus a `Vary: Accept` header.
 - **Database:** no DDL. An unbounded export runs sequential keyset page queries, holding one pooled connection per batch and none between batches.
 - **Data integrity:** read-only, but a CSV must not silently misrepresent records. The risks are a parallel array losing its alignment, a value containing a delimiter being misread as two values, and a failed stream being mistaken for a complete file. The specs address each. Formula-like strings are deliberately left verbatim, because altering them would corrupt the data for R and pandas users.

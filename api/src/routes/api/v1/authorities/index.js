@@ -9,6 +9,7 @@ export default async function authorities(fastify) {
     source: descriptorFor('authorities').source,
     filters: descriptorFor('authorities').filters,
     component: 'Authority',
+    formats: ['text/csv'],
     // A payload in the authority source's shape, as a merged read returns it.
     stub: (permid = 'aut-00000000') => ({
       permid,

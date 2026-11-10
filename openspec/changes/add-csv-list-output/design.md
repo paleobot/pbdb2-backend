@@ -123,6 +123,16 @@ A `HEAD` for CSV reads the first batch only, so that errors and headers match `G
 
 RFC 4180: CRLF between records, fields quoted when they contain `"`, a comma, CR or LF, with `"` doubled. Embedded newlines are preserved (31,276 collection strings, 1,022 reference strings). Booleans are `true` and `false`; numbers are written as JSON would. Strings beginning `=`, `+`, `-` or `@` (998 in collections, 8 in references) are left verbatim: the usual `'` prefix would alter the data for the R and pandas users this feature is for.
 
+### D13. The pool grows from 5 to 10 connections, and the cap stays at 4
+
+The API's pool had 5 connections (`api/src/plugins/postgres.js`). With the cap at 4, four exports all mid-query would leave one connection for every JSON read on the instance. Over a 145 ms link, an export is mid-query for a quarter of its time or more. The pool is now 10, so four exports leave at least six.
+
+Pool and cap are both per instance, so Aurora sees instances × 10 connections at most. Aurora allows 844 (`max_connections` on the dev cluster, with 7 in use when measured), so the extra five per instance matter only if instances multiply a lot or other services share the database. Revisit both once a deployed API can be measured.
+
+*Alternatives:* lowering the cap to 2 keeps the pool at 5, but it halves concurrent exports to protect a pool that has room to grow. Keeping both at their old values relies on an API deployed beside Aurora, where batches take milliseconds; that has not been measured.
+
+Agreed 2026-11-09.
+
 ## Risks / Trade-offs
 
 - [A plain `<a href>` cannot set `Accept`] → A frontend download uses `fetch` and saves a blob, which is awkward for a full taxa export. The URL parameter in Non-Goals is the fix if that bites.
@@ -132,6 +142,34 @@ RFC 4180: CRLF between records, fields quoted when they contain `"`, a comma, CR
 - [A mid-stream failure can only drop the connection] → D7 covers the likely case, failing before the first byte. Tools that ignore transport errors can still keep a short file.
 - [CSV headers become a contract while `ages.intervals`, `environment` and `paleontology` are placeholders] → Those columns will change with that redesign, and the docs say so.
 - [`legacyIDs.oldpbdbIDs` reaches 61,788 characters on "authority unknown" and 48,598 on Linnaeus 1753, past Excel's 32,767-character cell limit] → Excel may cut or mishandle those two cells; R and pandas are unaffected. Exported as stored and documented.
+
+## Measurements
+
+Full exports with no `limit`, localhost `pbdb` (PostgreSQL 16, the API on the same VM), 2026-11-09. Each was parsed with Python's `csv` module: row counts equal the current-head counts, every permid is unique, and every row has the header's width. Memory is the server's resident set, sampled every 0.25 s during each export.
+
+| Resource | Rows | Columns | Time | Server RSS, start → peak |
+|---|---|---|---|---|
+| references | 96,122 | 24 | 1.8 s | 95 → 202 MB |
+| authorities | 166,992 | 8 | 2.4 s | 201 → 235 MB |
+| collections | 279,599 | 54 | 13.6 s | 238 → 315 MB |
+| taxa | 525,805 | 8 | 24.1 s | 292 → 293 MB |
+
+The exports ran one after another in one server. Taxa, the largest, added 1 MB, so the earlier growth is heap the process kept, not a result held in memory.
+
+Aurora `pbdb2_migration_test` (the same row counts), with the API on this VM and reaching Aurora over the VPN, 2026-11-09. Every export was again complete and correct, with no server errors:
+
+| Resource | Time | Server RSS, start → peak |
+|---|---|---|
+| references | 20.7 s | 97 → 165 MB |
+| authorities | 35.3 s | 160 → 190 MB |
+| collections | 143.0 s | 190 → 242 MB |
+| taxa | 100.8 s, then 95.7 s | 215 → 232 MB, then 195 → 196 MB |
+
+The time is the network, not the database. A round trip over the VPN is about 145 ms, while the database executes a 1,001-row batch in 0.5–2 ms (`EXPLAIN ANALYZE` on taxa and collections). Taxa costs about one round trip per batch (526 batches, about 185 ms each). Collections costs several per batch (heads, child rows, codec context), and moves the largest payloads. An API deployed beside Aurora would have far lower latency; that has not been measured.
+
+So an export puts little load on the database: one short query at a time, holding a pooled connection only while that query runs, including the transfer of its rows. What an export does hold is its slot, for as long as the whole response takes, up to a few minutes from here.
+
+Decision D13 follows from these figures.
 
 ## Migration Plan
 

@@ -8,6 +8,7 @@ import { normalizePublicBaseUrl } from './config.js';
 import { createAjv } from '../../payloadSchemas/lib/ajv.js';
 import { normalizeQuery, formatQueryErrors } from './lib/query-schemas.js';
 import { publishedComponents } from './lib/published-schemas.js';
+import { negotiate, ALL_FORMATS, JSON_TYPE } from './lib/formats.js';
 import pkg from '../../package.json' with { type: 'json' };
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -50,6 +51,9 @@ if (!isAtLeast(process.versions.node, minimumNode)) {
  */
 export const DEFAULT_PUBLIC_BASE_URL = 'http://localhost:3000';
 
+/** Concurrent unbounded exports per instance when none is configured (csv-output). */
+export const DEFAULT_MAX_CONCURRENT_EXPORTS = 4;
+
 /**
  * Build a fully configured Fastify instance WITHOUT listening.
  *
@@ -69,7 +73,14 @@ export function build(opts = {}) {
   // `publicBaseUrl` is the base every link in a response starts with
   // (`links.self`, `next`/`prev`, `href`, discovery). It is validated here, so a
   // bad value throws before the app exists.
-  const { pg, publicBaseUrl = DEFAULT_PUBLIC_BASE_URL, ...fastifyOpts } = opts;
+  // `maxConcurrentExports` caps unbounded non-JSON exports on this instance
+  // (csv-output); `server.js` passes the configured value.
+  const {
+    pg,
+    publicBaseUrl = DEFAULT_PUBLIC_BASE_URL,
+    maxConcurrentExports = DEFAULT_MAX_CONCURRENT_EXPORTS,
+    ...fastifyOpts
+  } = opts;
   const base = normalizePublicBaseUrl(publicBaseUrl);
 
   const app = Fastify({
@@ -81,6 +92,23 @@ export function build(opts = {}) {
 
   app.decorate('publicBaseUrl', base);
   if (pg) app.decorate('pg', pg);
+  app.decorate('exports', { max: maxConcurrentExports, running: 0 });
+
+  // Content negotiation (csv-output). Every GET/HEAD response varies by
+  // `Accept`. A request that selects a non-JSON format its route does not offer
+  // is a 406 here, before its query is validated; one naming a type the API
+  // never produces carries on to JSON. Unmatched routes keep their 404.
+  app.addHook('onRequest', async (request, reply) => {
+    if (request.method !== 'GET' && request.method !== 'HEAD') return;
+    reply.header('Vary', 'Accept');
+    if (request.is404) return;
+    const chosen = negotiate(request.headers.accept, ALL_FORMATS);
+    if (chosen === JSON_TYPE) return;
+    const offered = request.routeOptions.config?.formats ?? [];
+    if (!offered.includes(chosen)) {
+      throw app.httpErrors.notAcceptable(`This resource is not available as ${chosen}; it is available as ${[JSON_TYPE, ...offered].join(', ')}`);
+    }
+  });
 
   // Route schemas compile with the backend's own Ajv (draft 2020-12, the
   // annotation keywords registered), not Fastify's draft-07 default. Every

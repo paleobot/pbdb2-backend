@@ -18,8 +18,25 @@ export function loadConfig(env = process.env) {
     port,
     nodeEnv: env.NODE_ENV ?? 'development',
     publicBaseUrl: env.PUBLIC_BASE_URL || `http://localhost:${port}`,
+    maxConcurrentExports: parseMaxConcurrentExports(env.MAX_CONCURRENT_EXPORTS),
     pg: loadPgConfig(env),
   };
+}
+
+/**
+ * `MAX_CONCURRENT_EXPORTS`: unbounded non-JSON exports one instance runs at once
+ * (csv-output). Absent or empty means undefined, so `build()` applies its
+ * default. Anything but a positive integer throws, so a typo fails at startup.
+ *
+ * @param {string} [value]
+ * @returns {number | undefined}
+ */
+export function parseMaxConcurrentExports(value) {
+  if (value == null || value === '') return undefined;
+  if (!/^[1-9]\d*$/.test(value)) {
+    throw new Error(`MAX_CONCURRENT_EXPORTS must be a positive integer, got ${JSON.stringify(value)}`);
+  }
+  return Number(value);
 }
 
 /**

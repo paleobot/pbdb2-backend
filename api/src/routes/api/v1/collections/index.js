@@ -9,6 +9,7 @@ export default async function collections(fastify) {
     source: descriptorFor('collections').source,
     filters: descriptorFor('collections').filters,
     component: 'Collection',
+    formats: ['text/csv'],
     // A payload in the collection source's shape, as a merged read returns it.
     stub: (permid = 'col-00000000') => ({
       permid,

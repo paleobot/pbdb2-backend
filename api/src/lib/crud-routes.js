@@ -3,6 +3,8 @@ import { collectListFilters } from './list-filters.js';
 import { listQuerySchema, SINGLE_QUERY_SCHEMA, PERMID_PARAMS_SCHEMA } from './query-schemas.js';
 import { pageLinks } from './cursor.js';
 import { singleEnvelope, listEnvelope } from '../plugins/envelope.js';
+import { FORMATS, JSON_TYPE, negotiate } from './formats.js';
+import { sendExport } from './export.js';
 
 /** Marks a route the API description leaves out; discovery skips it too. */
 const HIDDEN = { hide: true };
@@ -53,10 +55,18 @@ const HIDDEN = { hide: true };
  * @param {(record: object) => object} [opts.hydrate]
  *   override the default link hydration, for a group with no payload source
  *   (taxa, whose descriptor links and containing chain hydrate themselves)
+ * @param {string[]} [opts.formats]  non-JSON media types (formats.js) the list
+ *   read offers; single reads offer none (csv-output)
+ * @param {object} [opts.exportSource]  the payload source a format's output is
+ *   derived from; defaults to `source` (taxa, which has no `source`, passes
+ *   `taxonSource`)
  */
 export function registerCrudRoutes(
   fastify,
-  { type, stub, repository, source, filters, expansions, component, hidden = false, readOnly = false, hydrate: customHydrate },
+  {
+    type, stub, repository, source, filters, expansions, component, hidden = false, readOnly = false,
+    hydrate: customHydrate, formats = [], exportSource = source,
+  },
 ) {
   const write = { preHandler: fastify.authenticate, schema: HIDDEN };
   // Each link's href base is derived from this group's mounted prefix and the
@@ -66,8 +76,11 @@ export function registerCrudRoutes(
     ? (record) => hydrateSourceLinks(record, source, fastify.prefix, fastify.publicBaseUrl)
     : (record) => record);
 
-  const list = { schema: listRouteSchema({ filters, source, expansions, component, hidden }) };
-  fastify.get('/', list, listReadHandler(fastify, { type, stub, repository, hydrate, filters, expansions }));
+  const list = {
+    schema: listRouteSchema({ filters, source, expansions, component, hidden, formats }),
+    config: { formats },
+  };
+  fastify.get('/', list, listReadHandler(fastify, { type, stub, repository, hydrate, filters, expansions, formats, exportSource }));
 
   // Single read. It takes no filters and no pagination, so its schema recognizes
   // no query parameters — but it is validated on the same terms as a list, so
@@ -145,14 +158,40 @@ function registerMethodNotAllowed(fastify, type) {
   }
 }
 
+/** How the description words each non-JSON format a list offers. */
+const FORMAT_DOCS = {
+  'text/csv':
+    'CSV, when `Accept` ranks `text/csv` above `application/json`. One header line, then one line per ' +
+    'record. Without `limit` the response holds the whole result, streamed; with `limit` it is one page, ' +
+    'and further pages are in the `Link` header. Columns come from the record schema: nested fields as ' +
+    'dotted paths, array elements joined with `|` (an array inside one with `;`), and `\\`, `|` and `;` ' +
+    'inside an element escaped with `\\`. A link gives its permid and label.',
+};
+
 /**
  * The schema of a list read: its querystring, from what the resource declares,
- * and its 200 response, a page of `component` records.
+ * and its 200 response, a page of `component` records, plus the text of each
+ * non-JSON format it offers.
  */
-export function listRouteSchema({ filters, source, expansions, component, hidden = false }) {
+export function listRouteSchema({ filters, source, expansions, component, hidden = false, formats = [] }) {
+  const json = component ? listEnvelope({ $ref: `${component}#` }) : undefined;
+  let response;
+  if (json && formats.length > 0) {
+    response = {
+      200: {
+        description: `${json.description}; in another format, the whole result unless \`limit\` is sent`,
+        content: {
+          [JSON_TYPE]: { schema: json },
+          ...Object.fromEntries(formats.map((f) => [f, { schema: { type: 'string', description: FORMAT_DOCS[f] } }])),
+        },
+      },
+    };
+  } else if (json) {
+    response = { 200: json };
+  }
   return {
     querystring: listQuerySchema({ filters, source, expansions }),
-    ...(component ? { response: { 200: listEnvelope({ $ref: `${component}#` }) } } : {}),
+    ...(response ? { response } : {}),
     ...(hidden ? HIDDEN : {}),
   };
 }
@@ -181,9 +220,22 @@ export function singleRouteSchema({ component, hidden = false }) {
  *   repository?: { readHeads: (criteria?: object) => Promise<{ records: object[], hasMore: boolean }> },
  *   hydrate: (record: object) => object, filters?: object, expansions?: object }} opts
  */
-export function listReadHandler(fastify, { type, stub, repository, hydrate, filters: filterDefs, expansions }) {
+export function listReadHandler(
+  fastify,
+  { type, stub, repository, hydrate, filters: filterDefs, expansions, formats = [], exportSource },
+) {
+  // Each offered format's serializer, built once: its columns come from the schema.
+  const serializers = Object.fromEntries(formats.map((f) => [f, FORMATS[f].serializer(exportSource)]));
+
   return async function listRead(request, reply) {
     const filters = collectListFilters(request.query, fastify.httpErrors, filterDefs, expansions);
+
+    const mediaType = negotiate(request.headers.accept, formats);
+    if (mediaType !== JSON_TYPE) {
+      return sendExport(fastify, request, reply, {
+        mediaType, serializer: serializers[mediaType], filters, repository, stub, hydrate,
+      });
+    }
 
     if (filters.ids) {
       // DB-backed: fetch the requested heads, narrowed by any field filters.

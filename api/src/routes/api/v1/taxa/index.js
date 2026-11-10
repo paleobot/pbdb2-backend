@@ -23,6 +23,7 @@ import { registerCrudRoutes } from '../../../../lib/crud-routes.js';
 import { taxaRepository } from '../../../../lib/taxa-repository.js';
 import { descriptorFor } from '../../../../lib/resource-tables.js';
 import { hydrateLinkHrefs, hydrateChainHrefs } from '../../../../lib/link-hydration.js';
+import { taxonSource } from '../../../../../../payloadSchemas/taxon.schema.js';
 
 const TYPE = 'taxon';
 
@@ -55,6 +56,10 @@ export default async function taxa(fastify) {
     expansions: descriptor.expansions,
     component: 'Taxon',
     hydrate,
+    // CSV columns come from the read-only taxon source, which describes this
+    // read (taxa reads do not go through merge(), so it is passed only here).
+    formats: ['text/csv'],
+    exportSource: taxonSource,
     // Reached only when no database is configured: the shared handlers fall back
     // to `stub` in that case, and taxa's fallback is an honest failure.
     stub: noDatabase,

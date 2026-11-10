@@ -10,7 +10,7 @@ import { loadPgConfig } from '../config.js';
  *
  * Registers @fastify/postgres from the `PG_*` environment (see loadPgConfig),
  * exposing `fastify.pg` (with `query`/`transact` helpers) and a pool capped at
- * 5 connections. The plugin owns shutdown via @fastify/postgres's own `onClose`
+ * 10 connections. The plugin owns shutdown via @fastify/postgres's own `onClose`
  * hook, which drains the pool.
  *
  * Two deliberate escape hatches keep this usable everywhere:
@@ -48,6 +48,8 @@ export default fp(async (fastify) => {
     password: pg.password,
     database: pg.database,
     ssl,
-    max: 5,
+    // Ten, so the export cap (MAX_CONCURRENT_EXPORTS, default 4) leaves at least
+    // six connections for JSON reads when every export is mid-query (csv-output).
+    max: 10,
   });
 });
