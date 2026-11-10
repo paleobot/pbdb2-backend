@@ -51,7 +51,8 @@ depends on.
 
 ### Requirement: Page size bounds
 
-A list request without a `limit` SHALL return at most a default page size. A
+A JSON list request without a `limit` SHALL return at most a default page size; a
+CSV list request without a `limit` SHALL return the whole result (`csv-output`). A
 `limit` above the maximum page size SHALL be rejected with HTTP 400 rather than
 silently clamped, so a client never believes it received more than it did. A
 `limit` that is not a positive integer SHALL be rejected with HTTP 400, as SHALL
@@ -59,7 +60,7 @@ a `limit` parameter present with an empty value.
 
 #### Scenario: Default page size applies
 
-- **WHEN** a client sends GET to a list endpoint with no `limit`
+- **WHEN** a client sends GET to a list endpoint with no `limit` and does not select CSV
 - **THEN** `data` contains at most the default page size
 
 #### Scenario: Oversized limit is rejected
@@ -100,10 +101,11 @@ or repeated.
 
 ### Requirement: Pagination links
 
-For a list response, `links.next` SHALL be a URL that retrieves the following
+For a JSON list response, `links.next` SHALL be a URL that retrieves the following
 page, preserving every other query parameter of the current request, or `null`
 when the current page is the last. `links.prev` SHALL be a URL that retrieves the
-preceding page, or `null` when the current page is the first.
+preceding page, or `null` when the current page is the first. A CSV list response
+SHALL name those pages in a `Link` header instead (`csv-output`).
 
 #### Scenario: A full page offers a next link
 
@@ -179,3 +181,4 @@ a single page with `null` pagination links.
   resource
 - **THEN** the system responds with HTTP 200
 - **AND** `links.next` and `links.prev` are both `null`
+

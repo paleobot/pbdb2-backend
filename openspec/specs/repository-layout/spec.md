@@ -5,7 +5,6 @@ Fix the backend repository's top-level areas and what each holds; the rule that 
 `migrations/`, and the guard test that enforces it; the npm workspaces root and its single root `.env`;
 and the convention that paths in a migration spec are relative to `migrations/`, while paths in any other
 spec are relative to the repository root.
-
 ## Requirements
 ### Requirement: The repository has a fixed set of top-level areas
 The repository SHALL be organized into these top-level directories, each with one purpose:
@@ -135,7 +134,7 @@ A path written in a spec SHALL be read relative to the area the spec belongs to:
 - Migration specs (`migration-script-layout`, `migration-runner`, `payload-audit`,
   `db-connection-config`, and every spec named `*-migration`): relative to `migrations/`. In these specs,
   "the repository root" means `migrations/`.
-- API specs (`api-discovery`, `api-foundation`, `auth-stub`, `data-access`, `list-pagination`,
+- API specs (`api-discovery`, `api-foundation`, `auth-stub`, `csv-output`, `data-access`, `list-pagination`,
   `reference-enrichment`, `resource-routes`, `taxa-reads`): relative to `api/`.
 - Every other spec, including `prefixed-permids`: relative to the repository root.
 
@@ -154,3 +153,4 @@ migration or API spec SHALL be added to the lists above.
 #### Scenario: A lasting spec names `payloadSchemas/lib/`
 - **WHEN** `payload-schema-variants` names `payloadSchemas/lib/variants.js`
 - **THEN** the path is relative to the repository root
+

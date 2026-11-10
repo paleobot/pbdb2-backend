@@ -19,7 +19,8 @@ backend repository root's `.env`, which the API SHALL load as
 never from the working directory, with variables already set in the environment
 taking precedence and a missing file not an error. A relative `PG_CA_CERT` SHALL
 be resolved against the backend repository root; an absolute one SHALL be used
-as given. The pool SHALL be bounded (max 5 connections) and SHALL be closed
+as given. The pool SHALL be bounded (max 10 connections, so that the default
+export cap of `csv-output` leaves at least six for other reads) and SHALL be closed
 cleanly on application shutdown. The connection SHALL be exposed to handlers
 through a single Fastify decorator so that the data source is swappable without
 touching route definitions.

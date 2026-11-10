@@ -58,7 +58,8 @@ rather than returning 404.
 The system SHALL return every successful response using a consistent envelope of
 `data`, `meta`, and `links`, except the API description's routes
 (`/api/v1/openapi.json`, an OpenAPI document, and `/api/v1/docs`, an HTML viewer;
-`api-description`), whose formats are defined by OpenAPI and HTML. For a single resource, `data` SHALL be an object;
+`api-description`), whose formats are defined by OpenAPI and HTML, and a read
+returned as CSV (`csv-output`). For a single resource, `data` SHALL be an object;
 for a collection, `data` SHALL be an array and `meta` SHALL carry result counts
 describing the returned page. The public identity of a resource SHALL be its
 `permid`, and internal database identifiers SHALL NOT be exposed.
@@ -107,6 +108,11 @@ avoid skipping or repeating records.
 
 - **WHEN** a client requests `/api/v1/openapi.json`
 - **THEN** the body is the OpenAPI document itself, with no `data`, `meta` or `links` wrapper
+
+#### Scenario: A CSV list is not enveloped
+
+- **WHEN** a client requests a list as `text/csv`
+- **THEN** the body is CSV, with no `data`, `meta` or `links` wrapper
 
 ### Requirement: Response entities present permid first and fields in schema order
 
@@ -248,3 +254,4 @@ unchanged by the base.
 
 - **WHEN** a client requests `/api/v1`
 - **THEN** `links.self` and every child link begin with the base
+

@@ -48,7 +48,9 @@ year or range) and what it ignores (case, accents, runs of whitespace, a DOI pre
 comes first. The description of a `references` filter on a field that only some publication types
 allow SHALL name those types, computed from the reference source's `PUBLICATION_TYPES` (a type
 allows a field when its `fields` list names it or it is unrestricted). Each operation
-SHALL describe its HTTP 200 response as the envelope with its `data` schema.
+SHALL describe its HTTP 200 response as the envelope with its `data` schema, under
+`application/json`. An operation that offers CSV (`csv-output`) SHALL also describe a `text/csv`
+200 response as a string, and SHALL state that a request with no `limit` returns the whole result.
 
 #### Scenario: A list's filters are discoverable
 
@@ -84,6 +86,16 @@ SHALL describe its HTTP 200 response as the envelope with its `data` schema.
 
 - **WHEN** the document's `GET /api/v1/taxa` operation is read
 - **THEN** it lists `includeContainingTaxa` as a boolean
+
+#### Scenario: A CSV list documents both formats
+
+- **WHEN** the document's `GET /api/v1/collections` operation is read
+- **THEN** its 200 response has `application/json` and `text/csv` content
+
+#### Scenario: A read with no CSV documents JSON only
+
+- **WHEN** the document's `GET /api/v1/schemas` operation is read
+- **THEN** its 200 response has no `text/csv` content
 
 ### Requirement: The document covers exactly the operations a client can rely on
 
