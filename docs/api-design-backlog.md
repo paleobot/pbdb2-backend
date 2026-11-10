@@ -876,3 +876,16 @@ supplies").
   as an orphan on every run. Fix it in PBot.
 - **PBot person pbotID collision.** Two PBot persons match one PostgreSQL row, so
   `legacyIDs.pbotID` alternates between runs. Pre-existing and unfixed.
+- **Volume and number dropped on book-type refs.** `mapVolNo` in `migrate-refs.js` keeps Classic
+  `pubvol`/`pubno` only for journal articles and serial monographs. Every other type drops them.
+  Book-type counts in `pbdb_2026_10_18` (volume / number):
+
+  | Classic type | Volume | Number |
+  |---|---:|---:|
+  | `book/book chapter` | 1,105 | 172 |
+  | `book chapter` | 787 | 67 |
+  | `book` | 247 | 74 |
+
+  Open: whether chapters and books get volume fields or a "Published in" note like the one
+  `fix-book-chapter-migration` writes for the 236 ambiguous `book` refs (its D3 covers only
+  those). Found 2026-11-10 while planning that change.
