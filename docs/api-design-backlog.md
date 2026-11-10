@@ -870,22 +870,125 @@ supplies").
   expression indexes for authors, can follow without an API change. `unaccent()` is `STABLE`, so
   an expression index needs an `IMMUTABLE` wrapper.
 
+## Series and volumes on book-type references
+
+**Leaning (2026-11-10): add `seriesTitle` and `seriesVolume` to `article in edited collection`
+only.** Planned as a later change (working name `add-chapter-series-fields`) after
+`fix-book-chapter-migration`. It touches the reference payload schema, its create rules and
+filters, the refs migration and RIS (`add-ris-reference-output`).
+
+**The problem has two causes.**
+
+1. *Classic has one container field set; pbdb2 has a set per type.* Every Classic ref has
+   `pubtitle`, `pubvol` and `pubno`. pbdb2 has a volume only on `journal article`
+   (`journalVolume`, `journalNumber`) and `serial monograph` (`seriesVolume`). `mapVolNo` drops
+   `pubvol` and `pubno` on every other type, because no field exists for them. Counts in
+   `pbdb_2026_10_18` (volume / number):
+
+   | Classic type | Volume | Number |
+   |---|---:|---:|
+   | `book/book chapter` | 1,105 | 172 |
+   | `book chapter` | 787 | 67 |
+   | `book` | 247 | 74 |
+
+2. *On a chapter, the volume usually belongs to a series, and the series name is inside
+   `pubtitle`.* Classic writes "Book title. Series name" in one field, and `pubvol` is the
+   series volume. For example, "The Continental Jurassic. Museum of Northern Arizona Bulletin"
+   is vol. 60, and "Cretaceous Period: Biotic Diversity and Biogeography. New Mexico Museum of
+   Natural History and Science Bulletin" is vol. 71. A volume field alone would make no sense
+   without the series name, which only `pubtitle` holds. Neither Classic nor pbdb2 has a type for
+   "chapter in a book that is a volume of a series".
+
+Classic is also inconsistent: chapters of the same series volume (e.g. "Fossil Record 3. NMMNH
+Bulletin" vol. 53) were entered as `book chapter`, `book/book chapter` and `journal article`.
+
+**Measured** on the 2,139 book-type refs with a `pubvol`. Each `pubtitle` was compared with series
+titles from Classic `serial monograph` refs, journal titles used by two or more `journal article`
+refs, and series keywords. Plain string matching; each interpretation rests on samples of 6–10
+rows.
+
+| Evidence in `pubtitle` | Two titles (chapter-shaped) | Whole volume |
+|---|---:|---:|
+| exactly a series title | 290 | 5 |
+| exactly a journal title | 189 | – |
+| ends with a series title | 383 | 4 |
+| contains a series title | 148 | 13 |
+| series keyword only | 218 | 4 |
+| no evidence | 729 | 86 |
+| no `pubtitle` | – | 70 |
+| **Total** | **1,957** | **182** |
+
+About 63% of the chapter-shaped rows show a series. That is a lower bound: the "no evidence"
+group includes series the list misses ("Cuadernos del Museo Geominero").
+
+- **Exactly a series title (290).**
+  - 66 start at page 1, 199 later, and 25 have no usable pages.
+  - 212 share their series and volume with another ref.
+  - 129 have the book title inside `reftitle` ("Order Protorthoptera, in Paleozoisk…").
+  - **About 49 start at page 1 and share their volume with no other ref.** These are whole
+    monographs and should be `serial monograph`: a Classic data-entry error.
+  - Most of the rest (about 210–240) are chapters in a series volume.
+  - At least one false match: "Librairie encyclopédique DE RORET, Paris" is a publisher that a
+    `serial monograph` row also has as its series.
+- **Exactly a journal title (189).** These are mostly the same "Book. Series" strings. They match
+  because Classic also entered chapters of these volumes as `journal article`.
+- **Ends with a series title.** Without the journal check first, there are 441 such rows:
+  - 415 have a separator (`. , : ; –`) before the series and split cleanly, and 410 of those have
+    a book part of 12 or more characters.
+  - The 415 come from **41 series and 128 distinct volumes**. NMMNH Bulletin accounts for 217,
+    MNA Bulletin 39, SEPM Special Publication 26 and GSA Special Paper 10.
+  - Wrong matches: *Journal of Vertebrate Paleontology* (21) is almost certainly SVP abstracts in a
+    journal supplement, not a book series; a couple of generic series titles ("Palaeontology")
+    match by accident.
+  - 26 match mid-phrase ("Textbook of / Palaeontology", "Alaska / Division of Geological…").
+  - The realistic yield is about 380–390 correct splits, with a short exclusion list.
+- **No evidence (729).** A mix:
+  - field-conference volumes ("New Mexico Geological Society, 49th Field Conference", where
+    vol. 49 is the conference number)
+  - multi-volume works with no series (*Palaeontological Atlas of South-Central China* vol. 2,
+    Richthofen's *China* vol. 5, *Dictionnaire des Sciences Naturelles* vol. 39)
+  - series the matching misses
+
+**The model.** A `serial monograph` already *is* a whole volume in a series. The schema allows it
+editors for an edited series volume such as an NMMNH Bulletin. So series fields on
+`standalone book` (or `edited collection`) would give two ways to say one thing, blurring the
+types for curators and filters. Each type keeps one meaning:
+
+|  | Whole volume | Part of a volume |
+|---|---|---|
+| **In a series** | `serial monograph` (authored or edited) | `article in edited collection` + `seriesTitle`, `seriesVolume` (new) |
+| **Not in a series** | `standalone book`, `edited collection` | `article in edited collection` |
+
+A chapter's series fields describe its containing volume, which is itself a `serial monograph`.
+RIS fits: `CHAP` with `T2` book, `T3` series and `VL` series volume. Zotero's book section has
+series and series number fields.
+
+*Alternative considered:* a new type, "article in serial monograph". It works, but adds a type
+curators must choose between, and splits chapter filters across two types.
+
+**Open:**
+- **Splitting rules for the migration:**
+  - the series list (Classic `serial monograph` titles plus additions)
+  - the exclusion list (JVP, generic titles)
+  - rows that match mid-phrase
+  - what to do with an unmatched chapter's `pubvol` (a "Published in:" note as in
+    `fix-book-chapter-migration` D3, or nothing)
+- **Whether to reclassify the ~49 whole monographs** to `serial monograph` in the same change.
+- **Chapters whose book title is inside `reftitle`** ("X, in Y"): split, or leave for curation.
+- **Multi-volume works with no series:** a `bookVolume` on chapters and books, or a note. Count
+  them first.
+- **`pubno` on chapters** is rare (67 + 172 + 74) and mostly a part within a volume. Decide with
+  the volume rule.
+- **Create rules:** whether `seriesVolume` requires `seriesTitle`, and whether either is required
+  on create.
+
 ## Known data issues that affect the API
 
 - **PBot self-parent state.** One PBot state (`ed088383…`, "other") is its own parent and is skipped
   as an orphan on every run. Fix it in PBot.
 - **PBot person pbotID collision.** Two PBot persons match one PostgreSQL row, so
   `legacyIDs.pbotID` alternates between runs. Pre-existing and unfixed.
-- **Volume and number dropped on book-type refs.** `mapVolNo` in `migrate-refs.js` keeps Classic
-  `pubvol`/`pubno` only for journal articles and serial monographs. Every other type drops them.
-  Book-type counts in `pbdb_2026_10_18` (volume / number):
-
-  | Classic type | Volume | Number |
-  |---|---:|---:|
-  | `book/book chapter` | 1,105 | 172 |
-  | `book chapter` | 787 | 67 |
-  | `book` | 247 | 74 |
-
-  Open: whether chapters and books get volume fields or a "Published in" note like the one
-  `fix-book-chapter-migration` writes for the 236 ambiguous `book` refs (its D3 covers only
-  those). Found 2026-11-10 while planning that change.
+- **Volume and number dropped on book-type refs.** About 2,100 Classic book-type refs lose
+  `pubvol`/`pubno` in migration. See [Series and volumes on book-type
+  references](#series-and-volumes-on-book-type-references). `fix-book-chapter-migration` D3 keeps
+  them only for the 236 ambiguous `book` refs, in a "Published in:" note.

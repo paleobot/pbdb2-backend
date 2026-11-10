@@ -54,6 +54,6 @@
 ## 8. Specs, docs and close-out
 
 - [ ] 8.1 If the measured counts differ from the spec scenarios, correct the scenarios (and design D4's table) to the measured values.
-- [ ] 8.2 Update `docs/api-design-backlog.md`: the volume-and-number entry under "Known data issues" names the 236 notes this change writes as already handled.
+- [ ] 8.2 Check `docs/api-design-backlog.md` "Series and volumes on book-type references" and its "Known data issues" pointer against the measured counts; correct the 236-note figure if it changed.
 - [ ] 8.3 Record that Aurora `pbdb2_migration_test` still has the old mapping and is rebuilt at the next scheduled rebuild.
 - [ ] 8.4 Rollback check: reverting the commit and re-running the runner reproduces the baseline from 1.1. Written down as the procedure, not run.
