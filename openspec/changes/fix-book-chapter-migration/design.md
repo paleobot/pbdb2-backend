@@ -40,13 +40,13 @@ The migrated rows are validated by the reference `db` variant. It accepts any de
 
 ### D1. The type of a `book/book chapter` ref depends on its titles
 
-A `book/book chapter` ref whose trimmed `reftitle` and `pubtitle` are both non-blank and differ maps to `article in edited collection`. Every other `book/book chapter` ref maps to `edited collection`, as today.
+A `book/book chapter` ref whose trimmed `reftitle` and `pubtitle` are both non-blank and differ, ignoring case, maps to `article in edited collection`. Every other `book/book chapter` ref maps to `edited collection`, as today.
 
 `mapPublicationType` takes the whole source row instead of only `publication_type`. `PUB_TYPE_MAP` stays the table for every type whose mapping is fixed. The two title-dependent types (D2 is the other) are handled in one small function beside it, `classifyByTitles`, so the lookup stays readable and the exceptions are in one place.
 
 The existing `mapPubtitle` then routes `pubtitle` to `bookTitle` with no change, because it already keys on the target type. The `pubtitle` title fallback (`isPubtitleTitle`) also needs no change: it applies only when `reftitle` is blank, and those rows stay `edited collection`.
 
-Equal titles stay `edited collection`, because the likeliest reading is the book's title entered in both fields.
+Equal titles stay `edited collection`, because the likeliest reading is the book's title entered in both fields. Equality ignores case: ref 54259 has "Cretaceous fossils of Queensland" and "Cretaceous Fossils of Queensland", one book entered twice.
 
 Placeholder titles such as "Taxonomic Names" (13), "Brachiopoda" (8) and "Taxonomic descriptions" (6) become chapters with the book in `bookTitle`. That is right, since they name the part of the book the ref cites.
 
@@ -87,7 +87,7 @@ The type summary moves by 3,123 out of `edited collection` and `standalone book`
 | edited collection | 3,711 | 666 |
 | standalone book | 2,471 | 2,393 |
 
-The PBDB-only figures are confirmed on the first run and written into the spec.
+Measured on the localhost re-run (2026-11-10), PBDB-only: article in edited collection 2,573 → 5,696, edited collection 3,710 → 665, standalone book 2,450 → 2,372. The PBot rows (16, 1 and 21) are unchanged. The rule counts are 3,045, 78 and 236, as the spec states.
 
 ## Risks / Trade-offs
 

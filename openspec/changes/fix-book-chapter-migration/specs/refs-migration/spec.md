@@ -20,7 +20,7 @@ The script SHALL map legacy `publication_type` values to the jsonb `publicationT
 | NULL | "other" | — |
 | any other | "other" | — |
 
-A ref *has two titles* when its `reftitle` and `pubtitle`, each trimmed, are both non-blank and are not equal. A ref *has editors* when the script's editor assembly (see Editor handling) yields a value for it.
+A ref *has two titles* when its `reftitle` and `pubtitle`, each trimmed, are both non-blank and are not equal ignoring case. (Ref 54259 has the same book title in both fields, differing only in capitalisation.) A ref *has editors* when the script's editor assembly (see Editor handling) yields a value for it.
 
 - A "book/book chapter" ref that has two titles SHALL map to "article in edited collection". Every other "book/book chapter" ref SHALL map to "edited collection".
 - A "book" ref that has two titles and has editors SHALL map to "article in edited collection", with no `bookType`. Every other "book" ref SHALL map to "standalone book" with `bookType` "monograph".
@@ -52,7 +52,7 @@ The mapping SHALL be a table in the script, with these two title rules beside it
 - **THEN** jsonb `publicationType` = "edited collection"
 
 #### Scenario: Equal titles stay an edited collection
-- **WHEN** a ref has `publication_type = 'book/book chapter'` and `reftitle` and `pubtitle` that are equal after trimming
+- **WHEN** a ref has `publication_type = 'book/book chapter'` and `reftitle` and `pubtitle` that are equal after trimming and ignoring case
 - **THEN** jsonb `publicationType` = "edited collection"
 
 #### Scenario: Book with two titles and editors is a chapter

@@ -35,9 +35,33 @@ const LANGUAGE_CORRECTIONS = { Portugese: 'Portuguese' };
 // whole book. pubtitle has no other destination for these two.
 const PUBTITLE_TITLE_TYPES = new Set(['standalone book', 'edited collection']);
 
+// Two Classic types whose target depends on the titles. A ref has two titles when
+// reftitle and pubtitle, trimmed, are both non-blank and differ ignoring case: a
+// part and the book it appears in. Equal titles are one book entered twice.
+export function hasTwoTitles(ref) {
+  const reftitle = (ref.reftitle ?? '').trim();
+  const pubtitle = (ref.pubtitle ?? '').trim();
+  return !!reftitle && !!pubtitle && reftitle.toLowerCase() !== pubtitle.toLowerCase();
+}
+
+// A "book/book chapter" with two titles is a chapter; so is a "book" with two
+// titles and editors. Returns null when the table applies.
+export function classifyByTitles(ref, editors) {
+  if (!hasTwoTitles(ref)) return null;
+  const type = ref.publication_type;
+  if (type === 'book/book chapter' || (type === 'book' && editors)) {
+    return { referenceTypeName: 'article in edited collection', bookType: null };
+  }
+  return null;
+}
+
 // --- Transform functions ---
 
-function mapPublicationType(legacyType) {
+export function mapPublicationType(ref, editors) {
+  const byTitles = classifyByTitles(ref, editors);
+  if (byTitles) return byTitles;
+
+  const legacyType = ref.publication_type;
   if (!legacyType) {
     return { referenceTypeName: 'other', bookType: null };
   }
@@ -103,7 +127,7 @@ function buildAuthors(ref, refAuthorsMap) {
   return authors;
 }
 
-function buildEditors(ref, refEditorsMap) {
+export function buildEditors(ref, refEditorsMap) {
   const refNo = ref.reference_no;
   const normalizedEditors = refEditorsMap.get(refNo);
 
@@ -116,7 +140,7 @@ function buildEditors(ref, refEditorsMap) {
   return ref.editors ? ref.editors.trim() || null : null;
 }
 
-function mapPubtitle(ref, referenceTypeName) {
+export function mapPubtitle(ref, referenceTypeName) {
   const pubtitle = ref.pubtitle ? ref.pubtitle.trim() : null;
   if (!pubtitle) return {};
 
@@ -208,7 +232,25 @@ function mapTitle(ref, referenceTypeName) {
 const isPubtitleTitle = (ref, referenceTypeName) =>
   !(ref.reftitle && ref.reftitle.trim()) && !!mapTitle(ref, referenceTypeName);
 
-function buildJsonb(ref, authors, editors, pubType, pages, pubtitleFields, volNoFields, language) {
+// A "book" with two titles and no editors stays a standalone book, which has no
+// field for its container. Its pubtitle, pubvol and pubno go into comments.
+export function containerNote(ref, editors) {
+  if (ref.publication_type !== 'book' || editors || !hasTwoTitles(ref)) return null;
+  const pubvol = (ref.pubvol ?? '').trim();
+  const pubno = (ref.pubno ?? '').trim();
+  let note = `Published in: ${ref.pubtitle.trim()}`;
+  if (pubvol) note += `, vol. ${pubvol}`;
+  if (pubno) note += `, no. ${pubno}`;
+  return note;
+}
+
+export function buildComments(ref, note) {
+  const comments = (ref.comments ?? '').trim();
+  if (comments && note) return `${comments}; ${note}`;
+  return comments || note || null;
+}
+
+export function buildJsonb(ref, authors, editors, pubType, pages, pubtitleFields, volNoFields, language, note = null) {
   const jsonb = {};
 
   jsonb.publicationType = pubType.referenceTypeName;
@@ -241,9 +283,8 @@ function buildJsonb(ref, authors, editors, pubType, pages, pubtitleFields, volNo
     jsonb.publicationCity = ref.pubcity.trim();
   }
 
-  if (ref.comments && ref.comments.trim()) {
-    jsonb.comments = ref.comments.trim();
-  }
+  const comments = buildComments(ref, note);
+  if (comments) jsonb.comments = comments;
 
   return jsonb;
 }
@@ -296,14 +337,20 @@ async function main() {
   let nonNumericPageCount = 0;
   let pageZeroCount = 0;
   let pubtitleTitleCount = 0;
+  const titleRuleCounts = { 'book/book chapter': 0, book: 0 };
+  let containerNoteCount = 0;
   let warningCount = 0;
 
   const targetRows = refs.map((ref) => {
-    const pubType = mapPublicationType(ref.publication_type);
-    pubTypeCounts[pubType.referenceTypeName] = (pubTypeCounts[pubType.referenceTypeName] || 0) + 1;
-
     const authors = buildAuthors(ref, refAuthorsMap);
     const editors = buildEditors(ref, refEditorsMap);
+    // Editors first: the "book" title rule depends on them.
+    const pubType = mapPublicationType(ref, editors);
+    pubTypeCounts[pubType.referenceTypeName] = (pubTypeCounts[pubType.referenceTypeName] || 0) + 1;
+    if (classifyByTitles(ref, editors)) titleRuleCounts[ref.publication_type]++;
+    const note = containerNote(ref, editors);
+    if (note) containerNoteCount++;
+
     const pubtitleFields = mapPubtitle(ref, pubType.referenceTypeName);
     const volNoFields = mapVolNo(ref, pubType.referenceTypeName);
     const pages = buildPages(ref.firstpage, ref.lastpage);
@@ -323,7 +370,7 @@ async function main() {
     const language = mapLanguage(ref.language);
     const { authorizerPersonId, entererPersonId } = mapPersonIds(ref);
 
-    const jsonb = buildJsonb(ref, authors, editors, pubType, pages, pubtitleFields, volNoFields, language);
+    const jsonb = buildJsonb(ref, authors, editors, pubType, pages, pubtitleFields, volNoFields, language, note);
     // PBDB refs keep fields their type would not allow on create: the db variant
     // applies no per-type rule, and those fields are bibliographic history.
     if (!validate(jsonb)) {
@@ -440,11 +487,18 @@ async function main() {
   console.log(`  Non-numeric page warnings: ${nonNumericPageCount}`);
   console.log(`  First page 0 written as 1: ${pageZeroCount}`);
   console.log(`  Titles taken from pubtitle: ${pubtitleTitleCount}`);
+  console.log(`  "book/book chapter" → article in edited collection by titles: ${titleRuleCounts['book/book chapter']}`);
+  console.log(`  "book" → article in edited collection by titles and editors: ${titleRuleCounts.book}`);
+  console.log(`  Container notes written to comments: ${containerNoteCount}`);
   console.log(`  Total warnings: ${warningCount}`);
   console.log(`[${endTime.toISOString()}] Refs migration complete in ${elapsed}s`);
 }
 
-main().catch((err) => {
-  console.error('Migration failed:', err);
-  process.exitCode = 1;
-}).finally(() => closeAll());
+// Only run main() when invoked directly, so pure transforms can be imported for unit tests.
+const invokedDirectly = import.meta.url === `file://${process.argv[1]}`;
+if (invokedDirectly) {
+  main().catch((err) => {
+    console.error('Migration failed:', err);
+    process.exitCode = 1;
+  }).finally(() => closeAll());
+}
