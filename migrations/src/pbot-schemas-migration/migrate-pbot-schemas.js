@@ -7,11 +7,6 @@ import { resolveEnums } from '../../../payloadSchemas/lib/enums.js';
 import { deriveVariant } from '../../../payloadSchemas/lib/variants.js';
 import { createAjv } from '../../../payloadSchemas/lib/ajv.js';
 
-if (!process.env.PBOT_TOKEN) {
-  console.error('Missing required .env variable: PBOT_TOKEN');
-  process.exit(1);
-}
-
 // --- Constants ---
 
 const PBOT_GRAPHQL_URL = 'https://pbot.paleobiodb.org/graphql';
@@ -42,6 +37,8 @@ const SCHEMA_QUERY = `{
       order
       Reference {
         pbotID
+        pbdbid
+        title
       }
     }
     authoredBy {
@@ -164,6 +161,45 @@ async function lookupRefByPbotID(pbotID) {
   return rows.length > 0 ? rows[0].id : null;
 }
 
+// A PBot reference with a pbdbid is skipped by pbot-refs in favour of the Classic
+// ref with that reference_no, so it is found here through legacyIDs.oldpbdbID.
+async function lookupRefByPbdbID(pbdbid) {
+  const { rows } = await pg.query(
+    `SELECT id, reference->>'title' AS title FROM refs WHERE reference->'legacyIDs'->>'oldpbdbID' = $1`,
+    [pbdbid]
+  );
+  return rows.length > 0 ? rows[0] : null;
+}
+
+// Resolves a cited PBot Reference to a refs.id: by its pbotID first, then by its
+// trimmed non-blank pbdbid (the blank test pbot-refs uses to skip it).
+// byPbotID(pbotID) → id | null; byPbdbID(pbdbid) → { id, title } | null.
+export async function resolveReference(reference, { byPbotID, byPbdbID }) {
+  const id = await byPbotID(reference.pbotID);
+  if (id) return { id, via: 'pbotID', classicTitle: null };
+
+  const pbdbid = reference.pbdbid?.trim();
+  if (pbdbid) {
+    const classic = await byPbdbID(pbdbid);
+    if (classic) return { id: classic.id, via: 'pbdbid', classicTitle: classic.title };
+  }
+  return { id: null, via: null, classicTitle: null };
+}
+
+const refLookups = { byPbotID: lookupRefByPbotID, byPbdbID: lookupRefByPbdbID };
+
+// Names the pbdbid in an unresolved-reference warning, when there is one.
+function pbdbidNote(reference) {
+  const pbdbid = reference.pbdbid?.trim();
+  return pbdbid ? ` (pbdbid ${pbdbid}, no Classic ref)` : '';
+}
+
+// Logs a resolution through pbdbid with both titles, so a stub or mistaken pbdbid
+// shows on the line itself.
+function logPbdbidResolution(schema, reference, resolution, role) {
+  console.log(`  Schema ${schema.pbotID} — ${role} reference ${reference.pbotID} resolved via pbdbid ${reference.pbdbid.trim()}: PBot title ${JSON.stringify(reference.title)} → Classic title ${JSON.stringify(resolution.classicTitle)}`);
+}
+
 async function resolveEntererPgId(record, label) {
   const enteredByEntry = resolveEnterer(record, label);
   if (!enteredByEntry || !enteredByEntry.Person) return null;
@@ -270,12 +306,17 @@ function buildStateJsonb(state) {
 // --- Main ---
 
 async function main() {
+  if (!process.env.PBOT_TOKEN) {
+    throw new Error('Missing required .env variable: PBOT_TOKEN');
+  }
+
   const startTime = new Date();
   console.log(`[${startTime.toISOString()}] Starting PBot schema/character/state migration...`);
 
   const stats = {
     schemasFetched: 0, schemasInserted: 0, schemasSkipped: 0,
     additionalRefsInserted: 0,
+    primaryRefsViaPbdbid: 0, additionalRefsViaPbdbid: 0,
     charactersFetched: 0, charactersInserted: 0, characterOrphans: 0, charactersSkipped: 0,
     statesFetched: 0, statesInserted: 0, stateOrphans: 0, statesSkipped: 0,
   };
@@ -371,19 +412,24 @@ async function main() {
     });
 
     // Primary reference (lowest order)
-    const primaryRefPbotID = sortedRefs[0].Reference?.pbotID;
-    if (!primaryRefPbotID) {
+    const primaryRef = sortedRefs[0].Reference;
+    if (!primaryRef?.pbotID) {
       console.warn(`  WARNING: Skipping schema ${schema.pbotID} — primary reference has no pbotID`);
       stats.schemasSkipped++;
       continue;
     }
 
-    const primaryRefPgId = await lookupRefByPbotID(primaryRefPbotID);
-    if (!primaryRefPgId) {
-      console.warn(`  WARNING: Skipping schema ${schema.pbotID} — primary reference pbotID ${primaryRefPbotID} not found in refs table`);
+    const primary = await resolveReference(primaryRef, refLookups);
+    if (!primary.id) {
+      console.warn(`  WARNING: Skipping schema ${schema.pbotID} — primary reference pbotID ${primaryRef.pbotID}${pbdbidNote(primaryRef)} not found in refs table`);
       stats.schemasSkipped++;
       continue;
     }
+    if (primary.via === 'pbdbid') {
+      logPbdbidResolution(schema, primaryRef, primary, 'primary');
+      stats.primaryRefsViaPbdbid++;
+    }
+    const primaryRefPgId = primary.id;
 
     const jsonb = schemaJsonb.get(schema.pbotID);
 
@@ -408,17 +454,22 @@ async function main() {
 
     // Insert additional references
     for (let i = 1; i < sortedRefs.length; i++) {
-      const addlRefPbotID = sortedRefs[i].Reference?.pbotID;
-      if (!addlRefPbotID) {
+      const addlRef = sortedRefs[i].Reference;
+      if (!addlRef?.pbotID) {
         console.warn(`  WARNING: Schema ${schema.pbotID} — additional reference at order ${sortedRefs[i].order} has no pbotID, skipping`);
         continue;
       }
 
-      const addlRefPgId = await lookupRefByPbotID(addlRefPbotID);
-      if (!addlRefPgId) {
-        console.warn(`  WARNING: Schema ${schema.pbotID} — additional reference pbotID ${addlRefPbotID} not found in refs table, skipping`);
+      const addl = await resolveReference(addlRef, refLookups);
+      if (!addl.id) {
+        console.warn(`  WARNING: Schema ${schema.pbotID} — additional reference pbotID ${addlRef.pbotID}${pbdbidNote(addlRef)} not found in refs table, skipping`);
         continue;
       }
+      if (addl.via === 'pbdbid') {
+        logPbdbidResolution(schema, addlRef, addl, 'additional');
+        stats.additionalRefsViaPbdbid++;
+      }
+      const addlRefPgId = addl.id;
 
       await pg.query(
         `INSERT INTO additional_schema_refs (authorizer_person_id, enterer_person_id, schema_id, reference_id)
@@ -626,12 +677,17 @@ async function main() {
   console.log('\n  === Migration Summary ===');
   console.log(`  Schemas:    fetched=${stats.schemasFetched}, inserted=${stats.schemasInserted}, skipped=${stats.schemasSkipped}`);
   console.log(`  Additional refs: inserted=${stats.additionalRefsInserted}`);
+  console.log(`  Refs via pbdbid: primary=${stats.primaryRefsViaPbdbid}, additional=${stats.additionalRefsViaPbdbid}`);
   console.log(`  Characters: fetched=${stats.charactersFetched}, inserted=${stats.charactersInserted}, orphans=${stats.characterOrphans}, skipped=${stats.charactersSkipped}`);
   console.log(`  States:     fetched=${stats.statesFetched}, inserted=${stats.statesInserted}, orphans=${stats.stateOrphans}, skipped=${stats.statesSkipped}`);
   console.log(`[${endTime.toISOString()}] Migration complete in ${elapsed}s`);
 }
 
-main().catch((err) => {
-  console.error('Migration failed:', err);
-  process.exitCode = 1;
-}).finally(() => closePg());
+// Only run main() when invoked directly, so resolveReference can be imported for unit tests.
+const invokedDirectly = import.meta.url === `file://${process.argv[1]}`;
+if (invokedDirectly) {
+  main().catch((err) => {
+    console.error('Migration failed:', err);
+    process.exitCode = 1;
+  }).finally(() => closePg());
+}
