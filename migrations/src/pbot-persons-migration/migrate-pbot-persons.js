@@ -1,18 +1,13 @@
 import { pg, closePg } from '../lib/pg-pool.js';
 import { mintPermids } from '../lib/permids.js';
+import { PBOT_GRAPHQL_URL, pbotHeaders } from '../lib/pbot.js';
 import { personSource } from '../../../payloadSchemas/person.schema.js';
 import { resolveEnums } from '../../../payloadSchemas/lib/enums.js';
 import { deriveVariant } from '../../../payloadSchemas/lib/variants.js';
 import { createAjv } from '../../../payloadSchemas/lib/ajv.js';
 
-if (!process.env.PBOT_TOKEN) {
-  console.error('Missing required .env variable: PBOT_TOKEN');
-  process.exit(1);
-}
-
 // --- Constants ---
 
-const PBOT_GRAPHQL_URL = 'https://pbot.paleobiodb.org/graphql';
 const AUTHORIZER_PERSON_ID = 1106; // Douglas Meredith
 const PERSON_ROLE_ID = 6; // "Person" role
 
@@ -32,10 +27,8 @@ const PBOT_QUERY = `{
 async function fetchPbotPersons() {
   const response = await fetch(PBOT_GRAPHQL_URL, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${process.env.PBOT_TOKEN}`,
-    },
+    // Always the token: PBot returns email as null to anonymous requests.
+    headers: pbotHeaders(true),
     body: JSON.stringify({ query: PBOT_QUERY }),
   });
 
@@ -134,6 +127,7 @@ async function main() {
 
   // --- Fetch PBot persons ---
 
+  console.log('  PBot access: token (person emails are not public)');
   console.log(`  Fetching persons from ${PBOT_GRAPHQL_URL}...`);
   const allPersons = await fetchPbotPersons();
   console.log(`  Fetched ${allPersons.length} persons from PBot`);

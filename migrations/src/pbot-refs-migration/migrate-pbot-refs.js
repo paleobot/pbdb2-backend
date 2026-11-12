@@ -1,5 +1,6 @@
 import { pg, closePg } from '../lib/pg-pool.js';
 import { mintPermids } from '../lib/permids.js';
+import { PBOT_GRAPHQL_URL, pbotHeaders, pbotAccessLabel, includePrivateRequested } from '../lib/pbot.js';
 import { referenceSource, PUBLICATION_TYPES, SHARED_FIELDS } from '../../../payloadSchemas/reference.schema.js';
 import { resolveEnums } from '../../../payloadSchemas/lib/enums.js';
 import { deriveVariant } from '../../../payloadSchemas/lib/variants.js';
@@ -7,7 +8,6 @@ import { createAjv } from '../../../payloadSchemas/lib/ajv.js';
 
 // --- Constants ---
 
-const PBOT_GRAPHQL_URL = 'https://pbot.paleobiodb.org/graphql';
 const AUTHORIZER_PERSON_ID = 1106; // Douglas Meredith
 
 // PBot publication types that are not values of referenceSource's enum.
@@ -63,7 +63,7 @@ const PBOT_QUERY = `{
 async function fetchPbotReferences() {
   const response = await fetch(PBOT_GRAPHQL_URL, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: pbotHeaders(includePrivateRequested()),
     body: JSON.stringify({ query: PBOT_QUERY }),
   });
 
@@ -238,6 +238,7 @@ async function main() {
 
   // --- 2.1 Fetch PBot data ---
 
+  console.log(`  PBot access: ${pbotAccessLabel(includePrivateRequested())}`);
   console.log(`  Fetching references from ${PBOT_GRAPHQL_URL}...`);
   const allRefs = await fetchPbotReferences();
   console.log(`  Fetched ${allRefs.length} references from PBot`);

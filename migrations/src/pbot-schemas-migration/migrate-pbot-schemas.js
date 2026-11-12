@@ -1,5 +1,6 @@
 import { pg, closePg } from '../lib/pg-pool.js';
 import { mintPermids } from '../lib/permids.js';
+import { PBOT_GRAPHQL_URL, pbotHeaders, pbotAccessLabel, includePrivateRequested } from '../lib/pbot.js';
 import { schemaSource } from '../../../payloadSchemas/schema.schema.js';
 import { characterSource } from '../../../payloadSchemas/character.schema.js';
 import { stateSource } from '../../../payloadSchemas/state.schema.js';
@@ -9,7 +10,6 @@ import { createAjv } from '../../../payloadSchemas/lib/ajv.js';
 
 // --- Constants ---
 
-const PBOT_GRAPHQL_URL = 'https://pbot.paleobiodb.org/graphql';
 const AUTHORIZER_PERSON_ID = 1106; // Douglas Meredith
 
 // Lowercase lookup map for case-insensitive matching, built from an enum the
@@ -103,10 +103,7 @@ const STATE_QUERY = `{
 async function fetchPbot(query, entityName) {
   const response = await fetch(PBOT_GRAPHQL_URL, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${process.env.PBOT_TOKEN}`,
-    },
+    headers: pbotHeaders(includePrivateRequested()),
     body: JSON.stringify({ query }),
   });
 
@@ -306,10 +303,6 @@ function buildStateJsonb(state) {
 // --- Main ---
 
 async function main() {
-  if (!process.env.PBOT_TOKEN) {
-    throw new Error('Missing required .env variable: PBOT_TOKEN');
-  }
-
   const startTime = new Date();
   console.log(`[${startTime.toISOString()}] Starting PBot schema/character/state migration...`);
 
@@ -339,6 +332,7 @@ async function main() {
   // PHASE 0: Fetch and validate everything
   // =====================================================================
 
+  console.log(`\n  PBot access: ${pbotAccessLabel(includePrivateRequested())}`);
   console.log(`\n  Fetching schemas from ${PBOT_GRAPHQL_URL}...`);
   const allSchemas = await fetchPbot(SCHEMA_QUERY, 'Schema');
   stats.schemasFetched = allSchemas.length;

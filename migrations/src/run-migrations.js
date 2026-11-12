@@ -4,7 +4,7 @@
 // migrations duplicate their rows outright on a second run. See
 // openspec/specs/migration-runner/spec.md.
 //
-//   node src/run-migrations.js [--createdb] [--from <step>] [--only <step>] [--list]
+//   node src/run-migrations.js [--createdb] [--from <step>] [--only <step>] [--pbot-include-private] [--list]
 //
 // Steps are spawned as child processes, never imported: six of the eleven entry
 // points call main() unconditionally at module load, so importing one to inspect it
@@ -13,6 +13,7 @@ import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { REGISTRY as AUDIT_REGISTRY } from './audit-payloads.js';
+import { PBOT_INCLUDE_PRIVATE_FLAG, pbotAccessLabel } from './lib/pbot.js';
 
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = join(SCRIPT_DIR, '..');
@@ -24,6 +25,8 @@ const BACKEND_ROOT = join(REPO_ROOT, '..');
 const ENV_GROUPS = {
   PG: ['PG_HOST', 'PG_USER', 'PG_PASSWORD', 'PG_DATABASE'],
   MARIADB: ['MARIADB_HOST', 'MARIADB_USER', 'MARIADB_PASSWORD', 'MARIADB_DATABASE'],
+  // Always required by pbot-persons (person emails are not public); required by the
+  // pbotRecords steps only with --pbot-include-private (see preflightEnv).
   PBOT: ['PBOT_TOKEN'],
 };
 
@@ -117,7 +120,9 @@ const STEPS = [
   {
     name: 'pbot-refs',
     script: 'src/pbot-refs-migration/migrate-pbot-refs.js',
-    env: ['PG', 'PBOT'],
+    // Anonymous (public records) unless --pbot-include-private: then the token.
+    env: ['PG'],
+    pbotRecords: true,
     inputs: [],
     writes: ['refs'],
     firstWriterOf: [],
@@ -130,7 +135,9 @@ const STEPS = [
   {
     name: 'pbot-schemas',
     script: 'src/pbot-schemas-migration/migrate-pbot-schemas.js',
-    env: ['PG', 'PBOT'],
+    // Anonymous (public records) unless --pbot-include-private: then the token.
+    env: ['PG'],
+    pbotRecords: true,
     inputs: [],
     writes: ['schemas', 'characters', 'states', 'additional_schema_refs'],
     firstWriterOf: ['schemas', 'characters', 'states', 'additional_schema_refs'],
@@ -255,7 +262,7 @@ function fail(message) {
 }
 
 function parseArgs(argv) {
-  const opts = { createdb: false, from: null, only: null, list: false };
+  const opts = { createdb: false, from: null, only: null, list: false, pbotIncludePrivate: false };
 
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
@@ -263,6 +270,8 @@ function parseArgs(argv) {
       opts.list = true;
     } else if (arg === '--createdb') {
       opts.createdb = true;
+    } else if (arg === PBOT_INCLUDE_PRIVATE_FLAG) {
+      opts.pbotIncludePrivate = true;
     } else if (arg === '--from' || arg === '--only') {
       const value = argv[i + 1];
       if (value === undefined || value.startsWith('--')) fail(`${arg} requires a step name`);
@@ -273,7 +282,7 @@ function parseArgs(argv) {
     } else if (arg.startsWith('--only=')) {
       opts.only = arg.slice('--only='.length);
     } else {
-      fail(`unrecognised argument '${arg}'. Valid flags: --createdb, --from <step>, --only <step>, --list`);
+      fail(`unrecognised argument '${arg}'. Valid flags: --createdb, --from <step>, --only <step>, ${PBOT_INCLUDE_PRIVATE_FLAG}, --list`);
     }
   }
   return opts;
@@ -297,6 +306,13 @@ function validateArgs(opts) {
     fail(
       `--createdb cannot be combined with ${selection[0]} ${selection[1]}: --createdb initializes an empty ` +
       `database, while ${selection[0]} ${selection[1]} asserts that the preceding steps have already run.`
+    );
+  }
+
+  if (opts.pbotIncludePrivate && !selectSteps(opts).some((s) => s.pbotRecords)) {
+    fail(
+      `${PBOT_INCLUDE_PRIVATE_FLAG} affects only ${STEPS.filter((s) => s.pbotRecords).map((s) => s.name).join(' and ')}, ` +
+      `and neither is selected. Omit it to run these steps.`
     );
   }
 }
@@ -394,9 +410,12 @@ function pbotSchemasNotes(parsed) {
 // --- Preflight --------------------------------------------------------------
 
 // 1. Environment, as the union over the SELECTED steps only, so --from authorities
-//    does not demand PBOT_TOKEN.
-function preflightEnv(selected) {
+//    does not demand PBOT_TOKEN. The pbotRecords steps need it only with
+//    --pbot-include-private; when one is selected, the record scope is reported.
+function preflightEnv(selected, opts) {
   const groups = new Set(selected.flatMap((s) => s.env));
+  const pbotRecords = selected.some((s) => s.pbotRecords);
+  if (pbotRecords && opts.pbotIncludePrivate) groups.add('PBOT');
   const required = [...groups].flatMap((g) => ENV_GROUPS[g]);
   const missing = required.filter((v) => !process.env[v]);
   if (missing.length > 0) {
@@ -404,7 +423,8 @@ function preflightEnv(selected) {
       `Preflight 1/5 (environment) failed. Missing for the selected steps:\n  ${missing.join('\n  ')}`
     );
   }
-  console.log(`  1/5 environment      ok (${[...groups].sort().join(', ')})`);
+  const pbot = pbotRecords ? ` — PBot records: ${pbotAccessLabel(opts.pbotIncludePrivate)}` : '';
+  console.log(`  1/5 environment      ok (${[...groups].sort().join(', ')})${pbot}`);
   return groups;
 }
 
@@ -522,14 +542,15 @@ function sampleWarnings(stdout) {
 }
 
 // `records` is passed in so a step that fails still reaches the run log.
-async function runStep(pg, step, records) {
+async function runStep(pg, step, records, opts) {
   const record = { step: step.name, script: step.script, startedAt: new Date().toISOString() };
 
   await evaluateAll(pg, step.preconditions(), `Precondition failed for step '${step.name}':`);
   console.log(`  preconditions ok (${step.preconditions().length} checks)`);
 
   const before = await countTables(pg, step.writes);
-  const { code, stdout } = await spawnStep(step);
+  const args = step.pbotRecords && opts.pbotIncludePrivate ? [PBOT_INCLUDE_PRIVATE_FLAG] : [];
+  const { code, stdout } = await spawnStep(step, args);
   const after = await countTables(pg, step.writes);
 
   record.endedAt = new Date().toISOString();
@@ -713,7 +734,7 @@ async function main() {
   const { default: dotenv } = await import('dotenv');
   dotenv.config({ path: join(BACKEND_ROOT, '.env'), quiet: true });
 
-  const groups = preflightEnv(selected);
+  const groups = preflightEnv(selected, opts);
   await preflightInputs(selected);
 
   const { pg, closePg } = await import('./lib/pg-pool.js');
@@ -738,7 +759,7 @@ async function main() {
     // produces, so a second failure would only be noise caused by the first.
     for (const step of selected) {
       console.log(`\n=== ${step.name} ===`);
-      await runStep(pg, step, records);
+      await runStep(pg, step, records, opts);
     }
 
     // The audit runs only after every selected step has passed its postconditions.

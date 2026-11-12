@@ -10,8 +10,15 @@ cannot reset a populated one, hence the drop and create. A full run takes about
 
 .env (one file at the repository root, from .env.example) must hold
 PG_HOST/PG_USER/PG_PASSWORD/PG_DATABASE, MARIADB_HOST/MARIADB_USER/
-MARIADB_PASSWORD/MARIADB_DATABASE and PBOT_TOKEN. The runner checks
-the variables the selected steps need before running any of them. The pbot-*
+MARIADB_PASSWORD/MARIADB_DATABASE and PBOT_TOKEN. The runner checks the
+variables the selected steps need before running any of them.
+
+PBot records are public only by default: pbot-refs and pbot-schemas read
+PBot anonymously. Add --pbot-include-private to the run to have them send
+PBOT_TOKEN and migrate the private records it can see as well. pbot-persons
+always sends the token, because PBot hides person emails from anonymous
+requests. Preflight prints the record scope, and the run log's argv line
+shows whether the flag was given. The pbot-*
 steps fetch live from the PBot GraphQL API, so their counts can grow between
 runs.
 
