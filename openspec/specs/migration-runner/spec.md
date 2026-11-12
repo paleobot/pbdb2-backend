@@ -141,6 +141,9 @@ The runner SHALL execute each step as a child process invoking the step's entry 
 SHALL NOT import a step's module into the runner process. Each step SHALL therefore manage its own
 connection pools and produce its own exit code.
 
+When `--pbot-include-private` is given, the runner SHALL pass it as an argument to `pbot-refs` and
+`pbot-schemas`, and SHALL NOT pass it to any other step.
+
 This is required because the entry points are not uniform: six of the eleven, `src/rebuild-taxa.js`
 among them, call `main()` unconditionally at module load, and five guard it behind an
 `import.meta.url === file://${process.argv[1]}` check.
@@ -153,6 +156,10 @@ among them, call `main()` unconditionally at module load, and five guard it behi
 - **WHEN** a step is spawned
 - **THEN** it inherits the parent environment, so all steps resolve the same `PG_*` and `MARIADB_*` connection settings from `.env`
 
+#### Scenario: The include-private flag reaches only the steps it affects
+- **WHEN** the full pipeline runs with `--pbot-include-private`
+- **THEN** `pbot-refs` and `pbot-schemas` are spawned with `--pbot-include-private` in their arguments, and `pbot-persons` and every other step are spawned without it
+
 ### Requirement: Preflight assertions run once before the first step
 Before spawning any step, the runner SHALL verify all of the following and SHALL abort without spawning
 anything if any check fails:
@@ -160,8 +167,11 @@ anything if any check fails:
 1. **Environment.** Every variable required by the selected steps is set. `PG_HOST`, `PG_USER`,
    `PG_PASSWORD`, and `PG_DATABASE` are required by every step. `MARIADB_HOST`, `MARIADB_USER`,
    `MARIADB_PASSWORD`, and `MARIADB_DATABASE` are required by `persons`, `refs`, `authorities`,
-   `authority-opinions`, `opinions`, and `collections`. `PBOT_TOKEN` is required by `pbot-persons` and
-   `pbot-schemas`. The required set SHALL be the union over the *selected* steps only.
+   `authority-opinions`, `opinions`, and `collections`. `PBOT_TOKEN` is required by `pbot-persons`, and
+   by `pbot-refs` and `pbot-schemas` only when `--pbot-include-private` is given. The required set SHALL
+   be the union over the *selected* steps only. When `pbot-refs` or `pbot-schemas` is selected, the
+   environment check SHALL report the PBot record scope: `token, including private records` with the
+   flag, otherwise `anonymous, public records only`.
 2. **Connectivity.** The PostgreSQL connection succeeds, and the MariaDB connection succeeds if any
    selected step requires it.
 3. **Dictionaries.** All 22 `dictionaries.*` tables — `genders`, `roles`, `interval_types`, `zone_types`,
@@ -177,7 +187,15 @@ anything if any check fails:
 
 #### Scenario: Missing token fails before any work
 - **WHEN** `PBOT_TOKEN` is unset and the full pipeline is selected
-- **THEN** the runner aborts during preflight, before spawning `persons`, rather than failing at step 2 after `persons` has loaded
+- **THEN** the runner aborts during preflight, before spawning `persons`, because `pbot-persons` requires it, rather than failing at step 2 after `persons` has loaded
+
+#### Scenario: Public-only run reports its scope
+- **WHEN** the full pipeline is selected without `--pbot-include-private` and `PBOT_TOKEN` is set
+- **THEN** preflight passes and the environment line reports `PBot records: anonymous, public records only`
+
+#### Scenario: Private records need the token for every PBot step
+- **WHEN** `--only pbot-schemas --pbot-include-private` is passed and `PBOT_TOKEN` is unset
+- **THEN** preflight fails naming `PBOT_TOKEN`, although `pbot-schemas` alone does not require it without the flag
 
 #### Scenario: Unselected step's environment is not demanded
 - **WHEN** the runner is invoked with `--from authorities` and `PBOT_TOKEN` is unset
@@ -379,6 +397,7 @@ connecting to any database:
 - `--createdb` together with `--from <step>` where the step is not `persons`.
 - `--createdb` together with `--only <step>` where the step is not `persons`.
 - Any `--from` or `--only` value that is not a step name in the run-order table.
+- `--pbot-include-private` when neither `pbot-refs` nor `pbot-schemas` is selected.
 
 The runner SHALL NOT provide a flag that bypasses a failed precondition or postcondition.
 
@@ -393,6 +412,10 @@ The runner SHALL NOT provide a flag that bypasses a failed precondition or postc
 #### Scenario: No override exists
 - **WHEN** a user wishes to run a step whose precondition fails
 - **THEN** no flag permits it, because the preconditions are the runner's purpose rather than an advisory check
+
+#### Scenario: Include-private with no PBot record step
+- **WHEN** `--from authorities --pbot-include-private` is passed
+- **THEN** the runner exits non-zero before connecting, explaining that `--pbot-include-private` affects only `pbot-refs` and `pbot-schemas` and neither is selected
 
 ### Requirement: The runner halts on the first failure
 When any preflight check, precondition, step exit code, or postcondition fails, the runner SHALL stop
