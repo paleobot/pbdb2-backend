@@ -81,11 +81,13 @@ The mapping SHALL be a table in the script, with these two title rules beside it
 The script SHALL map `reftitle` to the jsonb `title` field. A `reftitle` that is NULL or blank after trimming
 SHALL be treated as absent.
 
-When `reftitle` is absent and the ref maps to "standalone book", the script SHALL use the legacy `pubtitle`,
-trimmed, as `title` if it is non-blank. Legacy PBDB records a whole book with `reftitle` empty and the book's
-title in `pubtitle`; without this fallback the title is discarded, because `pubtitle` has no other
-destination for that type. The value SHALL be taken verbatim, including the few that begin `in ` and name a
-containing volume rather than the ref, and each fallback SHALL be logged with the `reference_no`.
+When `reftitle` is absent and the ref maps to "standalone book" or "edited collection", the script SHALL use
+the legacy `pubtitle`, trimmed, as `title` if it is non-blank. Legacy PBDB records a whole book with
+`reftitle` empty and the book's title in `pubtitle`; without this fallback the title is discarded, because
+`pubtitle` has no other destination for those two types. The value SHALL be taken verbatim, including the few
+that begin `in ` and name a containing volume rather than the ref, and each fallback SHALL be logged with the
+`reference_no`. The fallback applies to "edited collection" even though no PBDB ref maps to it (see
+Publication type mapping), because it is a whole book and a later mapping rule may target it.
 
 For every other type, an absent `reftitle` leaves `title` omitted: their `pubtitle` is routed to its own
 field, or names a container the type has no field for.
@@ -101,6 +103,10 @@ field, or names a container the type has no field for.
 #### Scenario: Book title recovered from pubtitle
 - **WHEN** a ref maps to "standalone book", has `reftitle = ''` and `pubtitle = 'Systema Naturae'`
 - **THEN** the jsonb `title` = "Systema Naturae" and the script logs the `reference_no` as a pubtitle fallback
+
+#### Scenario: Edited collection title recovered from pubtitle
+- **WHEN** the title mapping is applied to a ref whose target is "edited collection", with `reftitle = NULL` and `pubtitle = 'Corals of the World'`
+- **THEN** the jsonb `title` = "Corals of the World"
 
 #### Scenario: Single-title book/book chapter title recovered from pubtitle
 - **WHEN** a "book/book chapter" ref has `reftitle = NULL` and `pubtitle = 'Acadian Geology'`
@@ -127,10 +133,9 @@ The script SHALL map the legacy `pubtitle` column to a type-specific jsonb field
 | serial monograph | `seriesTitle` |
 | article in edited collection | `bookTitle` |
 | standalone book | `title`, only when `reftitle` is absent (see Title mapping); for a "book" ref with two titles, the container note (see Container note for books with two titles); otherwise not mapped |
+| edited collection | `title`, only when `reftitle` is absent (see Title mapping); otherwise not mapped. No PBDB ref maps to this type (see Publication type mapping) |
 | unpublished | (not mapped) |
 | other | (not mapped) |
-
-No PBDB ref maps to "edited collection" (see Publication type mapping), so that type has no row.
 
 A ref that maps to "article in edited collection" by a title rule routes its `pubtitle` to `bookTitle` like any other.
 
@@ -160,22 +165,28 @@ The script SHALL log:
 - Number of refs mapped to "article in edited collection" by each title rule ("book/book chapter", "book")
 - Number of "book/book chapter" refs mapped to "standalone book" because they lack two titles
 - Number of container notes written
-- Number of rows written to the single-title books review list, and the number of rows carrying each signal
+- Number of rows written to the single-title books review list, split by Classic type ("book/book chapter", "book"), and the number of rows carrying each signal
 - Warnings for: NULL publication types, non-numeric pages, unparseable otherauthors, missing authors, zero person IDs
 - Elapsed time
 
 #### Scenario: Successful migration log output
 - **WHEN** the migration completes without errors
-- **THEN** the console output includes start time, source counts, upsert count, pub type summary, the pubtitle fallback count, the count for each title rule, the count of single-title "book/book chapter" refs mapped to "standalone book", the container note count, the review-list row count with a count per signal, any warnings, and elapsed time
+- **THEN** the console output includes start time, source counts, upsert count, pub type summary, the pubtitle fallback count, the count for each title rule, the count of single-title "book/book chapter" refs mapped to "standalone book", the container note count, the review-list row count by Classic type with a count per signal, any warnings, and elapsed time
 
 ## ADDED Requirements
 
 ### Requirement: Review list of suspect single-title books
-On every run, after the upsert, the script SHALL write a review list of the "book/book chapter" refs it mapped to "standalone book" because they lack two titles, when a ref matches at least one of the signals below. The list is a reading aid for curators: the signals are unverified, each flags many authored books, and the script SHALL NOT change any ref's mapping because of them.
+Classic records nothing that tells an edited volume from an authored book, so no PBDB ref maps to "edited collection", and curators correct such refs after migration. On every run, after the upsert, the script SHALL write a review list to help them find these refs.
+
+The *review group* is:
+- every "book/book chapter" ref the script mapped to "standalone book" because it lacks two titles;
+- every "book" ref that lacks two titles and has editors. This is the route by which edited volumes are entered in Classic, including refs added after this change.
+
+A ref in the review group SHALL be listed when it matches at least one of the signals below. A ref outside the group SHALL NOT be listed. The list is a reading aid for curators: the signals are unverified, each flags many authored books, and the script SHALL NOT change any ref's mapping because of them.
 
 The list SHALL be written to `src/refs-migration/single-title-books-review.csv`, beside the script, and is a version-controlled file: it SHALL NOT be gitignored. It SHALL be UTF-8 CSV with the header
 
-`reference_no,permid,authors,editors,year,title,pages,signals`
+`reference_no,permid,classic_type,authors,editors,year,title,pages,signals`
 
 and one row per listed ref, sorted by `reference_no` ascending:
 
@@ -183,6 +194,7 @@ and one row per listed ref, sorted by `reference_no` ascending:
 |---|---|
 | `reference_no` | the Classic `reference_no` |
 | `permid` | the ref's permid |
+| `classic_type` | the Classic `publication_type`: "book/book chapter" or "book" |
 | `authors` | the migrated authors' family names in order, joined by `; ` |
 | `editors` | the migrated `editors`, blank when absent |
 | `year` | the migrated `publicationYear`, blank when absent |
@@ -202,6 +214,7 @@ Signals, in order. "Title" is the migrated `title`. Titles in the two lookup set
 | `pubtitle-is-journal-title` | the ref's `pubtitle` equals the `journalTitle` of at least one ref this run mapped to "journal article" |
 | `first-page-after-1` | the ref's `firstpage` is numeric and greater than 1 |
 | `edited-volume-words` | the title contains "proceedings", "symposium", "congress", "conference", "festschrift" or "in honour"/"in honor"; or the title or `comments` contains the word "ed.", "eds.", "editor", "editors" or "edited"; all ignoring case |
+| `book-with-editors` | the ref is a "book" ref in the review group, so every such ref is listed |
 
 #### Scenario: A chapter missing its title is listed
 - **WHEN** a "book/book chapter" ref has a blank `reftitle` and `pubtitle`, `editors = 'Biggs'` and two authors
@@ -219,8 +232,16 @@ Signals, in order. "Title" is the migrated `title`. Titles in the two lookup set
 - **WHEN** a "book/book chapter" ref has only a `pubtitle` that no other ref uses as a book or journal title, one author, no editors, `firstpage = '1'`, and no edited-volume words
 - **THEN** the review list has no row for it
 
-#### Scenario: Refs outside the reclassification are never listed
-- **WHEN** a ref maps to "article in edited collection" by a title rule, or comes from any Classic type other than "book/book chapter"
+#### Scenario: A single-title book with editors is listed
+- **WHEN** a "book" ref has only `reftitle = 'The Conservation Biology of Tortoises'`, authors Swingland and Klemens, and `editors = 'I. R. Swingland, M. W. Klemens'`
+- **THEN** the review list has a row for it with `classic_type` = "book" and `signals` containing "book-with-editors", and the ref is still migrated as "standalone book"
+
+#### Scenario: A single-title book without editors is not listed
+- **WHEN** a "book" ref lacks two titles and has no editors
+- **THEN** the review list has no row for it, whatever other signals it would match
+
+#### Scenario: Refs outside the review group are never listed
+- **WHEN** a ref maps to "article in edited collection" by a title rule, or comes from a Classic type other than "book/book chapter" and "book"
 - **THEN** the review list has no row for it, whatever signals it would match
 
 #### Scenario: Unchanged source rewrites an identical file

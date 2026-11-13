@@ -22,11 +22,20 @@
   - A ref with two titles is still `article in edited collection` (the 3,045).
   - The title fallback from `pubtitle` already applies to `standalone book`, so no title is lost.
   - `editors` are kept wherever they are stored, as on the Classic `book` refs that already migrate as `standalone book` with editors.
-- **Classic data loses `edited collection`:** no Classic type maps to it any more. It remains a publication type for PBot refs ("edited book of contributed articles") and for new references.
+- **Classic data loses `edited collection`:** no Classic type maps to it any more. It remains a publication type for PBot refs ("edited book of contributed articles") and for new references. This holds for refs still being added to Classic before it retires (explored 2026-11-13):
+  - Classic has no type for an edited volume.
+  - `book/book chapter` has not been used since 2024-08-23. New edited volumes are entered as `book` with editors, which already migrates as `standalone book`.
+  - No rule separates them from authored books. "All authors also listed as editors" matches 12 refs, of which about 4 are edited volumes.
+
+  So curators correct edited volumes in pbdb2 after migration, using the review list below. The title fallback from `pubtitle` keeps applying to `edited collection`, since it is a whole book, so a later rule that maps to it would not lose titles.
 - **Known misclassifications are documented, not special-cased.** Nothing stored in Classic tells them apart from authored books:
   - **About 20–50 real edited volumes** whose editors were entered as authors, e.g. Fraser & Sues, *In the Shadow of the Dinosaurs*. They become `standalone book` with the editors as authors.
   - **About 30 chapters missing their chapter title** (titles like "in Bering Land Bridge", or a blank title with editors), plus a few misfiled articles. They were wrong as `edited collection` and are equally wrong as `standalone book`.
-- **Suspect refs are recorded in a review list:** `migrations/src/refs-migration/single-title-books-review.csv`, written by the refs migration on every run and committed. It lists the reclassified refs that match at least one signal, with one row per ref and every matching signal named. Each signal flags about 50% false positives on its own (measured 2026-11-13), so the list is for a curator to read, and the migration does not act on it. About 237 refs match at least one signal:
+- **Suspect refs are recorded in a review list:** `migrations/src/refs-migration/single-title-books-review.csv`, written by the refs migration on every run and committed. It covers two groups:
+  - the 665 reclassified refs;
+  - single-title Classic `book` refs with editors (about 35), the route by which edited volumes arrive. Refs added to Classic later show up in the list's diff.
+
+  A ref is listed when it matches at least one signal, with one row per ref, its Classic type, and every matching signal named. Each signal flags about 50% false positives on its own (measured 2026-11-13), so the list is for a curator to read, and the migration does not act on it. About 272 refs match at least one signal:
 
   | Signal | Refs | What it catches |
   |---|---:|---|
@@ -36,6 +45,9 @@
   | `pubtitle` is the journal title of other refs' journal articles | 15 | misfiled articles, but mostly books that journal-article refs cite as their journal |
   | First page after 1 | 60 | mostly instalments of multi-part 19th-century works, plus some chapters and articles |
   | Title names a proceedings, symposium, congress, conference or festschrift, or "ed."/"eds."/"editor(s)"/"edited" in `title` or `comments` | 16 | edited volumes |
+  | A single-title Classic `book` with editors (every such ref) | ~35 | edited volumes mixed with authored books whose `editors` hold series editors, revisers or publishers |
+
+  The first six counts are for the reclassified refs; the `book` refs may add a few matches to them.
 
 - **Localhost is re-migrated** with the full runner. Aurora `pbdb2_migration_test` is rebuilt later.
 
@@ -53,11 +65,13 @@ None.
   - The `book/book chapter` row of the publication-type table maps to `standalone book` (`"monograph"`) when the ref lacks two titles.
   - The scenarios in which a ref "stays an edited collection" become `standalone book`.
   - The title-rule counts gain the 665.
+  - The title fallback from `pubtitle` still covers `edited collection`, though no PBDB ref maps to it.
+  - A new requirement adds the review list of suspect single-title books (the reclassified refs, and single-title `book` refs with editors).
 
 ## Impact
 
 - **Source → target:** MariaDB `pbdb_2026_10_18`.`refs` (`publication_type`, `reftitle`, `pubtitle`) → PostgreSQL `refs.reference` jsonb (`publicationType`, `bookType`). `ref_authors` and `ref_editors` are unaffected. The PBot refs migration is unaffected.
-- **Code:** `migrations/src/refs-migration/migrate-refs.js` (`PUB_TYPE_MAP`, `PUBTITLE_TITLE_TYPES`, the mapping summary) and `migrations/src/tests/refs-transforms.test.js`. The review list is new: the code in `migrate-refs.js` that writes `single-title-books-review.csv` beside itself (`migration-script-layout`), and the CSV itself, which is committed rather than gitignored like the other run artifacts.
+- **Code:** `migrations/src/refs-migration/migrate-refs.js` (`PUB_TYPE_MAP`, the comment on `PUBTITLE_TITLE_TYPES`, whose entries are unchanged, the mapping summary) and `migrations/src/tests/refs-transforms.test.js`. The review list is new: the code in `migrate-refs.js` that writes `single-title-books-review.csv` beside itself (`migration-script-layout`), and the CSV itself, which is committed rather than gitignored like the other run artifacts.
 - **Data integrity:**
   - 665 refs change `publicationType`, and each gains `bookType: "monograph"`. Titles, authors, editors, pages and every other field are unchanged.
   - Permids are minted on a full rebuild as before. Collections, opinions and specimens link to refs by permid and not by type, so every other runner count must reproduce exactly.
@@ -66,7 +80,7 @@ None.
 - **Anomalies:** NULL vs empty-string title fields (legacy "no value" inconsistency) are handled by the existing trimmed, blank-is-absent title comparison. The 1,201 NULL `publication_type` refs still map to `other`.
 - **API:** no code change. After the re-run, `publicationType=edited collection` returns only PBot refs, and `standalone book` gains 665.
 - **Follow-up:**
-  - `add-ris-reference-output`: the EDBOOK-vs-BOOK open question closes. `edited collection` keeps `EDBOOK`, since it now holds only real edited volumes.
+  - `add-ris-reference-output`: the EDBOOK-vs-BOOK open question closes. `edited collection` keeps `EDBOOK`, since it now holds only real edited volumes: PBot refs, new references, and Classic refs curators correct after migration.
   - `add-chapter-series-fields` comes next and also touches `migrate-refs.js`.
 
 ## Evidence (localhost and `pbdb_2026_10_18`, 2026-11-12)
