@@ -122,7 +122,7 @@ field, or names a container the type has no field for.
 
 #### Scenario: Restored count
 - **WHEN** the migration completes against the full legacy source
-- **THEN** 1,468 refs have a `title` taken from `pubtitle`, and 541 of the refs it wrote have no `title`
+- **THEN** 1,465 refs have a `title` taken from `pubtitle`, and 529 of the refs it wrote have no `title` (measured on `pbdb_2026_10_18`)
 
 ### Requirement: Publication title routing
 The script SHALL map the legacy `pubtitle` column to a type-specific jsonb field:

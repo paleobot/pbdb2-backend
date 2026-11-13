@@ -1,5 +1,9 @@
+import { writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { mariadb, pg, closeAll } from '../lib/db.js';
 import { registerPermids } from '../lib/permids.js';
+import { csvField } from '../lib/anomaly-log.js';
 import { referenceSource } from '../../../payloadSchemas/reference.schema.js';
 import { resolveEnums } from '../../../payloadSchemas/lib/enums.js';
 import { deriveVariant } from '../../../payloadSchemas/lib/variants.js';
@@ -12,7 +16,7 @@ const PUB_TYPE_MAP = {
   'journal article':   { referenceType: 'journal article', bookType: null },
   'serial monograph':  { referenceType: 'serial monograph', bookType: null },
   'unpublished':       { referenceType: 'unpublished', bookType: null },
-  'book/book chapter': { referenceType: 'edited collection', bookType: null },
+  'book/book chapter': { referenceType: 'standalone book', bookType: 'monograph' },
   'book chapter':      { referenceType: 'article in edited collection', bookType: null },
   'book':              { referenceType: 'standalone book', bookType: 'monograph' },
   'compendium':        { referenceType: 'standalone book', bookType: 'compendium' },
@@ -31,8 +35,10 @@ const TARGET_LANGUAGES = new Set([
 ]);
 const LANGUAGE_CORRECTIONS = { Portugese: 'Portuguese' };
 
-// Types whose title legacy PBDB may keep in pubtitle, with reftitle empty: a
-// whole book. pubtitle has no other destination for these two.
+// The target types that are whole books, whose title legacy PBDB may keep in
+// pubtitle alone, with reftitle empty. pubtitle has no other destination for
+// these two. No Classic row maps to "edited collection", but it is a whole book,
+// so a later rule that targets it keeps its titles.
 const PUBTITLE_TITLE_TYPES = new Set(['standalone book', 'edited collection']);
 
 // Two Classic types whose target depends on the titles. A ref has two titles when
@@ -45,7 +51,9 @@ export function hasTwoTitles(ref) {
 }
 
 // A "book/book chapter" with two titles is a chapter; so is a "book" with two
-// titles and editors. Returns null when the table applies.
+// titles and editors. Returns null when the table applies, which makes every
+// other "book/book chapter" a standalone book: one title is how Classic stored a
+// whole book.
 export function classifyByTitles(ref, editors) {
   if (!hasTwoTitles(ref)) return null;
   const type = ref.publication_type;
@@ -221,7 +229,7 @@ function mapPersonIds(ref) {
 }
 
 // reftitle, or for a whole book with no reftitle its pubtitle, verbatim.
-function mapTitle(ref, referenceTypeName) {
+export function mapTitle(ref, referenceTypeName) {
   const reftitle = ref.reftitle ? ref.reftitle.trim() : '';
   if (reftitle) return reftitle;
   const pubtitle = ref.pubtitle ? ref.pubtitle.trim() : '';
@@ -289,6 +297,65 @@ export function buildJsonb(ref, authors, editors, pubType, pages, pubtitleFields
   return jsonb;
 }
 
+// --- Single-title books review list ---
+// Classic records nothing that tells an edited volume from an authored book, so
+// curators correct such refs after migration. The list helps them find these refs. It
+// covers the single-title "book/book chapter" refs reclassified as standalone books,
+// and single-title "book" refs with editors, the route edited volumes arrive by.
+// The signals are unverified hints; no mapping depends on them.
+
+const REVIEW_FILE = join(dirname(fileURLToPath(import.meta.url)), 'single-title-books-review.csv');
+const REVIEW_HEADER = 'reference_no,permid,classic_type,authors,editors,year,title,pages,signals';
+
+export function inReviewGroup(ref, editors) {
+  if (hasTwoTitles(ref)) return false;
+  return ref.publication_type === 'book/book chapter' || (ref.publication_type === 'book' && !!editors);
+}
+
+const normTitle = (s) => (s ?? '').trim().toLowerCase();
+const EDITED_VOLUME_TITLE = /proceedings|symposium|congress|conference|festschrift|in hono(?:u)?r/i;
+const EDITOR_WORD = /\b(?:eds?\.|editors?\b|edited\b)/i;
+
+// Spec order. Each test takes (ref, jsonb, editors, lookups).
+const REVIEW_SIGNALS = [
+  ['chapter-missing-title', (ref, j, ed) => !!ed && (!j.title || /^in[ :]/i.test(j.title))],
+  ['multi-author-no-editors', (ref, j, ed) => !ed && (j.authors?.length ?? 0) >= 2],
+  ['pubtitle-is-book-title', (ref, j, ed, l) => !!normTitle(ref.pubtitle) && l.bookTitles.has(normTitle(ref.pubtitle))],
+  ['pubtitle-is-journal-title', (ref, j, ed, l) => !!normTitle(ref.pubtitle) && l.journalTitles.has(normTitle(ref.pubtitle))],
+  ['first-page-after-1', (ref, j) => (j.pages?.first ?? 0) > 1],
+  ['edited-volume-words', (ref, j) => EDITED_VOLUME_TITLE.test(j.title ?? '')
+    || EDITOR_WORD.test(j.title ?? '') || EDITOR_WORD.test(ref.comments ?? '')],
+  ['book-with-editors', (ref) => ref.publication_type === 'book'],
+];
+export const REVIEW_SIGNAL_NAMES = REVIEW_SIGNALS.map(([name]) => name);
+
+// The names of the signals a ref matches, in spec order; none outside the review group.
+// lookups: { bookTitles, journalTitles }, trimmed and lowercased.
+export function reviewSignals(ref, jsonb, editors, lookups) {
+  if (!inReviewGroup(ref, editors)) return [];
+  return REVIEW_SIGNALS.filter(([, matches]) => matches(ref, jsonb, editors, lookups)).map(([name]) => name);
+}
+
+function reviewPages(ref, jsonb) {
+  if (jsonb.pages) return `${jsonb.pages.first}–${jsonb.pages.last}`;
+  return [ref.firstpage, ref.lastpage].map((p) => (p ?? '').trim()).filter(Boolean).join('–');
+}
+
+// One CSV line of the review list.
+export function reviewRow(ref, jsonb, permid, signals) {
+  return [
+    ref.reference_no,
+    permid,
+    ref.publication_type,
+    (jsonb.authors ?? []).map((a) => a.familyName).join('; '),
+    jsonb.editors ?? '',
+    jsonb.publicationYear ?? '',
+    jsonb.title ?? '',
+    reviewPages(ref, jsonb),
+    signals.join('; '),
+  ].map(csvField).join(',');
+}
+
 // --- Main ---
 
 async function main() {
@@ -338,8 +405,13 @@ async function main() {
   let pageZeroCount = 0;
   let pubtitleTitleCount = 0;
   const titleRuleCounts = { 'book/book chapter': 0, book: 0 };
+  let singleTitleBookCount = 0;
   let containerNoteCount = 0;
   let warningCount = 0;
+  // Refs in the review group, and the title sets two of its signals compare against.
+  const reviewCandidates = [];
+  const bookTitles = new Set();
+  const journalTitles = new Set();
 
   const targetRows = refs.map((ref) => {
     const authors = buildAuthors(ref, refAuthorsMap);
@@ -348,6 +420,7 @@ async function main() {
     const pubType = mapPublicationType(ref, editors);
     pubTypeCounts[pubType.referenceTypeName] = (pubTypeCounts[pubType.referenceTypeName] || 0) + 1;
     if (classifyByTitles(ref, editors)) titleRuleCounts[ref.publication_type]++;
+    else if (ref.publication_type === 'book/book chapter') singleTitleBookCount++;
     const note = containerNote(ref, editors);
     if (note) containerNoteCount++;
 
@@ -379,6 +452,9 @@ async function main() {
       console.error(JSON.stringify(jsonb, null, 2));
       throw new Error('payload failed reference db-schema validation');
     }
+    if (jsonb.bookTitle) bookTitles.add(normTitle(jsonb.bookTitle));
+    if (jsonb.journalTitle) journalTitles.add(normTitle(jsonb.journalTitle));
+    if (inReviewGroup(ref, editors)) reviewCandidates.push({ ref, jsonb, editors });
 
     return {
       id: ref.reference_no,
@@ -464,6 +540,20 @@ async function main() {
   );
   console.log('  Identity sequence reset');
 
+  // 5.4 Review list, after the upsert so every row has its permid.
+  const lookups = { bookTitles, journalTitles };
+  const reviewByType = { 'book/book chapter': 0, book: 0 };
+  const signalCounts = Object.fromEntries(REVIEW_SIGNAL_NAMES.map((name) => [name, 0]));
+  const reviewLines = [];
+  for (const { ref, jsonb, editors } of reviewCandidates.sort((a, b) => a.ref.reference_no - b.ref.reference_no)) {
+    const signals = reviewSignals(ref, jsonb, editors, lookups);
+    if (signals.length === 0) continue;
+    reviewByType[ref.publication_type]++;
+    for (const name of signals) signalCounts[name]++;
+    reviewLines.push(reviewRow(ref, jsonb, permidById.get(ref.reference_no), signals));
+  }
+  writeFileSync(REVIEW_FILE, [REVIEW_HEADER, ...reviewLines].join('\n') + '\n');
+
   // 6.1 Row count verification
   const { rows: countResult } = await pg.query(`SELECT COUNT(*)::int AS count FROM refs`);
   const pgCount = countResult[0].count;
@@ -489,7 +579,11 @@ async function main() {
   console.log(`  Titles taken from pubtitle: ${pubtitleTitleCount}`);
   console.log(`  "book/book chapter" → article in edited collection by titles: ${titleRuleCounts['book/book chapter']}`);
   console.log(`  "book" → article in edited collection by titles and editors: ${titleRuleCounts.book}`);
+  console.log(`  "book/book chapter" → standalone book for lacking two titles: ${singleTitleBookCount}`);
   console.log(`  Container notes written to comments: ${containerNoteCount}`);
+  console.log(`  Single-title books review list: ${reviewLines.length} rows`
+    + ` ("book/book chapter" ${reviewByType['book/book chapter']}, "book" ${reviewByType.book})`);
+  for (const [name, count] of Object.entries(signalCounts)) console.log(`    ${name}: ${count}`);
   console.log(`  Total warnings: ${warningCount}`);
   console.log(`[${endTime.toISOString()}] Refs migration complete in ${elapsed}s`);
 }

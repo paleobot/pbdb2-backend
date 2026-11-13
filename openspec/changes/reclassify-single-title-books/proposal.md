@@ -35,7 +35,7 @@
   - the 665 reclassified refs;
   - single-title Classic `book` refs with editors (about 35), the route by which edited volumes arrive. Refs added to Classic later show up in the list's diff.
 
-  A ref is listed when it matches at least one signal, with one row per ref, its Classic type, and every matching signal named. Each signal flags about 50% false positives on its own (measured 2026-11-13), so the list is for a curator to read, and the migration does not act on it. About 272 refs match at least one signal:
+  A ref is listed when it matches at least one signal, with one row per ref, its Classic type, and every matching signal named. Each signal flags about 50% false positives on its own (measured 2026-11-13), so the list is for a curator to read, and the migration does not act on it. 275 refs match at least one signal (measured on localhost 2026-11-13; 240 reclassified, 35 `book`):
 
   | Signal | Refs | What it catches |
   |---|---:|---|
@@ -43,11 +43,11 @@
   | Two or more authors and no editors | 149 | co-authored books mixed with edited volumes whose editors were entered as authors |
   | `pubtitle` is the book title of other refs' chapters | 36 | edited volumes mixed with authored books whose chapters are cited separately |
   | `pubtitle` is the journal title of other refs' journal articles | 15 | misfiled articles, but mostly books that journal-article refs cite as their journal |
-  | First page after 1 | 60 | mostly instalments of multi-part 19th-century works, plus some chapters and articles |
-  | Title names a proceedings, symposium, congress, conference or festschrift, or "ed."/"eds."/"editor(s)"/"edited" in `title` or `comments` | 16 | edited volumes |
-  | A single-title Classic `book` with editors (every such ref) | ~35 | edited volumes mixed with authored books whose `editors` hold series editors, revisers or publishers |
+  | First page after 1 | 63 + 9 | mostly instalments of multi-part 19th-century works, plus some chapters and articles |
+  | Title names a proceedings, symposium, congress, conference or festschrift, or "ed."/"eds."/"editor(s)"/"edited" in `title` or `comments` | 16 + 1 | edited volumes |
+  | A single-title Classic `book` with editors (every such ref) | 35 | edited volumes mixed with authored books whose `editors` hold series editors, revisers or publishers |
 
-  The first six counts are for the reclassified refs; the `book` refs may add a few matches to them.
+  Counts are for the reclassified refs; "+ n" adds matches among the `book` refs.
 
 - **Localhost is re-migrated** with the full runner. Aurora `pbdb2_migration_test` is rebuilt later.
 

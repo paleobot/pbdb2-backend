@@ -19,7 +19,7 @@ The db variant accepts any declared field on any type, so legacy refs can carry 
 
 Classic's writer (`classic/lib/PBDB/ReferenceEntry.pm`, `formatRISRef`) is the precedent, but it has quirks: an unreachable `SER` branch, `UNPD`, compact author forms and slash dates. The tag mapping below was checked against Zotero's RIS translator (`zotero/translators` `RIS.js`): how each `TY` and tag imports.
 
-This change assumes `fix-book-chapter-migration` has been applied. After it, chapters are `article in edited collection` with a `bookTitle`, and about 665 `edited collection` rows remain, mostly whole books.
+This change assumes `fix-book-chapter-migration` and `reclassify-single-title-books` have been applied. After them, chapters are `article in edited collection` with a `bookTitle`, the 665 single-title Classic `book/book chapter` refs are `standalone book`, and no Classic ref maps to `edited collection`. That type holds only PBot refs and references created through the API, which are real edited volumes.
 
 ## Goals / Non-Goals
 
@@ -68,7 +68,7 @@ The handler does not go through `sendExport`, whose `ids`, page and stream branc
 |---|---|---|---|
 | journal article | `JOUR` | journal article | |
 | article in edited collection | `CHAP` | book section | |
-| edited collection | `EDBOOK` | book, `AU` → editors | revisit after the migration fix (Open Questions) |
+| edited collection | `EDBOOK` | book, `AU` → editors | only real edited volumes remain (`reclassify-single-title-books`) |
 | serial monograph | `SER` | book | Classic wrote `JOUR` |
 | standalone book, `bookType` Ph.D. or M.S. thesis | `THES` | thesis | `M3` = the `bookType` |
 | standalone book, any other `bookType` | `BOOK` | book | |
@@ -149,7 +149,7 @@ The `api/docs/` RIS section lists each difference:
 
 - **[EndNote or Mendeley read some tags differently from Zotero]** → Verification imports into Zotero only. The docs say which importer the mapping was checked against, and a report from another importer is a small follow-up.
 - **[The `A2`/`A3` choice for `THES`, `UNPD` and `GEN` is not confirmed by the translator read]** → It is checked during the Zotero import (tasks), and the table in D6 is corrected if needed.
-- **[`EDBOOK` turns the authors of a whole book into editors]** → After the migration fix, the remaining edited collections are mostly whole books, whose stored `authors` may be editors or authors. This is re-checked on a sample before the change is applied (Open Questions).
+- **[`EDBOOK` turns the authors of a whole book into editors]** → Settled by `reclassify-single-title-books`: the whole books that Classic stored as `book/book chapter` are now `standalone book`, so `edited collection` holds only real edited volumes. Classic edited volumes that migrated as `standalone book` export as `BOOK` until a curator corrects their type.
 - **[One-line editors look wrong in a reference manager]** → Documented. The real fix is structured editors in the reference model.
 - **[A large unbounded RIS export]** → It shares the existing per-instance cap and streaming, as CSV does. Each record costs about the same as a CSV row.
 
@@ -159,5 +159,5 @@ Additive, with no data step. Apply after `fix-book-chapter-migration` has been a
 
 ## Open Questions
 
-- `EDBOOK` or `BOOK` for edited collections: decide after the migration fix by sampling the roughly 665 remaining rows, checking whether their `authors` are the volume's editors or authors.
+- ~~`EDBOOK` or `BOOK` for edited collections~~ Settled (2026-11-13): `EDBOOK`. `reclassify-single-title-books` moved the 665 single-title Classic refs, mostly authored books, to `standalone book`, so `edited collection` holds only real edited volumes.
 - Whether to add `RIS` to the `api-design-backlog` "Output formats beyond CSV" entry as done, or remove the entry. Decided when this change is archived.

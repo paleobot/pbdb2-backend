@@ -90,18 +90,20 @@ reference_no,permid,classic_type,authors,editors,year,title,pages,signals
 
 Computed by an exported pure function, so `refs-transforms.test.js` can test each sign without a database. Its inputs are the source ref, its migrated payload, and two sets built in `main()` after transforming every row: the trimmed, lowercased `bookTitle` of every ref that migrated as `article in edited collection`, and the `journalTitle` of every `journal article`. It returns no signs for a ref outside the review group (D4). Every sign applies to both groups, except that `multi-author-no-editors` never matches a `book` ref in the group and `book-with-editors` matches only those.
 
-| Name | Matches when | Est. refs |
-|---|---|---:|
-| `chapter-missing-title` | editors present, and the title is blank or starts with `in ` or `in:` (ignoring case) | 16 |
-| `multi-author-no-editors` | two or more authors and no editors | 149 |
-| `pubtitle-is-book-title` | trimmed, lowercased `pubtitle` is in the book-title set | 36 |
-| `pubtitle-is-journal-title` | trimmed, lowercased `pubtitle` is in the journal-title set | 15 |
-| `first-page-after-1` | numeric `firstpage` greater than 1 | 60 |
-| `edited-volume-words` | the title matches proceedings, symposium, congress, conference, festschrift or "in honour/honor", or the title or `comments` contains the word `ed.`, `eds.`, `editor`, `editors` or `edited` | 16 |
-| `book-with-editors` | the ref is a Classic `book` without two titles and has editors | ~35 |
-| **any sign** | | **~272** |
+| Name | Matches when | Est. | Measured: `book/book chapter` | Measured: `book` |
+|---|---|---:|---:|---:|
+| `chapter-missing-title` | editors present, and the title is blank or starts with `in ` or `in:` (ignoring case) | 16 | 16 | 0 |
+| `multi-author-no-editors` | two or more authors and no editors | 149 | 149 | 0 |
+| `pubtitle-is-book-title` | trimmed, lowercased `pubtitle` is in the book-title set | 36 | 36 | 0 |
+| `pubtitle-is-journal-title` | trimmed, lowercased `pubtitle` is in the journal-title set | 15 | 15 | 0 |
+| `first-page-after-1` | numeric `firstpage` greater than 1 | 60 | 63 | 9 |
+| `edited-volume-words` | the title matches proceedings, symposium, congress, conference, festschrift or "in honour/honor", or the title or `comments` contains the word `ed.`, `eds.`, `editor`, `editors` or `edited` | 16 | 16 | 1 |
+| `book-with-editors` | the ref is a Classic `book` without two titles and has editors | ~35 | — | 35 |
+| **any sign (rows)** | | **~272** | **240** | **35** |
 
-The estimates come from SQL over `pbdb_2026_10_18` (2026-11-13). The first six were measured on the reclassified refs only; the `book` refs may add a few matches to them. Three estimates approximate the migration's logic: the book-title set used Classic types rather than mapped ones, "two or more authors" used `author2last`, and `book-with-editors` used the `editors` column without `ref_editors`. The run reports the exact counts. About 48 reclassified refs match two or more signs.
+The estimates come from SQL over `pbdb_2026_10_18` (2026-11-13). Three of them approximated the migration's logic: the book-title set used Classic types rather than mapped ones, "two or more authors" used `author2last`, and `book-with-editors` used the `editors` column without `ref_editors`. The measured counts come from the localhost run of 2026-11-13: 275 rows, of which 48 reclassified refs match two or more signs. `first-page-after-1` measures 63 rather than 60 because the migration parses page numbers like `buildPages()`, which also reads a leading number such as `97a`.
+
+Six of the 17 `edited-volume-words` rows match only because "ed." abbreviates an edition ("2nd ed.", "1st ed."). That is a known source of false positives, left in because the list is read by a person.
 
 `book-with-editors` lists the whole group rather than testing it, because no test separates edited volumes there (see Context). With about 35 rows it is small enough to read in full, and each new `book` with editors from a later dump adds a row to the diff.
 
@@ -132,7 +134,9 @@ The summary gains two lines: the count of `book/book chapter` refs mapped to `st
 3. Read through the review list once, to confirm the signs fire as described.
 4. Commit the code, the spec deltas and the review list. Aurora `pbdb2_migration_test` is rebuilt later, as the proposal says.
 
-Rollback: revert the commit and re-run the runner. No schema state is involved.
+Rollback: revert the implementation commit, drop and recreate `pbdb`, and run `node src/run-migrations.js --createdb`. This reproduces the baseline, and the review CSV goes away with the revert. No schema state is involved.
+
+Aurora `pbdb2_migration_test` keeps the old mapping (665 `edited collection` refs, no review list) until its next scheduled rebuild.
 
 ## Open Questions
 

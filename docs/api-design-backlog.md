@@ -992,3 +992,14 @@ curators must choose between, and splits chapter filters across two types.
   `pubvol`/`pubno` in migration. See [Series and volumes on book-type
   references](#series-and-volumes-on-book-type-references). `fix-book-chapter-migration` D3 keeps
   them only for the 236 ambiguous `book` refs, in a "Published in:" note.
+- **Edited volumes and chapters stored as standalone books.** Classic records nothing that tells an
+  edited volume from an authored book, so no Classic ref migrates as `edited collection`
+  (`reclassify-single-title-books`). Two groups contain misclassified refs:
+  - the 665 single-title Classic `book/book chapter` refs, now `standalone book`: about 20–50 edited
+    volumes whose editors were entered as authors, and about 30 chapters missing their chapter title;
+  - single-title Classic `book` refs with editors, the route by which Classic curators enter edited volumes,
+    including ones added before Classic retires.
+
+  Curators fix them in pbdb2 by changing `publicationType`. The refs migration writes the suspects,
+  with the signals each matches, to `migrations/src/refs-migration/single-title-books-review.csv` on
+  every run.

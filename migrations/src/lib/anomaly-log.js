@@ -12,7 +12,8 @@ import { dirname, join, basename } from 'node:path';
 // per-folder id column cannot collide with a sibling's.
 const headerFor = (idColumn) => `${idColumn},script,target_table,severity,issue,description`;
 
-function csvField(value) {
+// Quoted, with internal quotes doubled, only when the value holds a quote, comma or newline.
+export function csvField(value) {
   const s = String(value);
   return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
