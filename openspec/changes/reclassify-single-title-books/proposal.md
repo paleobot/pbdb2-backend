@@ -26,6 +26,17 @@
 - **Known misclassifications are documented, not special-cased.** Nothing stored in Classic tells them apart from authored books:
   - **About 20–50 real edited volumes** whose editors were entered as authors, e.g. Fraser & Sues, *In the Shadow of the Dinosaurs*. They become `standalone book` with the editors as authors.
   - **About 30 chapters missing their chapter title** (titles like "in Bering Land Bridge", or a blank title with editors), plus a few misfiled articles. They were wrong as `edited collection` and are equally wrong as `standalone book`.
+- **Suspect refs are recorded in a review list:** `docs/refs-single-title-books-review.csv`, regenerated from MariaDB whenever the refs are re-migrated. It lists the reclassified refs that match at least one signal, with one row per ref and every matching signal named. Each signal flags about 50% false positives on its own (measured 2026-11-13), so the list is for a curator to read, and the migration does not act on it:
+
+  | Signal | Refs | What it catches |
+  |---|---:|---|
+  | Editors present, and the title blank or starting with "in " | ~30 | chapters missing their chapter title (high precision) |
+  | Two or more authors and no editors | ~150 | co-authored books mixed with edited volumes whose editors were entered as authors |
+  | `pubtitle` is the book title of other refs' chapters | 36 | edited volumes mixed with authored books whose chapters are cited separately |
+  | `pubtitle` is the journal title of other refs' journal articles | 15 | misfiled articles, but mostly books that journal-article refs cite as their journal |
+  | First page after 1 | 57 | mostly instalments of multi-part 19th-century works, plus some chapters and articles |
+  | Title names a proceedings, symposium, congress, conference or festschrift, or "ed."/"eds."/"editor(s)"/"edited" in `title` or `comments` | ~5 | edited volumes |
+
 - **Localhost is re-migrated** with the full runner. Aurora `pbdb2_migration_test` is rebuilt later.
 
 No API, payload schema or DDL change.
@@ -46,7 +57,7 @@ None.
 ## Impact
 
 - **Source → target:** MariaDB `pbdb_2026_10_18`.`refs` (`publication_type`, `reftitle`, `pubtitle`) → PostgreSQL `refs.reference` jsonb (`publicationType`, `bookType`). `ref_authors` and `ref_editors` are unaffected. The PBot refs migration is unaffected.
-- **Code:** `migrations/src/refs-migration/migrate-refs.js` (`PUB_TYPE_MAP`, `PUBTITLE_TITLE_TYPES`, the mapping summary) and `migrations/src/tests/refs-transforms.test.js`.
+- **Code:** `migrations/src/refs-migration/migrate-refs.js` (`PUB_TYPE_MAP`, `PUBTITLE_TITLE_TYPES`, the mapping summary) and `migrations/src/tests/refs-transforms.test.js`. The review list is new: the code that writes `docs/refs-single-title-books-review.csv`, and the CSV itself, which is committed in the style of `docs/taxa-orphans-670.csv`.
 - **Data integrity:**
   - 665 refs change `publicationType`, and each gains `bookType: "monograph"`. Titles, authors, editors, pages and every other field are unchanged.
   - Permids are minted on a full rebuild as before. Collections, opinions and specimens link to refs by permid and not by type, so every other runner count must reproduce exactly.
