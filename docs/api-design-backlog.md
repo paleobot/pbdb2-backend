@@ -872,10 +872,35 @@ supplies").
 
 ## Series and volumes on book-type references
 
-**Leaning (2026-11-10): add `seriesTitle` and `seriesVolume` to `article in edited collection`
-only.** Planned as a later change (working name `add-chapter-series-fields`) after
-`fix-book-chapter-migration`. It touches the reference payload schema, its create rules and
-filters, the refs migration and RIS (`add-ris-reference-output`).
+**Status (2026-11-13): the migration keeps the volume; the model question is open.** The
+2026-11-10 leaning below (series fields on chapters, with the migration splitting `pubtitle`) was
+dropped after a spike. `keep-chapter-volume-in-note` (first named `add-chapter-series-fields`)
+only writes a chapter's `pubvol`/`pubno` to a container note in `comments` and leaves `bookTitle`
+as the whole `pubtitle`. See [Open model
+question](#open-model-question-a-chapter-in-a-series-volume) below.
+
+**Spike (2026-11-13).** The split rules were run over all 5,680 chapter-shaped refs with a
+`pubtitle`. The results were 286 exact-series matches and 432 splits, plus 58 "Series, Part X…"
+and 219 mid-phrase matches left alone. The split was dropped because the series list is the weak
+point. It is built from Classic `serial monograph` titles, and many of its 1,483 names aren't
+series:
+- generic words: Geology, Palaeontology, Paleontology
+- publishers and institutions: Backhuys Publishers, Librairie RORET, British Museum (Natural
+  History), Carnegie Institution of Washington
+- journals: *Journal of Vertebrate Paleontology*, *Journal of Paleontology*
+- multi-volume books: *The Mineral Conchology of Great Britain*
+- book and series joined in one name: "Lower and Middle Cretaceous Terrestrial Ecosystems, NMMNH
+  Bulletin"
+
+About 10–20% of splits were wrong, and an exact match on a non-series would move a real book title
+out of `bookTitle`. A hand-curated allow list of the ~110 series that actually match would fix the
+list. The cut itself would still be a guess, because Classic never says where the book ends and
+the series begins. Splits for the main series (NMMNH, MNA, SEPM, GSA Special Paper, Special Papers
+in Palaeontology) were clean, so curators or a later pass can recover them if the model gains
+series fields.
+
+**Original leaning (2026-11-10, superseded): add `seriesTitle` and `seriesVolume` to `article in
+edited collection` only.**
 
 **The problem has two causes.**
 
@@ -966,21 +991,32 @@ series and series number fields.
 *Alternative considered:* a new type, "article in serial monograph". It works, but adds a type
 curators must choose between, and splits chapter filters across two types.
 
-**Open:**
-- **Splitting rules for the migration:**
-  - the series list (Classic `serial monograph` titles plus additions)
-  - the exclusion list (JVP, generic titles)
-  - rows that match mid-phrase
-  - what to do with an unmatched chapter's `pubvol` (a "Published in:" note as in
-    `fix-book-chapter-migration` D3, or nothing)
-- **Whether to reclassify the ~49 whole monographs** to `serial monograph` in the same change.
-- **Chapters whose book title is inside `reftitle`** ("X, in Y"): split, or leave for curation.
-- **Multi-volume works with no series:** a `bookVolume` on chapters and books, or a note. Count
-  them first.
-- **`pubno` on chapters** is rare (67 + 172 + 74) and mostly a part within a volume. Decide with
-  the volume rule.
-- **Create rules:** whether `seriesVolume` requires `seriesTitle`, and whether either is required
-  on create.
+### Open model question: a chapter in a series volume
+
+pbdb2 can't say "this chapter's book is volume 60 of series X". This is a question about how
+curators enter references, not a migration question, so it is decided with API design, possibly
+with the committee. Whatever is chosen, curators fill it on real records. The migration doesn't
+guess it (see the spike above).
+
+- **How a chapter records its book's series and volume.** Options:
+  1. `seriesTitle` and `seriesVolume` on `article in edited collection`: the 2026-11-10 leaning.
+     It matches citation formats, which use flat fields on the chapter: CSL `container-title`,
+     `collection-title`, `collection-number`; RIS `T2`, `T3`, `VL`.
+  2. A new type, "article in serial monograph".
+  3. A volume field only (e.g. `bookVolume`). It holds a series volume or the volume of a
+     multi-volume work without saying which, so it covers *Palaeontological Atlas of South-Central
+     China* vol. 2 too, but it's ambiguous.
+  4. Nothing: the container note in `comments` stays the record.
+- **Whether `serial monograph` is the right type for an edited volume in a series.** The schema
+  already allows it editors (an NMMNH Bulletin), but the name reads as a single-author work, so
+  curators may not reach for it.
+- **Create rules,** if fields are added: whether `seriesVolume` requires `seriesTitle`, and whether
+  either is required on create.
+
+Left for curation, whatever the model:
+- the ~49 whole monographs Classic filed as chapters (should be `serial monograph`)
+- chapters whose book title is inside `reftitle` ("X, in Y")
+- Classic chapters of one series volume entered as `journal article`
 
 ## Known data issues that affect the API
 
@@ -988,10 +1024,12 @@ curators must choose between, and splits chapter filters across two types.
   as an orphan on every run. Fix it in PBot.
 - **PBot person pbotID collision.** Two PBot persons match one PostgreSQL row, so
   `legacyIDs.pbotID` alternates between runs. Pre-existing and unfixed.
-- **Volume and number dropped on book-type refs.** About 2,100 Classic book-type refs lose
-  `pubvol`/`pubno` in migration. See [Series and volumes on book-type
-  references](#series-and-volumes-on-book-type-references). `fix-book-chapter-migration` D3 keeps
-  them only for the 236 ambiguous `book` refs, in a "Published in:" note.
+- **Volume and number dropped on book-type refs.** Classic book-type refs have no pbdb2 field for
+  `pubvol`/`pubno`. Two groups keep them in a "Published in:" container note in `comments`: the 236
+  ambiguous `book` refs (`fix-book-chapter-migration` D3) and about 1,900 chapters
+  (`keep-chapter-volume-in-note`). Whole books (`standalone book`) with a volume still lose it.
+  Because a note isn't a field, filters and RIS don't see the volume. See [Series and volumes on
+  book-type references](#series-and-volumes-on-book-type-references).
 - **Edited volumes and chapters stored as standalone books.** Classic records nothing that tells an
   edited volume from an authored book, so no Classic ref migrates as `edited collection`
   (`reclassify-single-title-books`). Two groups contain misclassified refs:
