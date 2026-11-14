@@ -42,7 +42,8 @@ None.
 ### Modified Capabilities
 
 - `refs-migration`:
-  - Container note: chapters with a volume or number get one too.
+  - Container note: chapters with a volume or number get one too. The requirement is renamed from "Container note for books with two titles".
+  - Volume and number mapping: points chapters to the note.
   - Its logging changes.
 
 ## Impact
