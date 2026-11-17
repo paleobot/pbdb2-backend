@@ -15,13 +15,14 @@ The bad DOIs can't be found from the Classic row alone. 158 of the 160 wrong DOI
   - `unresolvable`
   - `malformed`
 
-  The audit runs outside the migration, at Crossref's polite rate, in about 1.5–2 hours. It can be re-run for only the refs that are new or changed in a later dump.
-- **Committed verdict file:** the audit writes a CSV keyed by `reference_no`. It holds the source DOI, the normalized DOI, the verdict, and the registered title, year and first author. It lives beside `migrate-refs.js`, because the migration reads it, and it is the record of every DOI pbdb2 did not keep.
+  The audit runs outside the migration, sequentially at Crossref's public-pool rate, in about 3 hours. It can be re-run for only the refs that are new or changed in a later dump.
+- **Committed verdict file:** the audit writes a CSV keyed by `reference_no`. It holds the source DOI, the normalized DOI, the verdict, and the registered title, year and first author. It lives in `src/refs-migration/inputs/`, because the migration reads it, and it is the record of every DOI pbdb2 did not keep.
 - **The refs migration uses the verdicts:**
   - **Normalized:** DOIs are stored without a leading `doi:`, `DOI:`, `https://doi.org/`, `dx.doi.org/` or stray `^` (68 refs).
   - **Dropped:** DOIs with verdict `wrong`, `related-work`, `unresolvable` or `malformed` are not migrated. That includes the ~280 strings that are not DOIs at all, such as handles, JSTOR or PDF URLs, author lists, dates and "-".
   - **Kept:** `match` and `part-or-container` DOIs, and `uncertain` ones until a curator decides.
   - **Run summary:** the migration reports how many DOIs it normalized and how many it dropped under each verdict.
+  - **Input file:** the runner's `refs` step declares the verdict file, so preflight fails if it is missing.
 - **Classic itself is unchanged.** The verdict CSV can go upstream as a report, separately from this change.
 - **Localhost is re-migrated** with the full runner. Aurora `pbdb2_migration_test` is rebuilt later.
 
@@ -35,7 +36,9 @@ No API, payload schema or DDL change. PBot refs are out of scope.
 
 ### Modified Capabilities
 
-- `refs-migration`: under "Additional jsonb fields", `doi` changes from "the source `doi` column (NULL if empty)" to the normalized DOI, omitted when its verdict says drop. New scenarios cover a prefixed DOI, a wrong DOI, a non-DOI string, and a ref with no row in the verdict file.
+- `refs-migration`: under "Additional jsonb fields", `doi` changes from "the source `doi` column (NULL if empty)" to the normalized DOI, omitted when its verdict says drop. New scenarios cover a prefixed DOI, a wrong DOI, a non-DOI string, and a ref with no row in the verdict file. "Migration logging" gains the DOI counts.
+- `migration-runner`: the `refs` step declares `src/refs-migration/inputs/doi-verdicts.csv` as an input.
+- `repository-layout`: `classic-doi-audit` joins the migration specs whose paths are relative to `migrations/`.
 
 ## Impact
 
@@ -44,6 +47,7 @@ No API, payload schema or DDL change. PBot refs are out of scope.
   - The new audit script and its tests.
   - `migrations/src/refs-migration/migrate-refs.js`: normalizing, reading the verdict file, the run summary.
   - `migrations/src/tests/refs-transforms.test.js`.
+  - `migrations/src/run-migrations.js` (the `refs` step's `inputs`), `migrations/src/README.txt`, and the spec-path list in `openspec/config.yaml`.
   - The script and the CSV must fit `migration-script-layout`. Nothing outside `migrations/` reads the CSV.
 - **External services:** the audit sends each DOI to `api.crossref.org` and `doi.org`. DOIs are public identifiers, and nothing about the user or the project is sent. The migration itself makes no network calls and reads only the committed file, so runs stay deterministic.
 - **Data integrity:**
