@@ -57,6 +57,10 @@ Each value SHALL be trimmed. When the ref has non-blank `comments`, the note SHA
 - **WHEN** a ref maps to "journal article", "serial monograph", "standalone book" (other than a two-title "book" without editors), or "other", whatever its `pubvol` and `pubno`
 - **THEN** its `comments` are the source `comments` only
 
+#### Scenario: Note count
+- **WHEN** the migration completes against `pbdb_2026_10_18`
+- **THEN** 236 "book" refs with two titles and no editors and 1,907 refs that map to "article in edited collection" carry a container note
+
 ### Requirement: Volume and number mapping
 The script SHALL map `pubvol` to `journalVolume` (journal articles) or `seriesVolume` (serial monographs), and `pubno` to `journalNumber` (journal articles only). A ref that maps to "article in edited collection" SHALL get no volume or number field; its `pubvol` and `pubno` SHALL be kept in its container note instead (see Container note).
 

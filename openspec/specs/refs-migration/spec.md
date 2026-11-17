@@ -198,7 +198,7 @@ The script SHALL map the legacy `pubtitle` column to a type-specific jsonb field
 | journal article | `journalTitle` |
 | serial monograph | `seriesTitle` |
 | article in edited collection | `bookTitle` |
-| standalone book | `title`, only when `reftitle` is absent (see Title mapping); for a "book" ref with two titles, the container note (see Container note for books with two titles); otherwise not mapped |
+| standalone book | `title`, only when `reftitle` is absent (see Title mapping); for a "book" ref with two titles, the container note (see Container note); otherwise not mapped |
 | edited collection | `title`, only when `reftitle` is absent (see Title mapping); otherwise not mapped. No PBDB ref maps to this type (see Publication type mapping) |
 | unpublished | (not mapped) |
 | other | (not mapped) |
@@ -222,7 +222,7 @@ A ref that maps to "article in edited collection" by a title rule routes its `pu
 - **THEN** its `pubtitle` is not written to any jsonb field
 
 ### Requirement: Volume and number mapping
-The script SHALL map `pubvol` to `journalVolume` (journal articles) or `seriesVolume` (serial monographs), and `pubno` to `journalNumber` (journal articles only).
+The script SHALL map `pubvol` to `journalVolume` (journal articles) or `seriesVolume` (serial monographs), and `pubno` to `journalNumber` (journal articles only). A ref that maps to "article in edited collection" SHALL get no volume or number field; its `pubvol` and `pubno` SHALL be kept in its container note instead (see Container note).
 
 #### Scenario: Journal volume and number
 - **WHEN** a ref maps to "journal article" with `pubvol = '42'` and `pubno = '3'`
@@ -231,6 +231,10 @@ The script SHALL map `pubvol` to `journalVolume` (journal articles) or `seriesVo
 #### Scenario: Serial monograph volume
 - **WHEN** a ref maps to "serial monograph" with `pubvol = '15'`
 - **THEN** the jsonb contains `seriesVolume: "15"`
+
+#### Scenario: Chapter volume goes to the note
+- **WHEN** a ref maps to "article in edited collection" with `pubvol = '60'`
+- **THEN** the jsonb contains no `journalVolume`, `seriesVolume` or `journalNumber`, and its `comments` end with `, vol. 60`
 
 ### Requirement: Pages mapping
 The script SHALL map `firstpage` and `lastpage` to a jsonb `pages` object with integer `first` and `last` properties. If either value is non-numeric, the script SHALL skip the `pages` object and log a warning.
@@ -281,7 +285,7 @@ The script SHALL populate:
 - `publicationYear` from the source `pubyr`
 - `publisher` from the source `publisher` (for applicable publication types)
 - `publicationCity` from the source `pubcity` (for applicable publication types)
-- `comments` from the source `comments` column, followed by the container note where one applies (see Container note for books with two titles); omitted if both are absent
+- `comments` from the source `comments` column, followed by the container note where one applies (see Container note); omitted if both are absent
 
 #### Scenario: DOI present
 - **WHEN** a ref has `doi = '10.1234/example'`
@@ -355,14 +359,14 @@ The script SHALL log:
 - Number of titles taken from `pubtitle`, and each such `reference_no`
 - Number of refs mapped to "article in edited collection" by each title rule ("book/book chapter", "book")
 - Number of "book/book chapter" refs mapped to "standalone book" because they lack two titles
-- Number of container notes written
+- Number of container notes written, split into "book" refs with two titles and no editors, and refs that map to "article in edited collection"
 - Number of rows written to the single-title books review list, split by Classic type ("book/book chapter", "book"), and the number of rows carrying each signal
 - Warnings for: NULL publication types, non-numeric pages, unparseable otherauthors, missing authors, zero person IDs
 - Elapsed time
 
 #### Scenario: Successful migration log output
 - **WHEN** the migration completes without errors
-- **THEN** the console output includes start time, source counts, upsert count, pub type summary, the pubtitle fallback count, the count for each title rule, the count of single-title "book/book chapter" refs mapped to "standalone book", the container note count, the review-list row count by Classic type with a count per signal, any warnings, and elapsed time
+- **THEN** the console output includes start time, source counts, upsert count, pub type summary, the pubtitle fallback count, the count for each title rule, the count of single-title "book/book chapter" refs mapped to "standalone book", the container note counts for books and for chapters, the review-list row count by Classic type with a count per signal, any warnings, and elapsed time
 
 ### Requirement: Validate the built jsonb against the `db` variant
 The script SHALL build its validator once at startup by deriving the `db` variant of `referenceSource` in
@@ -395,8 +399,17 @@ The script SHALL build the jsonb and the column values separately and SHALL NOT 
 - **WHEN** the migration completes
 - **THEN** every `reference` object written validated against the `db` variant, and none was written without validating
 
-### Requirement: Container note for books with two titles
-A "book" ref that has two titles and no editors (see Publication type mapping) SHALL keep its `pubtitle`, `pubvol` and `pubno` in `comments` as a container note, because no field of "standalone book" holds them. The note SHALL be `Published in: <pubtitle>`, followed by `, vol. <pubvol>` when the trimmed `pubvol` is non-blank and `, no. <pubno>` when the trimmed `pubno` is non-blank. Each value SHALL be trimmed. When the ref has non-blank `comments`, the note SHALL follow them after `; `; otherwise the note SHALL be the whole `comments` value. No other ref SHALL get a container note.
+### Requirement: Container note
+Two kinds of ref SHALL keep their Classic container in `comments` as a container note, because no field of their target type holds all of it:
+- a "book" ref that has two titles and no editors (see Publication type mapping), which maps to "standalone book", SHALL always get a note;
+- a ref that maps to "article in edited collection" SHALL get a note when its trimmed `pubvol` or trimmed `pubno` is non-blank. Its `pubtitle` SHALL still go to `bookTitle` (see Publication title routing).
+
+The note SHALL be `Published in: ` followed by, in order and joined with `, `:
+- the trimmed `pubtitle`, when non-blank;
+- `vol. <pubvol>`, when the trimmed `pubvol` is non-blank;
+- `no. <pubno>`, when the trimmed `pubno` is non-blank.
+
+Each value SHALL be trimmed. When the ref has non-blank `comments`, the note SHALL follow them after `; `; otherwise the note SHALL be the whole `comments` value. No other ref SHALL get a container note.
 
 #### Scenario: Note with volume and number
 - **WHEN** a "book" ref with two titles and no editors has `pubtitle = 'Bulletin of the British Museum (Natural History), Zoology'`, `pubvol = '18'`, `pubno = '3'` and no comments
@@ -410,13 +423,37 @@ A "book" ref that has two titles and no editors (see Publication type mapping) S
 - **WHEN** such a ref has `comments = '49 pl.'` and `pubtitle = 'Annales du Musée d''Histoire Naturelle de Belgique'`
 - **THEN** the jsonb contains `comments: "49 pl.; Published in: Annales du Musée d'Histoire Naturelle de Belgique"`
 
-#### Scenario: A reclassified chapter gets no note
-- **WHEN** a "book" ref with two titles has editors
+#### Scenario: Chapter with a volume
+- **WHEN** a "book chapter" ref has `pubtitle = 'The Continental Jurassic. Museum of Northern Arizona Bulletin'`, `pubvol = '60'`, blank `pubno` and no comments
+- **THEN** the jsonb contains `bookTitle: "The Continental Jurassic. Museum of Northern Arizona Bulletin"` and `comments: "Published in: The Continental Jurassic. Museum of Northern Arizona Bulletin, vol. 60"`
+
+#### Scenario: Chapter with a number only
+- **WHEN** a ref that maps to "article in edited collection" has a non-blank `pubtitle`, blank `pubvol` and `pubno = '2'`
+- **THEN** its note is `Published in: <pubtitle>, no. 2`
+
+#### Scenario: Chapter note follows existing comments
+- **WHEN** a "book chapter" ref with `pubvol = '21'` has `comments = 'pl. 3'`
+- **THEN** its jsonb `comments` starts with `pl. 3; Published in: ` and ends with `, vol. 21`
+
+#### Scenario: Chapter with a volume but no publication title
+- **WHEN** a "book chapter" ref has a blank `pubtitle`, `pubvol = '3'` and `pubno = '2'`
+- **THEN** the jsonb contains `comments: "Published in: vol. 3, no. 2"` and no `bookTitle`
+
+#### Scenario: Chapter by the title rules gets a note
+- **WHEN** a "book" ref with two titles and editors, or a "book/book chapter" ref with two titles, has `pubvol = '14'`
+- **THEN** it maps to "article in edited collection", its `pubtitle` is in `bookTitle`, and its `comments` end with `, vol. 14`
+
+#### Scenario: Chapter without volume or number gets no note
+- **WHEN** a ref that maps to "article in edited collection" has blank `pubvol` and blank `pubno`
 - **THEN** its `comments` are the source `comments` only, and its `pubtitle` is in `bookTitle`
+
+#### Scenario: Other types get no note
+- **WHEN** a ref maps to "journal article", "serial monograph", "standalone book" (other than a two-title "book" without editors), or "other", whatever its `pubvol` and `pubno`
+- **THEN** its `comments` are the source `comments` only
 
 #### Scenario: Note count
 - **WHEN** the migration completes against `pbdb_2026_10_18`
-- **THEN** 236 refs carry a container note
+- **THEN** 236 "book" refs with two titles and no editors and 1,907 refs that map to "article in edited collection" carry a container note
 
 ### Requirement: Review list of suspect single-title books
 Classic records nothing that tells an edited volume from an authored book, so no PBDB ref maps to "edited collection", and curators correct such refs after migration. On every run, after the upsert, the script SHALL write a review list to help them find these refs.
