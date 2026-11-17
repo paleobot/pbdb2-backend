@@ -1,7 +1,7 @@
 # Classic occurrences + reidentifications → 2.0 `occurrences` [‡]
 
 Every row of classic `occurrences` (1,984,733) and `reidentifications` (35,098) becomes one `occurrences` row.
-Target: `postgresql/02-core.sql`; payload: `payloadSchemas/occurrence.schema.js`; rationale and the measurements
+Target: `db/02-core.sql`; payload: `payloadSchemas/occurrence.schema.js`; rationale and the measurements
 behind every line here: `openspec/changes/create-occurrences-schema/design.md`.
 
 ## Occurrence rows (from `occurrences`)

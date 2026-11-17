@@ -2,7 +2,7 @@
 
 See proposal.md for motivation. Everything below was measured on 2026-11-17 against the Postgres-ported
 classic mirror (`PG_CLASSIC_*`); counts can drift slightly from the MariaDB figures in
-`mariadb/PBDBLegacy-DeepAnalysis/`, which are older.
+`migrations/mariadb/PBDBLegacy-DeepAnalysis/`, which are older.
 
 **Two source tables carry one concept.** `occurrences` holds the original identification; each row of
 `reidentifications` is a later identification of the same occurrence.

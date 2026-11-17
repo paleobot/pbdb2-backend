@@ -12,11 +12,11 @@
 
 ## 3. Schema (Phase 2)
 
-- [x] 3.1 Replace the commented-out `occurrences` stub in `postgresql/02-core.sql` with the table, version triggers, and indexes
+- [x] 3.1 Replace the commented-out `occurrences` stub in `db/02-core.sql` with the table, version triggers, and indexes
 - [x] 3.2 Verify the DDL on a scratch database: chain insert, swing of `reidentifies_id` on a new version, nulls allowed
 - [x] 3.3 Add `payloadSchemas/occurrence.schema.js` and `tests/fixtures/occurrence-example.json`
 - [x] 3.4 Extend `payloadSchemas/tests/sources.test.js` with the occurrence source and its quirks
-- [x] 3.5 Write `src/occurrences-migration/docs/occurrences.md`
+- [x] 3.5 Write `migrations/src/occurrences-migration/docs/occurrences.md`
 - [x] 3.5a Inspect the 626 collection-less occurrences and generate `docs/occurrences-excluded.csv`
 - [x] 3.6 `openspec validate create-occurrences-schema` passes
 
@@ -25,9 +25,9 @@
 Owned by another team member, in a follow-on change; the findings it needs are in design.md ("Handed off") and
 the mapping doc.
 
-- [ ] H.1 `src/occurrences-migration/migrate-occurrences.js`: stream, resolve, validate, batch-insert, two-pass or ordered chain linking, anomaly logging
-- [ ] H.2 Runner step 11 with pre/postconditions and `src/README.txt`
-- [ ] H.3 Register `occurrence` in `src/audit-payloads.js`
+- [ ] H.1 `migrations/src/occurrences-migration/migrate-occurrences.js`: stream, resolve, validate, batch-insert, two-pass or ordered chain linking, anomaly logging
+- [ ] H.2 Runner step 11 with pre/postconditions and `migrations/src/README.txt`
+- [ ] H.3 Register `occurrence` in `migrations/src/audit-payloads.js`
 - [ ] H.4 Tests and a full-run timing (the current full run takes about 3 minutes; this table is ~12× specimens)
 - [ ] H.5 Exclude the rows in `docs/occurrences-excluded.csv` by predicate and assert the count; a human decides the 6 `collection-lost` rows
 - [ ] H.6 Decide the ditto-mark expansion (design: Open Questions)

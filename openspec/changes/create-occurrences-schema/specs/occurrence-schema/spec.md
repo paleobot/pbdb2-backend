@@ -1,7 +1,7 @@
 ## ADDED Requirements
 
 ### Requirement: Occurrences are a versioned table that links to its taxon by permid
-The `occurrences` table SHALL be defined in `postgresql/02-core.sql` as a versioned entity table: a `bigint`
+The `occurrences` table SHALL be defined in `db/02-core.sql` as a versioned entity table: a `bigint`
 identity `id`, a uuidv7 `permid` enforced by the same CHECK as the other versioned tables, `authorizer_person_id`
 and `enterer_person_id` referencing `persons`, an `occurrence` jsonb payload, the `preceded_by_id` /
 `succeeded_by_id` / `removed` / `created_at` columns, and the standard version triggers installed through

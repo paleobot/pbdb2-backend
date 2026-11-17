@@ -78,7 +78,7 @@ const occurrenceProperties = {
 }
 
 export const occurrenceSource = {
-	$schema: "https://json-schema.org/draft/2019-09/schema",
+	$schema: "https://json-schema.org/draft/2020-12/schema",
 	$id: "https://pbdb2.example.com/schemas/occurrence.json",
 	title: "Occurrence",
 	description: "An occurrence (one identification of a fossil in a collection) payload in the PBDB database",
