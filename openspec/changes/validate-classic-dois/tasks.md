@@ -16,11 +16,11 @@
 
 ## 3. Full audit and threshold check
 
-- [ ] 3.1 Run the audit over all Classic DOIs on `pbdb_2026_10_18` (about 3 h; resume if interrupted). Record the verdict counts, `failed` (re-run until 0 or explained) and the elapsed time
-- [ ] 3.2 Compare the verdict rates per Classic type with the proposal's estimates, and explain any large gap
-- [ ] 3.3 Draw the D7 sample in scratch (100 `wrong`, 50 `related-work`, 50 `uncertain`, 25 `part-or-container`) and hand it to the user for checking
-- [ ] 3.4 Apply the user's findings: adjust constants if needed, `--rescore`, re-check the affected rows, and record the outcome in design.md (Open Questions → decision)
-- [ ] 3.5 Check that a second incremental run makes 0 requests and leaves the file byte-identical
+- [x] 3.1 Run the audit over all Classic DOIs on `pbdb_2026_10_18` (about 3 h; resume if interrupted). Record the verdict counts, `failed` (re-run until 0 or explained) and the elapsed time
+- [x] 3.2 Compare the verdict rates per Classic type with the proposal's estimates, and explain any large gap
+- [x] 3.3 Draw the D7 sample in scratch (100 `wrong`, 50 `related-work`, 50 `uncertain`, 25 `part-or-container`) and hand it to the user for checking
+- [x] 3.4 Apply the user's findings: adjust constants if needed, `--rescore`, re-check the affected rows, and record the outcome in design.md (Open Questions → decision)
+- [x] 3.5 Check that a second incremental run makes 0 requests and leaves the file byte-identical
 
 ## 4. Refs migration
 
@@ -38,8 +38,8 @@
 
 ## 6. Re-migrate localhost and verify
 
-- [ ] 6.1 Rebuild localhost `pbdb` with the full runner (`--createdb`). Keep the log
-- [ ] 6.2 Confirm that every step's totals other than the DOI counts match the previous run, and that `refs` has the same row count
-- [ ] 6.3 Confirm in SQL: PBDB refs with `reference ? 'doi'` = the summary's kept total, no stored DOI matches a prefix (`^(doi:|https?://|dx\.|\^)`), and the sum in the summary equals the refs with a non-blank source DOI
-- [ ] 6.4 Confirm via the API that `doi=` with the Hall 1866 *Lancet* DOI returns no PBDB ref, and a kept DOI still returns its ref
-- [ ] 6.5 Rollback check: note in the commit message that reverting the migration change and re-running restores the previous DOIs; the verdict file can stay
+- [x] 6.1 Rebuild localhost `pbdb` with the full runner (`--createdb`). Keep the log
+- [x] 6.2 Confirm that every step's totals other than the DOI counts match the previous run, and that `refs` has the same row count
+- [x] 6.3 Confirm in SQL: PBDB refs with `reference ? 'doi'` = the summary's kept total, no stored DOI matches a prefix (`^(doi:|https?://|dx\.|\^)`), and the sum in the summary equals the refs with a non-blank source DOI
+- [x] 6.4 Confirm via the API that `doi=` with the Hall 1866 *Lancet* DOI returns no PBDB ref, and a kept DOI still returns its ref
+- [x] 6.5 Rollback check: note in the commit message that reverting the migration change and re-running restores the previous DOIs; the verdict file can stay

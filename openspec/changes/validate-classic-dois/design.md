@@ -66,10 +66,10 @@ About 45,000 distinct DOIs at 4 per second is about 3 hours.
 
 ### D4. Scoring and verdicts
 
-`tokens(s)`: strip markup tags (`<i>`, `<scp>`), NFKD-decompose and drop combining marks, lowercase, split on non-letters, and keep words of 3+ letters as a set.
+`tokens(s)`: decode `&lt;`-style entities, remove `<scp>`/`<sub>`/`<sup>` tags without a break (Wiley writes `<scp>C</scp>arnian`), replace other tags with a space, NFKD-decompose and drop combining marks, lowercase, split on non-letters, and keep the words of 3+ letters that are not stopwords, as a set. The stopwords are a short list of function words in the main languages ("the", "and", "des", "der", "los"…), without which "The Lancet" agreed with every title containing "the".
 `score(a, b) = |A ∩ B| / min(|A|, |B|)`, and 0 when either set is empty. This is the token containment used in the exploration.
 
-Inputs from the ref: `reftitle`, `pubtitle` and `pubyr` (its first 4-digit run). `refTitle` is `reftitle` when non-blank, else `pubtitle`.
+Inputs from the ref: `reftitle`, `pubtitle`, `pubyr` (its first 4-digit run), and `author1last`. `refTitle` is `reftitle` when non-blank, else `pubtitle`. The authors agree when the surnames, with accents, case and non-letters removed, are equal, one edit apart (Runnergar/Runnegar), or, at 4+ letters, one is a prefix of the other (Gutiérrez-M.).
 
 The verdict is the first rule that applies:
 
@@ -78,19 +78,22 @@ The verdict is the first rule that applies:
 | 1 | normalized string not well formed | `malformed` |
 | 2 | not registered | `unresolvable` |
 | 3 | registered but no metadata (source `handle`), or the ref has no title, or the registered title is blank | `uncertain` |
-| 4 | T = score(refTitle, registered title) ≥ **0.6**, and the years agree | `match` |
-| 5 | T ≥ 0.6, and the years disagree | `related-work` |
+| 4 | T = score(refTitle, registered title) ≥ **0.6** and the years agree; or T = **1.00** and the authors agree | `match` |
+| 5 | T ≥ 0.6 | `related-work` |
 | 6 | C ≥ **0.6**, where C is the higher of score(`pubtitle`, registered title) (only when `reftitle` is non-blank) and score(`reftitle`, registered container title) | `part-or-container` |
 | 7 | max(T, C) ≥ **0.3** | `uncertain` |
-| 8 | otherwise | `wrong` |
+| 8 | score(`pubtitle`, registered container) ≥ 0.6, and the authors and the years agree | `uncertain` |
+| 9 | otherwise | `wrong` |
 
 The years agree when either year is missing or they differ by at most **1**.
 
-The registered container title is never compared with the ref's `pubtitle`. A different article in the right journal shares its container, so that comparison would turn the commonest wrong case into `part-or-container`.
+**Authors only rescue.** The proposal's evidence stands: 158 of 160 wrong DOIs agree on surname and year, so author agreement never condemns a DOI. It only keeps one that the titles alone would drop, and only together with a full title (rule 4) or with the journal and the year (rule 8):
+- Rule 4's second clause covers the same work with the year off: online-first issued dates (*Historical Biology*, *Acta Palaeontologica Polonica*: registered 2 years before Classic's print year), backfiles registered decades late (*Spanish Journal of Palaeontology*), and typos in Classic (1990 for 1900). A review of the book has the book's title but another author, so it stays `related-work`.
+- Rule 8 covers titles registered in another language (*Estudios Geológicos*, *Andean Geology*, *Geobios*) and refs with no article title, only the journal. It gives `uncertain`, not `match`: an author can have two articles in one journal and year (Troxell 1922).
 
-Author agreement is not used. It agreed on 158 of the 160 wrong DOIs, and it fails on corporate authors (IODP "Expedition 3xx Scientists").
+Rule 6 never compares the ref's `pubtitle` with the registered container on its own. A different article in the right journal shares its container, so that comparison would turn the commonest wrong case into `part-or-container`.
 
-The constants (0.6, 0.3, 1) are exported from `dois.js` in one place. They are provisional until the hand-checked sample (D7).
+The constants (0.6, 0.3, 1) and the stopwords are exported from `dois.js` in one place.
 
 ### D5. The verdict file
 
@@ -122,9 +125,22 @@ Hand edits to `verdict` survive incremental runs, since unchanged rows are not t
 
 At the end the audit logs the count per verdict, `failed`, and the number of HTTP requests.
 
-### D7. Threshold validation before committing the file
+### D7. Threshold validation
 
-After the first full run, a stratified random sample is drawn in scratch: 100 `wrong`, 50 `related-work`, 50 `uncertain` and 25 `part-or-container`. The user hand-checks it. The bar is no false `wrong` and no false `related-work`, because those drop good DOIs. Any misses lead to adjusting the constants, `--rescore`, and re-checking the affected rows. The sample and its results go into the change's notes, not into the repo.
+The plan was a hand-checked sample before committing the file. The user decided (2026-11-17) not to hand-check it: the verdict file will be reviewed later by a curator. Instead, the rules were checked by reading a seeded sample of 275 rows after the full audit (100 `wrong`, 50 `related-work`, 25 + 25 same-title year gaps in each direction, 50 `uncertain`, 25 `part-or-container`). The full population of each changed verdict was then compared before and after each `--rescore`. What that check found:
+- **`wrong`:** about 96 of 100 were clearly wrong. The misses were translated titles and refs with no article title → rule 8.
+- **`related-work`:** half were the same work with a different year (online-first dates, backfiles, typos) → rule 4's second clause. Reviews of the book were told apart by their author.
+- **Markup bug:** Wiley's `<scp>` split words, which sent identical titles to `uncertain` or `wrong` → tokenizer fix.
+- **Function words:** "The Lancet" scored 0.5 against titles containing "the" → stopwords.
+
+Verdict counts, first run → final rules: match 44,367 → 44,620; wrong 1,207 → 1,202; related-work 351 → 99; uncertain 300 → 306; part-or-container 27 → 25; unresolvable 279 and malformed 281 unchanged. Dropped: 2,118 → 1,861 (4.0%), against the proposal's estimate of about 1,870.
+
+Known remaining errors, accepted:
+- Rule 4 keeps a different paper by the same author whose title contains the ref's title (Panchen 1973/1985).
+- Rule 5 still drops a few same-work DOIs with a small spelling difference ("softshelled").
+- A one-word container ("Facies", "Fossils") gives a loose `part-or-container`.
+
+All of these are kept-or-dropped mistakes in tens of rows, not hundreds, and every row is in the file for the curator.
 
 ### D8. Migration behavior
 
@@ -178,6 +194,4 @@ Rollback: revert the migration commit and re-run. The verdict file can stay; not
 
 ## Open Questions
 
-- The thresholds are provisional until D7's hand check.
-- **Candidate: a wider year gap for identical titles.** The first 517 audited refs gave 20 `related-work`, and about a third of them are the same work with a year 2–3 off (refs 196, 281, 317, 754, 827, 1082). The rest are different works with similar titles (92, 336, 409, 460, 642, 1086). The candidate: T = 1.00 and a year gap of 3 or less → `match`. That keeps the first group and still drops 92 and 336 (T = 0.875). Ref 969, a review of the book, would become `match`. Decided at the D7 hand check (user, 2026-11-17), which samples the rows the rule would flip.
-- **Common short words in short registered titles** ("the", "and") can lift a wrong DOI into `uncertain`. The D7 sample of `uncertain` should show whether that matters.
+None. The thresholds, the year rule and the short-word question were settled in D4 and D7.

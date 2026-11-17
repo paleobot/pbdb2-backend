@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  normalizeDoi, isWellFormedDoi, tokens, score, verdictFor, verdictRow, resolutionOf,
+  normalizeDoi, isWellFormedDoi, tokens, score, verdictFor, verdictRow, resolutionOf, authorsAgree,
   formatVerdictFile, parseVerdictFile, VERDICT_COLUMNS,
 } from '../refs-migration/dois.js';
 import { createResolver, selectForAudit, metadataFrom, USER_AGENT } from '../refs-migration/audit-dois.js';
@@ -47,7 +47,29 @@ test('score is token containment over the smaller set', () => {
   assert.equal(score('On a new fish', 'A new fish of Ohio'), 1);
   assert.equal(score('', 'A new fish'), 0);
   assert.equal(score('A b', 'A new fish'), 0);
-  assert.equal(score('new fish ohio indiana', 'new fish from texas'), 0.5);
+  assert.equal(score('new fish ohio indiana', 'new fish in texas lakes'), 0.5);
+});
+
+test('small caps, sub/superscript and escaped tags do not split words', () => {
+  assert.deepEqual([...tokens('A new ammonoid fauna from the <scp>C</scp>arnian')], ['new', 'ammonoid', 'fauna', 'carnian']);
+  assert.deepEqual([...tokens('JURASSIC &lt;italic&gt;CAMPTONECTES&lt;/italic&gt; (BIVALVIA)')], ['jurassic', 'camptonectes', 'bivalvia']);
+  assert.deepEqual([...tokens('artiodactyl<i>Anthracokeryx</i>and')], ['artiodactyl', 'anthracokeryx']);
+});
+
+test('function words do not count', () => {
+  assert.deepEqual([...tokens('The Lancet')], ['lancet']);
+  assert.equal(score('Descriptions of the Crinoidea', 'The Lancet'), 0);
+  assert.deepEqual([...tokens('Revisión de las avispas del Mioceno')], ['revision', 'avispas', 'mioceno']);
+});
+
+test('authorsAgree ignores accents and case, and allows a typo or a compound name', () => {
+  assert.ok(authorsAgree('Hubner', 'HÜBNER'));
+  assert.ok(authorsAgree('Runnergar', 'Runnegar'));
+  assert.ok(authorsAgree('Přikryl', 'Pikryl'));
+  assert.ok(authorsAgree('Gutierrez-Marco', 'Gutiérrez-M.'));
+  assert.ok(!authorsAgree('Szalay', 'Krishtalka'));
+  assert.ok(!authorsAgree('Matsumoto', '松本'));
+  assert.ok(!authorsAgree('Hibbard', ''));
 });
 
 // --- Verdicts ---
@@ -77,9 +99,24 @@ test('rule 4: match, years within one', () => {
 });
 
 test('rule 5: related-work when the years disagree', () => {
-  const v = verdictFor(ref({ reftitle: 'New ceratopsian from Alberta', pubyr: '2005' }),
-    meta({ title: 'A new ceratopsian from Alberta', year: 2008 }));
+  const v = verdictFor(ref({ reftitle: 'New ceratopsian from Alberta', pubyr: '2005', author1last: 'Ryan' }),
+    meta({ title: 'A new ceratopsian from Alberta', year: 2008, firstAuthor: 'Ryan' }));
+  assert.equal(v.verdict, 'match', 'full title and author: the year is off');
+  const partial = verdictFor(ref({ reftitle: 'New ceratopsian material from Alberta', pubyr: '2005', author1last: 'Ryan' }),
+    meta({ title: 'New ceratopsian teeth from Alberta', year: 2008, firstAuthor: 'Ryan' }));
+  assert.equal(partial.verdict, 'related-work', 'part of the title: another paper by the author');
+});
+
+test('a review of the book stays related-work', () => {
+  const v = verdictFor(ref({ reftitle: 'Systematics of the Omomyidae', pubyr: '1976', author1last: 'Szalay' }),
+    meta({ title: 'Szalay. Systematics of the Omomyidae', year: 1978, firstAuthor: 'Krishtalka' }));
   assert.equal(v.verdict, 'related-work');
+});
+
+test('an online-first date with the full title and author is a match', () => {
+  const v = verdictFor(ref({ reftitle: 'Earliest Cretaceous mammals from the western United States', pubyr: '2014', author1last: 'Cifelli' }),
+    meta({ title: 'Earliest Cretaceous mammals from the western United States', year: 2012, firstAuthor: 'Cifelli' }));
+  assert.equal(v.verdict, 'match');
 });
 
 test('rule 6: part-or-container — the DOI is the chapter\'s book', () => {
@@ -95,9 +132,17 @@ test('rule 6: part-or-container — the DOI is a part of the ref', () => {
 });
 
 test('another article in the same journal is wrong, not part-or-container', () => {
-  const v = verdictFor(ref({ reftitle: 'Pleistocene horses of Nebraska', pubtitle: 'Journal of Paleontology' }),
-    meta({ title: 'Ordovician brachiopods', container: 'Journal of Paleontology' }));
+  const v = verdictFor(ref({ reftitle: 'Pleistocene horses of Nebraska', pubtitle: 'Journal of Paleontology', author1last: 'Ray' }),
+    meta({ title: 'Ordovician brachiopods', container: 'Journal of Paleontology', firstAuthor: 'Cooper' }));
   assert.equal(v.verdict, 'wrong');
+});
+
+test('same journal, author and year rescues a translated title as uncertain', () => {
+  const r = ref({ reftitle: 'New elasmosaurids from the Upper Cretaceous of Chile', pubtitle: 'Andean Geology', pubyr: '2015', author1last: 'Otero' });
+  const m = meta({ title: 'Nuevos elasmosáuridos del Cretácico Superior de Chile', container: 'Andean Geology', year: 2015, firstAuthor: 'Otero' });
+  assert.equal(verdictFor(r, m).verdict, 'uncertain');
+  assert.equal(verdictFor({ ...r, pubyr: '2010' }, m).verdict, 'wrong', 'the year must agree too');
+  assert.equal(verdictFor({ ...r, author1last: 'Smith' }, m).verdict, 'wrong', 'the author must agree too');
 });
 
 test('rule 7: a partial agreement is uncertain', () => {

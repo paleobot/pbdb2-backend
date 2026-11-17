@@ -25,15 +25,29 @@ export const AGREE = 0.6;
 export const UNCERTAIN_FLOOR = 0.3;
 export const YEAR_TOLERANCE = 1;
 
-// The distinct words of 3+ letters, ignoring markup, accents and case.
+const ENTITIES = { lt: '<', gt: '>', amp: '&', quot: '"', apos: "'" };
+
+// Function words that would let two unrelated titles agree ("The Lancet").
+const STOPWORDS = new Set([
+  'the', 'and', 'for', 'from', 'with', 'into', 'its', 'are', 'was', 'were', 'this', 'that',
+  'des', 'les', 'une', 'sur', 'dans', 'par', 'avec', 'der', 'die', 'das', 'und', 'von', 'den', 'dem', 'ein', 'eine',
+  'del', 'los', 'las', 'por', 'para', 'con', 'una', 'della', 'dei', 'delle', 'dos', 'das', 'uma', 'com',
+]);
+
+// The distinct words of 3+ letters, other than stopwords, ignoring markup, accents and case. Small caps,
+// sub- and superscript tags sit inside words (`<scp>C</scp>arnian`), so they are
+// removed without a break; any other tag separates words.
 export function tokens(s) {
   const words = (s ?? '')
+    .replace(/&(lt|gt|amp|quot|apos);/g, (_, e) => ENTITIES[e])
+    .replace(/&#(\d+);/g, (_, n) => String.fromCodePoint(Number(n)))
+    .replace(/<\/?(?:scp|sub|sup)>/gi, '')
     .replace(/<[^>]+>/g, ' ')
     .normalize('NFKD')
     .replace(/\p{M}/gu, '')
     .toLowerCase()
     .split(/\P{L}+/u)
-    .filter((w) => w.length >= 3);
+    .filter((w) => w.length >= 3 && !STOPWORDS.has(w));
   return new Set(words);
 }
 
@@ -56,12 +70,38 @@ const yearsAgree = (a, b) => a === null || b === null || Math.abs(a - b) <= YEAR
 
 const blank = (s) => !(s ?? '').trim();
 
+const surname = (s) => (s ?? '').normalize('NFKD').replace(/\p{M}/gu, '').toLowerCase().replace(/\P{L}/gu, '');
+
+function editDistance(a, b) {
+  let prev = Array.from({ length: b.length + 1 }, (_, j) => j);
+  for (let i = 1; i <= a.length; i++) {
+    const cur = [i];
+    for (let j = 1; j <= b.length; j++) {
+      cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+    }
+    prev = cur;
+  }
+  return prev[b.length];
+}
+
+// First-author surnames agree, ignoring accents, case and punctuation: equal, one a
+// prefix of the other (4+ letters, for compound names), or one edit apart (typos).
+export function authorsAgree(a, b) {
+  const x = surname(a);
+  const y = surname(b);
+  if (x.length < 2 || y.length < 2) return false;
+  if (x === y || editDistance(x, y) <= 1) return true;
+  return Math.min(x.length, y.length) >= 4 && (x.startsWith(y) || y.startsWith(x));
+}
+
 // --- Verdicts ---
 
 export const KEPT_VERDICTS = new Set(['match', 'part-or-container', 'uncertain']);
 export const DROPPED_VERDICTS = new Set(['wrong', 'related-work', 'unresolvable', 'malformed']);
 
-// ref: { doi, reftitle, pubtitle, pubyr }. resolution: { source, title, container, year }
+// Authors never condemn a DOI (a surname-and-year match is how the wrong ones were
+// attached); they only rescue one the titles alone would drop.
+// ref: { doi, reftitle, pubtitle, pubyr, author1last }. resolution: { source, title, container, year, firstAuthor }
 // with source 'crossref' | 'doi.org' (metadata), 'handle' (registered, no metadata) or
 // 'none' (not registered); null when the DOI is malformed and was never resolved.
 // Returns { verdict, score } with score as T to two decimals, or '' when rules 1–3 decide.
@@ -76,9 +116,12 @@ export function verdictFor(ref, resolution) {
   }
   const T = score(refTitle, resolution.title);
   const fixed = T.toFixed(2);
+  const authors = authorsAgree(ref.author1last, resolution.firstAuthor);
+  const years = yearsAgree(yearOf(ref.pubyr), yearOf(resolution.year));
   if (T >= AGREE) {
-    const agree = yearsAgree(yearOf(ref.pubyr), yearOf(resolution.year));
-    return { verdict: agree ? 'match' : 'related-work', score: fixed };
+    // The full title and the author with the year off: a typo, or an online-first date.
+    if (years || (fixed === '1.00' && authors)) return { verdict: 'match', score: fixed };
+    return { verdict: 'related-work', score: fixed };
   }
   // The ref's pubtitle is never compared with the registered container: another
   // article in the right journal shares it.
@@ -87,6 +130,10 @@ export function verdictFor(ref, resolution) {
     : 0;
   if (C >= AGREE) return { verdict: 'part-or-container', score: fixed };
   if (Math.max(T, C) >= UNCERTAIN_FLOOR) return { verdict: 'uncertain', score: fixed };
+  // Same journal, author and year, with the title in another language or missing.
+  if (pubtitle && score(pubtitle, resolution.container) >= AGREE && authors && years) {
+    return { verdict: 'uncertain', score: fixed };
+  }
   return { verdict: 'wrong', score: fixed };
 }
 

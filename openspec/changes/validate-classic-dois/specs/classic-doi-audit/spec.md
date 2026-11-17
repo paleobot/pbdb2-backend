@@ -70,7 +70,7 @@ Every request SHALL send `User-Agent: pbdb2-doi-audit/1.0` and SHALL NOT include
 - **THEN** its headers and URL contain no email address
 
 ### Requirement: Title scoring
-`tokens(s)` SHALL remove markup tags, NFKD-decompose, drop combining marks, lowercase, split on non-letters, and keep the distinct words of 3 or more letters. `score(a, b)` SHALL be `|A ∩ B| / min(|A|, |B|)` over the two token sets, and 0 when either set is empty. The thresholds SHALL be constants exported from `dois.js`: the agreement threshold 0.6, the uncertain floor 0.3, and the year tolerance 1.
+`tokens(s)` SHALL decode the entities `&lt;`, `&gt;`, `&amp;`, `&quot;`, `&apos;` and `&#N;`, remove `<scp>`, `<sub>` and `<sup>` tags (opening and closing) without a break, replace any other tag with a space, NFKD-decompose, drop combining marks, lowercase, split on non-letters, and keep the distinct words of 3 or more letters that are not in the stopword list. The stopword list holds common English, French, German, Spanish, Italian and Portuguese function words ("the", "and", "from", "des", "der", "und", "del", "los" and the like), and is a constant in `dois.js`. `score(a, b)` SHALL be `|A ∩ B| / min(|A|, |B|)` over the two token sets, and 0 when either set is empty. The thresholds SHALL be constants exported from `dois.js`: the agreement threshold 0.6, the uncertain floor 0.3, and the year tolerance 1.
 
 #### Scenario: Accents, case and markup are ignored
 - **WHEN** `a` is `Paléontologie française` and `b` is `<i>Paleontologie</i> Française`
@@ -80,33 +80,54 @@ Every request SHALL send `User-Agent: pbdb2-doi-audit/1.0` and SHALL NOT include
 - **WHEN** `a` is `On a new fish` and `b` is `A new fish of Ohio`
 - **THEN** the token sets are {new, fish} and {new, fish, ohio}, and `score(a, b)` is 1
 
+#### Scenario: Small caps do not split a word
+- **WHEN** `b` is `A new ammonoid fauna from the <scp>C</scp>arnian`
+- **THEN** its tokens are {new, ammonoid, fauna, carnian}
+
+#### Scenario: A journal name shares only a function word
+- **WHEN** `a` is a crinoid title containing "the" and `b` is `The Lancet`
+- **THEN** `score(a, b)` is 0
+
 #### Scenario: Nothing to compare
 - **WHEN** either title is blank or has no word of 3 or more letters
 - **THEN** `score` is 0
 
 ### Requirement: Verdict rules
-The audit SHALL give each ref with a non-blank DOI the verdict of the first rule below that applies. `refTitle` is the ref's `reftitle` when non-blank, else its `pubtitle`. T = `score(refTitle, registered title)`. C is the higher of `score(pubtitle, registered title)` (only when `reftitle` is non-blank) and `score(reftitle, registered container title)`. The years agree when either is missing or they differ by no more than the year tolerance. The ref's year is the first run of four digits in `pubyr`.
+The audit SHALL give each ref with a non-blank DOI the verdict of the first rule below that applies. `refTitle` is the ref's `reftitle` when non-blank, else its `pubtitle`. T = `score(refTitle, registered title)`. C is the higher of `score(pubtitle, registered title)` (only when `reftitle` is non-blank) and `score(reftitle, registered container title)`. The years agree when either is missing or they differ by no more than the year tolerance. The ref's year is the first run of four digits in `pubyr`. The authors agree when `authorsAgree(author1last, registered first author)` holds. That function compares surnames with accents, case and non-letters removed, and accepts equal names, names one edit apart, and, when both have 4 or more letters, one name that is a prefix of the other.
 
 | # | Condition | Verdict |
 |---|---|---|
 | 1 | the normalized DOI is not well formed | `malformed` |
 | 2 | the DOI is not registered | `unresolvable` |
 | 3 | the DOI has no metadata, the ref has no title, or the registered title is blank | `uncertain` |
-| 4 | T ≥ 0.6 and the years agree | `match` |
-| 5 | T ≥ 0.6 and the years disagree | `related-work` |
+| 4 | T ≥ 0.6 and the years agree, or T = 1.00 (to two decimals) and the authors agree | `match` |
+| 5 | T ≥ 0.6 | `related-work` |
 | 6 | C ≥ 0.6 | `part-or-container` |
 | 7 | max(T, C) ≥ 0.3 | `uncertain` |
-| 8 | otherwise | `wrong` |
+| 8 | `score(pubtitle, registered container title)` ≥ 0.6, the authors agree, and the years agree | `uncertain` |
+| 9 | otherwise | `wrong` |
 
-The ref's `pubtitle` SHALL NOT be compared with the registered container title. Author names SHALL NOT affect a verdict.
+Rule 6 SHALL NOT compare the ref's `pubtitle` with the registered container title; only rule 8 does, and only together with the author and the year. Author agreement SHALL only move a verdict towards keeping the DOI: it never makes a verdict `wrong` or `related-work`, because a surname-and-year match is how the wrong DOIs were attached.
 
 #### Scenario: A wrong DOI
 - **WHEN** a 1866 crinoid paper by Hall carries a DOI whose registered title is from *The Lancet* and shares no word with the ref's titles
 - **THEN** its verdict is `wrong`, although the registered first author is Hall and the year is 1866
 
-#### Scenario: An abstract pointing to the later paper
-- **WHEN** the titles agree with T ≥ 0.6, the ref's year is 2005 and the registered year is 2008
+#### Scenario: Another paper by the same author
+- **WHEN** T is 0.75, the authors agree, the ref's year is 2005 and the registered year is 2008
 - **THEN** its verdict is `related-work`
+
+#### Scenario: An online-first date
+- **WHEN** T is 1.00, the authors agree, the ref's year is 2014 and the registered year is 2012
+- **THEN** its verdict is `match`
+
+#### Scenario: A review of the book
+- **WHEN** T is 1.00, the ref's author is Szalay, the registered first author is Krishtalka, and the years differ by 2
+- **THEN** its verdict is `related-work`
+
+#### Scenario: A translated title in the same journal
+- **WHEN** the ref's English title shares no word with the registered Spanish title, and the ref's `pubtitle` agrees with the registered container, the authors agree and the years agree
+- **THEN** its verdict is `uncertain`, and the DOI is kept
 
 #### Scenario: The DOI is the chapter's book
 - **WHEN** a ref has a chapter `reftitle` and a `pubtitle` that agrees with the registered title, and its `reftitle` does not

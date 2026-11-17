@@ -126,7 +126,7 @@ async function main() {
   let refs;
   try {
     const [rows] = await mariadb.query(
-      `SELECT reference_no, doi, reftitle, pubtitle, pubyr FROM refs WHERE doi IS NOT NULL ORDER BY reference_no`,
+      `SELECT reference_no, doi, reftitle, pubtitle, pubyr, author1last FROM refs WHERE doi IS NOT NULL ORDER BY reference_no`,
     );
     refs = rows.filter((r) => r.doi.trim());
   } finally {
