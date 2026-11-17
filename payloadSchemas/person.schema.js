@@ -88,7 +88,7 @@ const personProperties = {
 };
 
 export const personSource = {
-	$schema: "https://json-schema.org/draft/2019-09/schema",
+	$schema: "https://json-schema.org/draft/2020-12/schema",
 	$id: "https://pbdb2.example.com/schemas/person.json",
 	title: "Person",
 	description: "A person payload in the PBDB database",

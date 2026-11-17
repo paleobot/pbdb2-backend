@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { collectEnumSources, loadEnums, applyEnums, resolveEnums } from '../lib/enums.js';
 import { createAjv } from '../lib/ajv.js';
 import { getPg, closePg } from './pg.js';
+import { taxonSource } from '../taxon.schema.js';
 
 after(() => closePg());
 
@@ -89,4 +90,10 @@ test('missing table throws naming it (real DB)', async () => {
     resolveEnums(pg, { properties: { a: { type: 'string', 'x-enumFrom': { table: 'no_such_table', column: 'name' } } } }),
     /dictionaries\.no_such_table\.name/,
   );
+});
+
+test('the taxon source\'s dictionaries resolve (real DB)', async () => {
+  const resolved = await resolveEnums(getPg(), taxonSource);
+  assert.ok(resolved.properties.rank.enum.includes('species'));
+  assert.ok(resolved.properties.nomenclaturalStatus.enum.length > 0);
 });

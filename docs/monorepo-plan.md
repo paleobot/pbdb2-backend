@@ -1,6 +1,6 @@
 # Moving to a backend monorepo
 
-*Status: direction decided 2026-09-25; nothing moved yet. Feedback welcome before any of it happens.*
+*Status: moved 2026-10-01 (OpenSpec change `move-to-backend-monorepo`, archived the same day). The GitHub repo is renamed `pbdb2-backend`, and `pbdb2-api` is archived.*
 
 This note explains a planned change to how the PBDB2 backend code is organized. It is written for
 people who work in `pbdb2-migrations` on the DDL, payload schemas and database functions and weren't
@@ -124,28 +124,30 @@ first-class and can be changed in the same proposal as a migration or an API rou
 
 Two OpenSpec changes, with some housekeeping between them. Each is reviewed like any other change.
 
-**1. Split `payloadSchemas/` from the migrations (`split-payload-schemas`).** This happens first,
-inside the current layout, and it is small: the payload-schema code already imports nothing from
-the migrations. The legacy mapping docs move out of `payloadSchemas/` to a `docs/` folder in
+**1. Split `payloadSchemas/` from the migrations (`split-payload-schemas`, done).** This happens
+first, inside the current layout, and it is small: the payload-schema code already imports nothing
+from the migrations. The legacy mapping docs move out of `payloadSchemas/` to a `docs/` folder in
 each migration's directory, with their names unchanged. `tests/enums.test.js` and
 `tests/dictionary-seeds.test.js` stop borrowing the migrations' database connection
 (`src/lib/pg-pool.js`) and get their own. A guard test in `npm test` now enforces the rule above for
 `payloadSchemas/`, so the move itself only relocates files.
 
-**2. Housekeeping.** Before the move, in-flight work should be merged or parked. Besides `main`
-and `ddm-dev`, the only branch on GitHub is your `graph-visuals` (one commit, the graph tool), and
-it stays or goes as you decide. The open `clade-hierarchy-user-guide` change (16 of 17 tasks) will
-also be finished or parked.
+**2. Housekeeping (done).** In-flight work was merged or parked before the move. Your
+`graph-visuals` branch was dead, so it was deleted; `main` and `ddm-dev` are the only branches on
+GitHub. The `clade-hierarchy-user-guide` change stays open: its guide is written, and only its
+archive waits on a maintainer's confirmation. Stray files at the root went into `docs/`.
 
-**3. Agree a moment.** The move is quick (an afternoon), but it works best with nothing in flight.
-We'll agree on a time together.
+**3. Pick a moment (done).** The move is quick (an afternoon), but it works best with nothing in
+flight. It happens while you're on other work: neither repo has anything in flight.
 
-**4. The move (second change).**
+**4. The move (second change, done).**
 - One commit moves everything into the new layout, with the three DDL files going to `db/`. The same
   change fixes every import and file path that pointed at the old locations, including
   `run-migrations.js`. `migration_exploration/` moves as-is and is not fixed up: nothing depends
   on it, so its scripts may break and it retires with the rest of `migrations/`.
-- The API's history is brought in under `api/`. Its 15 commits are the only history that gets
+- The change decides where each `.env` lives and where `global-bundle.pem` (the AWS RDS certificate
+  bundle) goes. Both are found today by paths relative to the repo root, where every command runs.
+- The API's history is brought in under `api/`. Its 16 commits are the only history that gets
   rewritten, to move them into the subdirectory.
 - The root `package.json` sets up npm workspaces. The migrations and the API keep their own
   `package.json`.
@@ -154,24 +156,37 @@ We'll agree on a time together.
   the PostgreSQL server named in `.env`. Today they find the DDL through a relative path to a sibling
   `pbdb2-migrations` checkout. The move points that path at `db/` inside the same repo instead.
 
-**5. Rename and archive.** `pbdb2-migrations` becomes `pbdb2-backend` on GitHub. `pbdb2-api` is
+**5. Rename and archive (done).** `pbdb2-migrations` becomes `pbdb2-backend` on GitHub. `pbdb2-api` is
 archived (read-only) with a pointer to its new home.
 
 ## What you'll need to do
 
-Before the move:
-- Push or merge what you're working on, or tell me what's in flight so we can time it.
-- Let me know whether to keep `graph-visuals`.
+Do these in order before starting any new work:
 
-After the move:
-- `git pull`. The move comes through as a normal commit.
-- Run `npm install` once at the repo root.
-- Update anything local that uses the old paths, such as a shell alias or a
-  `psql -f postgresql/01-dictionaries.sql` and the other two, which become `db/01-dictionaries.sql`
-  and so on.
-- Your `.env` may need copying into `migrations/`. The move change will say exactly where each
-  `.env` goes.
-- Optionally: `git remote set-url origin git@github.com:paleobot/pbdb2-backend.git`
+1. **Pull.** Run `git pull`. The move comes through as a normal commit.
+2. **Install.** Run `npm install` once, at the repo root.
+3. **Set up the one `.env`.**
+   - Put it at the repo root, with every variable listed in the root `.env.example`.
+   - If you have an `api/.env` from a `pbdb2-api` checkout, delete it rather than copying it in.
+   - Don't create `api/.env` or `migrations/.env`. Every area reads the root file, whatever
+     directory you start in.
+   - `PG_CA_CERT=global-bundle.pem` works as written: it finds the committed certificate at the root.
+4. **Update local references to old paths**, such as shell aliases or scripts. For example,
+   `psql -f postgresql/01-dictionaries.sql` becomes `psql -f db/01-dictionaries.sql`, and likewise
+   for `02-core.sql` and `03-taxa.sql`.
+
+Optional:
+
+5. **Point your remote at the new name:**
+   `git remote set-url origin git@github.com:paleobot/pbdb2-backend.git`
+6. **Rename your local folder** to `pbdb2-backend`. If you use Claude Code:
+   1. Before renaming, copy its memory folder. Claude Code keys each project by its absolute path,
+      with every `/` turned into `-`, so `/home/you/repos/pbdb2-migrations` keeps its memory in
+      `~/.claude/projects/-home-you-repos-pbdb2-migrations/`. Copy that folder to the key for the
+      new path (`...-pbdb2-backend/`), or the memory is left behind.
+   2. Rename the folder.
+   3. On the first launch in the renamed folder, expect a folder-trust prompt. That's normal for a
+      path Claude Code hasn't seen.
 
 If a branch does cross the move, git's rename detection usually carries edits to moved files across
 a merge or rebase. Landing work first is still simpler.
@@ -196,8 +211,6 @@ a merge or rebase. Landing work first is still simpler.
   there (for example the `derive_taxa()` benchmark and diagnostic scripts in `testing/`) may still
   be useful to you. If you still run any of them, tell me which, and we can decide what to do with
   them. Otherwise they'll stop working after the move and go when `migrations/` retires.
-- **`graph-visuals`.** Keep or drop (step 2).
-- **Timing.** When a pause in DDL work would suit you.
 - **The frontend** is expected to stay in its own repo, not yet confirmed, and to get the payload
   schemas from the API over HTTP. Either way, it doesn't affect day-to-day backend work.
 

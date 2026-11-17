@@ -1,10 +1,15 @@
 // Derive the per-use variants of an annotated payload source:
 //
 //   db           the jsonb at rest: x-storage properties removed, base required only
-//   in-create    a create body: readOnly properties removed, x-create merged in
-//   out          a full response: everything kept, dictionary enums not enforced
-//   patch-guard  screens a JSON Merge Patch body (object, no readOnly keys); the
+//   in-create    a create body: readOnly properties removed at any depth, x-create merged in
+//   out          a full response: everything kept, dictionary enums not enforced,
+//                x-link properties nullable (a removed target); link items
+//                are not (a removed item is omitted)
+//   patch-guard  screens a JSON Merge Patch body (object, no root readOnly keys); the
 //                merged document is validated separately (payloadSchemas/DESIGN_NOTES.md)
+//
+// A source with root `readOnly: true` (taxon) has no write path, so asking for
+// its in-create or patch-guard throws.
 //
 // Resolve enums on the source first (./enums.js), then derive. Recurses through
 // properties, items, allOf/anyOf/oneOf, if/then/else and not. $defs/$ref are not
@@ -19,24 +24,6 @@ const SUBSCHEMAS = ['if', 'then', 'else', 'not'];
 
 function isSchema(v) {
   return v && typeof v === 'object' && !Array.isArray(v);
-}
-
-// readOnly may appear only on the source's root properties (so patch-guard,
-// which checks root keys, covers every read-only field).
-function assertRootOnlyReadOnly(source) {
-  const check = (node, path) => {
-    if (Array.isArray(node)) return node.forEach((n, i) => check(n, `${path}[${i}]`));
-    if (!isSchema(node)) return;
-    if (node.readOnly) throw new Error(`readOnly is allowed only on root properties; found at ${path}`);
-    for (const [k, v] of Object.entries(node)) check(v, `${path}.${k}`);
-  };
-  for (const [name, prop] of Object.entries(source.properties ?? {})) {
-    const { readOnly, ...rest } = prop;
-    check(rest, name);
-  }
-  for (const [k, v] of Object.entries(source)) {
-    if (k !== 'properties') check(v, k);
-  }
 }
 
 // Remove `names` from required lists at this node and in the applicators that
@@ -62,6 +49,12 @@ function transform(node, variant) {
       const drop = (variant === 'db' && prop['x-storage']) || (variant === 'in-create' && prop.readOnly);
       if (drop) removed.add(name);
       else props[name] = transform(prop, variant);
+      // A link property whose target has been removed reads as null; only a
+      // response says so. A link reached through `items` is not nullable: a
+      // removed item is omitted from its array instead.
+      if (variant === 'out' && props[name] && 'x-link' in props[name]) {
+        props[name] = { ...props[name], type: [props[name].type, 'null'] };
+      }
     }
     out.properties = props;
     pruneRequired(out, removed);
@@ -93,8 +86,10 @@ export function deriveVariant(source, variant) {
   if (!VARIANTS.includes(variant)) {
     throw new Error(`Unknown variant '${variant}'; expected one of ${VARIANTS.join(', ')}`);
   }
-  assertRootOnlyReadOnly(source);
   const $id = variantId(source, variant);
+  if (source.readOnly === true && (variant === 'in-create' || variant === 'patch-guard')) {
+    throw new Error(`${source.$id} is read-only: it has no '${variant}' variant`);
+  }
 
   if (variant === 'patch-guard') {
     const readOnly = Object.entries(source.properties ?? {}).filter(([, p]) => p.readOnly).map(([n]) => n);

@@ -1,7 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { split, merge, collectCodecSources, loadCodecContext, isDictionarySource, codecKeyColumns } from '../lib/storage.js';
+import { split, merge, collectCodecSources, loadCodecContext, isDictionarySource, codecKeyColumns, codecKeySites, storageColumns, storageSelects } from '../lib/storage.js';
+import { getCodec } from '../lib/codecs.js';
 import { authoritySource } from '../authority.schema.js';
+import { collectionSource } from '../collection.schema.js';
+import { schemaSource } from '../schema.schema.js';
 import { deriveVariant } from '../lib/variants.js';
 import { createAjv } from '../lib/ajv.js';
 
@@ -25,14 +28,14 @@ const source = {
         scale: { type: 'string' },
       },
     },
-    references: {
+    additionalReferences: {
       type: 'array',
-      items: { type: 'object', properties: { referenceID: { type: 'string' }, order: { type: 'string' } } },
-      'x-storage': { table: 'additional_collection_refs', codec: 'referenceList' },
+      items: { type: 'object', properties: { permid: { type: 'string' } } },
+      'x-storage': { table: 'additional_collection_refs', codec: 'referenceLinks' },
     },
   },
   required: ['name'],
-  'x-create': { required: ['references'] },
+  'x-create': { required: ['additionalReferences'] },
   unevaluatedProperties: false,
 };
 
@@ -59,38 +62,22 @@ test('half a coordinate pair throws', () => {
   assert.throws(() => split(source, { name: 'n', location: { coordinates: { latitude: 1 } } }), /together/);
 });
 
-test('primary reference goes to the column, the rest to child rows', () => {
-  const { columns, children, jsonb } = split(source, {
-    name: 'n',
-    references: [{ referenceID: 'r-12', order: '2' }, { referenceID: 'r-7', order: '1' }],
-  }, refs);
-  assert.equal(columns.reference_id, '7');
-  assert.deepEqual(children.additional_collection_refs, [{ reference_id: '12' }]);
-  assert.equal('references' in jsonb, false);
-});
-
-test('reference order normalized on round trip', () => {
-  const parts = split(source, { name: 'n', references: [{ referenceID: 'r-3', order: '1' }, { referenceID: 'r-9', order: '5' }] }, refs);
-  parts.children.additional_collection_refs = parts.children.additional_collection_refs.map((r, i) => ({ id: String(100 + i), ...r }));
-  assert.deepEqual(merge(source, parts, refs).references, [{ referenceID: 'r-3', order: '1' }, { referenceID: 'r-9', order: '2' }]);
-});
-
 test('merge rebuilds coordinates from GeoJSON, creating missing objects', () => {
   const merged = merge(source, {
     jsonb: { name: 'n' },
-    columns: { location: { type: 'Point', coordinates: [-110.25, 45.5] }, permid: 'p', reference_id: '7' },
+    columns: { location: { type: 'Point', coordinates: [-110.25, 45.5] }, permid: 'p' },
     children: { additional_collection_refs: [] },
   }, refs);
   assert.deepEqual(merged, {
     name: 'n',
     permid: 'p',
     location: { coordinates: { latitude: 45.5, longitude: -110.25 } },
-    references: [{ referenceID: 'r-7', order: '1' }],
+    additionalReferences: [],
   });
 });
 
 test('null location merges to no coordinates', () => {
-  assert.deepEqual(merge(source, { jsonb: { name: 'n' }, columns: { location: null } }), { name: 'n' });
+  assert.deepEqual(merge(source, { jsonb: { name: 'n' }, columns: { location: null } }), { name: 'n', additionalReferences: [] });
 });
 
 test('unknown codec throws naming it', () => {
@@ -104,9 +91,9 @@ test('split of an in-create-valid payload yields db-valid jsonb', () => {
   const inCreate = ajv.compile(deriveVariant(source, 'in-create'));
   const db = ajv.compile(deriveVariant(source, 'db'));
   const payloads = [
-    { name: 'a', references: [{ referenceID: 'r-1', order: '1' }] },
-    { name: 'b', location: { coordinates: { latitude: 1, longitude: 2 } }, references: [{ referenceID: 'r-1', order: '1' }, { referenceID: 'r-2', order: '2' }] },
-    { name: 'c', location: { coordinates: { latitude: 1, longitude: 2, basis: 'x' }, scale: 's' }, references: [] },
+    { name: 'a', additionalReferences: [{ permid: 'r-1' }] },
+    { name: 'b', location: { coordinates: { latitude: 1, longitude: 2 } }, additionalReferences: [{ permid: 'r-1' }, { permid: 'r-2' }] },
+    { name: 'c', location: { coordinates: { latitude: 1, longitude: 2, basis: 'x' }, scale: 's' }, additionalReferences: [] },
   ];
   for (const p of payloads) {
     assert.equal(inCreate(p), true, JSON.stringify(inCreate.errors));
@@ -114,41 +101,10 @@ test('split of an in-create-valid payload yields db-valid jsonb', () => {
   }
 });
 
-test('referenceList merges stored ids to permids, and no refs.id reaches the payload', () => {
-  const merged = merge(source, {
-    jsonb: { name: 'n' },
-    columns: { reference_id: '7' },
-    children: { additional_collection_refs: [{ id: '501', reference_id: '12' }] },
-  }, refs);
-  assert.deepEqual(merged.references, [{ referenceID: 'r-7', order: '1' }, { referenceID: 'r-12', order: '2' }]);
-});
-
-test('referenceList throws naming itself on an unknown permid or id', () => {
-  assert.throws(
-    () => split(source, { name: 'n', references: [{ referenceID: 'r-nobody', order: '1' }] }, refs),
-    /referenceList: refs.permid has no entry for "r-nobody"/,
-  );
-  assert.throws(
-    () => merge(source, { jsonb: {}, columns: { reference_id: '7' }, children: { additional_collection_refs: [{ id: '1', reference_id: '404' }] } }, refs),
-    /referenceList: refs.id has no entry for "404"/,
-  );
-  assert.throws(() => split(source, { name: 'n', references: [{ referenceID: 'r-7', order: '1' }] }), /referenceList: no codec context loaded for refs/);
-});
-
-test('referenceList writes child rows to the table its annotation names', () => {
-  const schemaLike = {
-    type: 'object',
-    properties: {
-      references: {
-        type: 'array',
-        items: { type: 'object', properties: { referenceID: { type: 'string' }, order: { type: 'string' } } },
-        'x-storage': { table: 'additional_schema_refs', codec: 'referenceList' },
-      },
-    },
-  };
-  const { columns, children } = split(schemaLike, { references: [{ referenceID: 'r-9', order: '2' }, { referenceID: 'r-3', order: '1' }] }, refs);
-  assert.equal(columns.reference_id, '3');
-  assert.deepEqual(children, { additional_schema_refs: [{ reference_id: '9' }] });
+test('referenceList is gone: a source naming it throws as an unknown codec', () => {
+  const old = { type: 'object', properties: { references: { type: 'array', 'x-storage': { table: 'additional_schema_refs', codec: 'referenceList' } } } };
+  assert.throws(() => split(old, { references: [] }, refs), /Unknown codec 'referenceList'/);
+  assert.throws(() => merge(old, { jsonb: {}, columns: {}, children: {} }, refs), /Unknown codec 'referenceList'/);
 });
 
 test('the old codec name is gone', () => {
@@ -175,41 +131,200 @@ test('a superseded reference is never cited: its permid resolves to the head', a
   assert.equal(ctx.get('refs').byValue.get('r-7'), '20');
   assert.equal(ctx.get('refs').byKey.has('7'), false, 'the superseded row is in neither map');
 
-  const { columns, children } = split(source, {
-    name: 'n', references: [{ referenceID: 'r-7', order: '1' }, { referenceID: 'r-12', order: '2' }],
+  const { children } = split(source, {
+    name: 'n', additionalReferences: [{ permid: 'r-7' }, { permid: 'r-12' }],
   }, ctx);
-  assert.equal(columns.reference_id, '20');
-  assert.deepEqual(children.additional_collection_refs, [{ reference_id: '12' }]);
+  assert.deepEqual(children.additional_collection_refs, [{ reference_id: '20' }, { reference_id: '12' }]);
   // A stored id naming a superseded row is a violated invariant, and says so.
-  assert.throws(() => merge(source, { jsonb: {}, columns: { reference_id: '7' } }, ctx), /refs.id has no entry for "7"/);
+  assert.throws(
+    () => merge(source, { jsonb: {}, columns: {}, children: { additional_collection_refs: [{ id: '1', reference_id: '7' }] } }, ctx),
+    /refs.id has no entry for "7"/,
+  );
 });
 
 // ---------- referencePermid (authority) ----------
 
-test('referencePermid resolves permid to id and back, and no refs.id reaches the payload', () => {
-  const { jsonb, columns } = split(authoritySource, { reference: 'r-7', citation: 'c', publishedInReference: true }, refs);
-  assert.equal(columns.reference_id, '7');
-  assert.deepEqual(jsonb, { citation: 'c', publishedInReference: true });
-  const merged = merge(authoritySource, { jsonb, columns: { permid: 'a-1', reference_id: '7' } }, refs);
-  assert.equal(merged.reference, 'r-7');
+// A refs context as loadCodecContext builds it for authority: titles as labels
+// (ref 9 has none), and ref 12 a soft-removed head.
+const labelledRefs = () => {
+  const ctx = refsContext([['7', 'r-7'], ['9', 'r-9'], ['12', 'r-12']]);
+  Object.assign(ctx.get('refs'), {
+    labels: new Map([['7', { title: 'Fossil leaves' }], ['9', {}], ['12', { title: 'Gone' }]]),
+    removed: new Set(['12']),
+  });
+  return ctx;
+};
+
+test('referencePermid merges the stored id to a link object, and no refs.id reaches the payload', () => {
+  const merged = merge(authoritySource, { jsonb: { citation: 'c' }, columns: { permid: 'a-1', reference_id: '7' } }, labelledRefs());
+  assert.deepEqual(merged.reference, { permid: 'r-7', title: 'Fossil leaves' });
   assert.equal(merged.permid, 'a-1');
+  assert.equal(JSON.stringify(merged).includes('"7"'), false);
+});
+
+test('referencePermid: an untitled reference has no title key; a removed one merges to null', () => {
+  const ctx = labelledRefs();
+  assert.deepEqual(merge(authoritySource, { jsonb: {}, columns: { reference_id: '9' } }, ctx).reference, { permid: 'r-9' });
+  assert.equal(merge(authoritySource, { jsonb: {}, columns: { reference_id: '12' } }, ctx).reference, null);
+  // Without labels in the context the link still resolves, label-less.
+  assert.deepEqual(merge(authoritySource, { jsonb: {}, columns: { reference_id: '7' } }, refs).reference, { permid: 'r-7' });
+});
+
+test('referencePermid split reads the permid only, and refuses a removed reference', () => {
+  const ctx = labelledRefs();
+  const { jsonb, columns } = split(authoritySource, { reference: { permid: 'r-7', title: 'Fossil leaves' }, citation: 'c' }, ctx);
+  assert.deepEqual(columns, { reference_id: '7' });
+  assert.deepEqual(jsonb, { citation: 'c' }, 'the label reaches neither the jsonb nor a column');
+  assert.throws(() => split(authoritySource, { reference: { permid: 'r-12' } }, ctx), /referencePermid: reference "r-12" has been removed/);
+});
+
+test('referencePermid round trip: merge, drop root read-only keys, split', () => {
+  const stored = { jsonb: { citation: 'c', publishedInReference: true }, columns: { permid: 'a-1', reference_id: '7' } };
+  const { permid, ...writable } = merge(authoritySource, stored, labelledRefs());
+  assert.deepEqual(split(authoritySource, writable, labelledRefs()).columns, { reference_id: '7' });
 });
 
 test('referencePermid resolves a superseded reference to its head', () => {
   // Built as a loaded context would be: ref 7 superseded by 20, heads only.
   const heads = refsContext([['20', 'r-7']]);
-  assert.equal(split(authoritySource, { reference: 'r-7' }, heads).columns.reference_id, '20');
+  assert.equal(split(authoritySource, { reference: { permid: 'r-7' } }, heads).columns.reference_id, '20');
   assert.throws(() => merge(authoritySource, { jsonb: {}, columns: { reference_id: '7' } }, heads), /referencePermid: refs.id has no entry for "7"/);
 });
 
 test('referencePermid: absent emits nothing; unknown permid throws naming the codec', () => {
   assert.deepEqual(split(authoritySource, { citation: 'c' }, refs).columns, {});
   assert.deepEqual(merge(authoritySource, { jsonb: {}, columns: { reference_id: null } }, refs), {});
-  assert.throws(() => split(authoritySource, { reference: 'r-nobody' }, refs), /referencePermid: refs.permid has no entry for "r-nobody"/);
+  assert.throws(() => split(authoritySource, { reference: { permid: 'r-nobody' } }, refs), /referencePermid: refs.permid has no entry for "r-nobody"/);
 });
 
 test('codecKeyColumns maps refs to authorities.reference_id', () => {
   assert.deepEqual(codecKeyColumns(authoritySource), new Map([['refs', new Set(['reference_id'])]]));
+});
+
+// ---------- collection references: referencePermid + referenceLinks ----------
+
+// Collection rows: ref 7 is the primary and also a child row, as Classic's
+// secondary_refs usually has it; ref 9 is untitled; ref 12 is soft-removed.
+const storedCollection = (childRefs, primary = '7') => ({
+  jsonb: { name: 'c' },
+  columns: { permid: 'c-1', reference_id: primary },
+  children: { additional_collection_refs: childRefs.map(([id, ref]) => ({ id, reference_id: ref })) },
+});
+
+test('a single-property codec learns its property name; wgs84Point, serving two, does not', () => {
+  // referencePermid emits under each source's own property name.
+  const merged = merge(collectionSource, { ...storedCollection([]), columns: { reference_id: '7', location: { type: 'Point', coordinates: [2, 1] } } }, labelledRefs());
+  assert.deepEqual(merged.primaryReference, { permid: 'r-7', title: 'Fossil leaves' });
+  assert.equal('reference' in merged, false);
+  assert.deepEqual(merge(authoritySource, { jsonb: {}, columns: { reference_id: '7' } }, labelledRefs()).reference, { permid: 'r-7', title: 'Fossil leaves' });
+  // wgs84Point still names its own keys.
+  assert.deepEqual(merged.location.coordinates, { latitude: 1, longitude: 2 });
+});
+
+test('referenceLinks merges child rows by id to labelled links, keeping a repeated primary', () => {
+  const merged = merge(collectionSource, storedCollection([['31', '9'], ['30', '7']]), labelledRefs());
+  assert.deepEqual(merged.primaryReference, { permid: 'r-7', title: 'Fossil leaves' });
+  assert.deepEqual(merged.additionalReferences, [{ permid: 'r-7', title: 'Fossil leaves' }, { permid: 'r-9' }]);
+  assert.equal(JSON.stringify(merged).includes('"30"'), false, 'no row or refs id reaches the payload');
+});
+
+test('referenceLinks omits a removed reference, and emits [] when nothing remains', () => {
+  const ctx = labelledRefs();
+  assert.deepEqual(merge(collectionSource, storedCollection([['30', '12'], ['31', '9']]), ctx).additionalReferences, [{ permid: 'r-9' }]);
+  assert.deepEqual(merge(collectionSource, storedCollection([['30', '12']]), ctx).additionalReferences, []);
+  assert.deepEqual(merge(collectionSource, storedCollection([]), ctx).additionalReferences, []);
+  assert.deepEqual(merge(collectionSource, { jsonb: { name: 'c' }, columns: { reference_id: '7' } }, ctx).additionalReferences, [], 'no children given at all');
+  // A removed primary reads as null, as on authority.
+  assert.equal(merge(collectionSource, storedCollection([], '12'), ctx).primaryReference, null);
+});
+
+test('referenceLinks split reads permids only, in item order, and refuses a removed reference', () => {
+  const ctx = labelledRefs();
+  const { columns, children, jsonb } = split(collectionSource, {
+    name: 'c',
+    primaryReference: { permid: 'r-7', title: 'Fossil leaves' },
+    additionalReferences: [{ permid: 'r-9', href: '/x' }, { permid: 'r-7', title: 'Fossil leaves' }],
+  }, ctx);
+  assert.deepEqual(columns, { reference_id: '7' });
+  assert.deepEqual(children, { additional_collection_refs: [{ reference_id: '9' }, { reference_id: '7' }] });
+  assert.deepEqual(jsonb, { name: 'c' });
+  assert.deepEqual(split(collectionSource, { name: 'c', additionalReferences: [] }, ctx).children, { additional_collection_refs: [] });
+  assert.deepEqual(split(collectionSource, { name: 'c' }, ctx).children, {}, 'absent emits nothing');
+  assert.throws(() => split(collectionSource, { name: 'c', additionalReferences: [{ permid: 'r-12' }] }, ctx), /referenceLinks: reference "r-12" has been removed/);
+  assert.throws(() => split(collectionSource, { name: 'c', additionalReferences: [{ permid: 'r-nobody' }] }, ctx), /referenceLinks: refs.permid has no entry for "r-nobody"/);
+  assert.throws(() => merge(collectionSource, storedCollection([['30', '404']]), ctx), /referenceLinks: refs.id has no entry for "404"/);
+});
+
+test('collection round trip with a repeated primary: merge, drop root read-only keys, split', () => {
+  const stored = storedCollection([['30', '7'], ['31', '9']]);
+  const { permid, legacyIDs, ...writable } = merge(collectionSource, stored, labelledRefs());
+  const parts = split(collectionSource, writable, labelledRefs());
+  assert.equal(parts.columns.reference_id, '7');
+  assert.deepEqual(parts.children.additional_collection_refs.map((r) => r.reference_id), ['7', '9']);
+  assert.deepEqual(parts.jsonb, stored.jsonb);
+});
+
+// ---------- schema references: the collection's codecs on additional_schema_refs ----------
+
+const storedSchema = (childRefs, primary = '7') => ({
+  jsonb: { title: 's', year: '2023' },
+  columns: { permid: 's-1', reference_id: primary },
+  children: { additional_schema_refs: childRefs.map(([id, ref]) => ({ id, reference_id: ref })) },
+});
+
+test('referencePermid merges the schema primary, and no references key is emitted', () => {
+  const merged = merge(schemaSource, storedSchema([['40', '7']]), labelledRefs());
+  assert.deepEqual(merged.primaryReference, { permid: 'r-7', title: 'Fossil leaves' });
+  assert.deepEqual(merged.additionalReferences, [{ permid: 'r-7', title: 'Fossil leaves' }], 'a repeated primary is kept');
+  assert.equal('references' in merged, false);
+  assert.equal(JSON.stringify(merged).includes('"40"'), false, 'no row or refs id reaches the payload');
+  assert.deepEqual(merge(schemaSource, storedSchema([]), labelledRefs()).additionalReferences, []);
+});
+
+test('referenceLinks writes the child table the schema annotation names', () => {
+  const { columns, children, jsonb } = split(schemaSource, {
+    title: 's', year: '2023',
+    primaryReference: { permid: 'r-7' },
+    additionalReferences: [{ permid: 'r-9' }, { permid: 'r-7' }],
+  }, labelledRefs());
+  assert.deepEqual(columns, { reference_id: '7' });
+  assert.deepEqual(children, { additional_schema_refs: [{ reference_id: '9' }, { reference_id: '7' }] });
+  assert.deepEqual(jsonb, { title: 's', year: '2023' });
+});
+
+test('codecKeySites lists the schema\'s reference_id and additional_schema_refs rows', () => {
+  assert.deepEqual(codecKeySites(schemaSource), new Map([
+    ['refs', { columns: ['reference_id'], children: { additional_schema_refs: ['reference_id'] } }],
+  ]));
+});
+
+test('collectCodecSources gives the collection one refs source, labelled, for both link fields', () => {
+  assert.deepEqual(collectCodecSources(collectionSource), [
+    { table: 'refs', key: 'id', value: 'permid', versioned: true, payload: 'reference', labels: ['title'] },
+  ]);
+});
+
+test('codecKeyColumns leaves refs out for the collection, whose child rows also hold refs ids', () => {
+  assert.equal(codecKeyColumns(collectionSource).has('refs'), false);
+  assert.equal(codecKeyColumns(source).has('refs'), false, 'a child-table codec alone');
+  assert.deepEqual(codecKeyColumns(authoritySource), new Map([['refs', new Set(['reference_id'])]]));
+});
+
+test('codecKeySites lists the parent columns and child-row columns holding a source\'s keys', () => {
+  assert.deepEqual(codecKeySites(collectionSource), new Map([
+    ['refs', { columns: ['reference_id'], children: { additional_collection_refs: ['reference_id'] } }],
+  ]));
+  assert.deepEqual(codecKeySites(authoritySource), new Map([['refs', { columns: ['reference_id'], children: {} }]]));
+});
+
+test('storageSelects selects a column through its codec\'s expression', () => {
+  assert.deepEqual(storageSelects(collectionSource), [
+    { column: 'permid', expression: '"permid"' },
+    { column: 'location', expression: 'ST_AsGeoJSON("location")::json' },
+    { column: 'reference_id', expression: '"reference_id"' },
+  ]);
+  assert.deepEqual(storageSelects(authoritySource).map((s) => s.column).sort(), ['permid', 'reference_id']);
+  assert.equal(getCodec('wgs84Point').select('location'), 'ST_AsGeoJSON("location")::json');
 });
 
 // ---------- Codec context ----------
@@ -248,7 +363,49 @@ test('collectCodecSources unions what the codecs declare, once each', () => {
     { table: 'dictionaries.roles', key: 'id', value: 'name' },
     { table: 'persons', key: 'id', value: 'permid' },
   ]);
-  assert.deepEqual(collectCodecSources(source), [{ table: 'refs', key: 'id', value: 'permid', versioned: true }]);
+  assert.deepEqual(collectCodecSources(source), [{ table: 'refs', key: 'id', value: 'permid', versioned: true, payload: 'reference' }]);
+});
+
+test('collectCodecSources asks a link\'s source for its label, merging labels across duplicates', () => {
+  assert.deepEqual(collectCodecSources(authoritySource), [
+    { table: 'refs', key: 'id', value: 'permid', versioned: true, payload: 'reference', labels: ['title'] },
+  ]);
+  const twoLinks = structuredClone(authoritySource);
+  twoLinks.properties.reference = { ...twoLinks.properties.reference, 'x-link': { target: 'references', label: 'doi' } };
+  twoLinks.properties.also = structuredClone(authoritySource.properties.reference);
+  assert.deepEqual(collectCodecSources(twoLinks)[0].labels.sort(), ['doi', 'title']);
+});
+
+test('a source with labels must name its payload column, and its labels must be identifiers', async () => {
+  const fakePg = { async query() { return { rows: [] }; } };
+  await assert.rejects(() => loadCodecContext(fakePg, [{ table: 'refs', key: 'id', value: 'permid', labels: ['title'] }]), /must name its payload column/);
+  await assert.rejects(() => loadCodecContext(fakePg, [{ table: 'refs', key: 'id', value: 'permid', payload: 'reference', labels: ["title'; --"] }]), /unsafe identifier/);
+});
+
+test('loadCodecContext reads labels and the removed set in the same query', async () => {
+  const issued = [];
+  const rows = [
+    { k: '7', v: 'r-7', l0: 'Fossil leaves', removed: false },
+    { k: '9', v: 'r-9', l0: null, removed: false },
+    { k: '12', v: 'r-12', l0: 'Gone', removed: true },
+  ];
+  const fakePg = { async query(sql, params) { issued.push({ sql, params }); return { rows }; } };
+  const ctx = await loadCodecContext(fakePg, collectCodecSources(authoritySource), { refs: { column: 'id', values: ['7', '9', '12'] } });
+  assert.equal(issued.length, 1);
+  assert.equal(
+    issued[0].sql,
+    `SELECT "id" AS k, "permid" AS v, "reference"->>'title' AS l0, COALESCE(removed, false) AS removed FROM "refs" WHERE succeeded_by_id IS NULL AND "id" = ANY($1)`,
+  );
+  const refsEntry = ctx.get('refs');
+  assert.deepEqual(refsEntry.labels.get('7'), { title: 'Fossil leaves' });
+  assert.deepEqual(refsEntry.labels.get('9'), {}, 'a NULL label is left out');
+  assert.deepEqual([...refsEntry.removed], ['12']);
+  assert.equal(refsEntry.byKey.get('12'), 'r-12', 'a removed head stays resolvable');
+});
+
+test('storageColumns lists the columns x-storage names, and no child tables', () => {
+  assert.deepEqual(storageColumns(authoritySource).sort(), ['permid', 'reference_id']);
+  assert.deepEqual(storageColumns(source).sort(), ['location', 'permid']);
 });
 
 test('collectCodecSources rejects an x-enumFrom that disagrees with the codec', () => {
@@ -360,7 +517,7 @@ test('a versioned source is read from heads only, alone or with a selection', as
   const personsSource = { table: 'persons', key: 'id', value: 'permid' };
 
   await loadCodecContext(fakePg, [refsSource, personsSource]);
-  assert.equal(issued[0].sql, 'SELECT "id" AS k, "permid" AS v FROM "refs" WHERE succeeded_by_id IS NULL');
+  assert.equal(issued[0].sql, 'SELECT "id" AS k, "permid" AS v, COALESCE(removed, false) AS removed FROM "refs" WHERE succeeded_by_id IS NULL');
   assert.equal(issued[1].sql.includes('succeeded_by_id'), false, 'an unversioned source is not filtered');
 
   issued.length = 0;

@@ -1,4 +1,4 @@
-// The real collection, specimen, person, reference, authority, schema, character and state sources: every variant resolves and
+// The real collection, specimen, person, reference, authority, schema, character, state and taxon sources: every variant resolves and
 // compiles in strict mode, and the variant rules hold on them. DB-free (fixture
 // enums).
 import { test } from 'node:test';
@@ -13,7 +13,9 @@ import * as authorityModule from '../authority.schema.js';
 import * as schemaModule from '../schema.schema.js';
 import * as characterModule from '../character.schema.js';
 import * as stateModule from '../state.schema.js';
-import { applyEnums } from '../lib/enums.js';
+import * as taxonModule from '../taxon.schema.js';
+import { opinionAttributionSchema } from '../opinionAttribution.schema.js';
+import { applyEnums, collectEnumSources } from '../lib/enums.js';
 import { deriveVariant, VARIANTS } from '../lib/variants.js';
 import { createAjv } from '../lib/ajv.js';
 import { collectCodecSources, split, merge } from '../lib/storage.js';
@@ -27,6 +29,8 @@ enums.set('admin1.iso', ['US-MT', 'CA-AB']);
 enums.set('maritime.iho_name', ['Arctic Ocean']);
 enums.set('roles.name', ['Superadmin', 'Admin', 'Authorizer', 'Enterer', 'Student', 'Person']);
 enums.set('book_types.name', ['monograph', 'compendium', 'Ph.D. thesis', 'M.S. thesis', 'guidebook', 'other']);
+enums.set('taxonomy_ranks.taxonomy_rank', ['species', 'genus', 'family', 'unranked']);
+enums.set('nomenclatural_statuses.status', ['nomen dubium', 'nomen nudum']);
 enums.set('languages.name', ['Chinese', 'English', 'French', 'German', 'Italian', 'Japanese', 'Portuguese', 'Russian', 'Spanish', 'other', 'unknown']);
 
 const sources = {
@@ -39,7 +43,11 @@ const sources = {
   schema: schemaModule.schemaSource,
   character: characterModule.characterSource,
   state: stateModule.stateSource,
+  taxon: taxonModule.taxonSource,
 };
+// A read-only source (root readOnly: true) has only db and out.
+const variantsOf = (entity) => (sources[entity].readOnly ? ['db', 'out'] : VARIANTS);
+const writable = Object.keys(sources).filter((entity) => !sources[entity].readOnly);
 const compile = (entity, variant) => createAjv().compile(deriveVariant(applyEnums(sources[entity], enums), variant));
 
 test('modules export only the annotated source', () => {
@@ -51,18 +59,29 @@ test('modules export only the annotated source', () => {
   assert.deepEqual(Object.keys(schemaModule).sort(), ['default', 'schemaSource']);
   assert.deepEqual(Object.keys(characterModule).sort(), ['characterSource', 'default']);
   assert.deepEqual(Object.keys(stateModule).sort(), ['default', 'stateSource']);
+  assert.deepEqual(Object.keys(taxonModule).sort(), ['default', 'taxonSource']);
   // Plus the publication type table, which the PBot refs migration filters fields by.
   assert.deepEqual(Object.keys(referenceModule).sort(), ['PUBLICATION_TYPES', 'SHARED_FIELDS', 'default', 'referenceSource']);
 });
 
 test('every variant of every entity compiles in strict mode', () => {
-  for (const entity of Object.keys(sources)) for (const v of VARIANTS) assert.ok(compile(entity, v), `${entity}.${v}`);
+  for (const entity of Object.keys(sources)) for (const v of variantsOf(entity)) assert.ok(compile(entity, v), `${entity}.${v}`);
+});
+
+// One draft everywhere: the one createAjv() compiles and OpenAPI 3.1 applies.
+test('every schema and every variant declares draft 2020-12', () => {
+  const DRAFT = 'https://json-schema.org/draft/2020-12/schema';
+  assert.equal(opinionAttributionSchema.$schema, DRAFT, 'opinionAttribution');
+  for (const [entity, source] of Object.entries(sources)) {
+    assert.equal(source.$schema, DRAFT, entity);
+    for (const v of variantsOf(entity)) assert.equal(deriveVariant(source, v).$schema, DRAFT, `${entity}.${v}`);
+  }
 });
 
 const createCollection = (administrativeArea) => ({
   name: 'c',
   context: {},
-  references: [{ referenceID: '1', order: '1' }],
+  primaryReference: { permid: '1' },
   location: {
     toponym: { administrativeArea },
     coordinates: { latitude: 1, longitude: 2 },
@@ -78,13 +97,53 @@ test('in-create: admin1 required for listed countries only', () => {
   assert.equal(validate(createCollection({ admin0: 'FR' })), true, JSON.stringify(validate.errors));
 });
 
-test('in-create: coordinates, references and context required', () => {
+test('in-create: coordinates, primary reference and context required', () => {
   const validate = compile('collection', 'in-create');
   const c = createCollection({ admin0: 'FR' });
   delete c.location.coordinates.longitude;
   assert.equal(validate(c), false);
-  const { references, ...noRefs } = createCollection({ admin0: 'FR' });
-  assert.equal(validate(noRefs), false);
+  const { primaryReference, ...noPrimary } = createCollection({ admin0: 'FR' });
+  assert.equal(validate(noPrimary), false);
+  assert.ok(validate.errors.some((e) => e.params?.missingProperty === 'primaryReference'));
+  const { context, ...noContext } = createCollection({ admin0: 'FR' });
+  assert.equal(validate(noContext), false);
+});
+
+test('collection in-create: additional references are optional links carrying only a permid', () => {
+  const validate = compile('collection', 'in-create');
+  const body = createCollection({ admin0: 'FR' });
+  assert.equal('additionalReferences' in body, false);
+  assert.equal(validate(body), true, JSON.stringify(validate.errors));
+  assert.equal(validate({ ...body, additionalReferences: [] }), true, JSON.stringify(validate.errors));
+  assert.equal(validate({ ...body, additionalReferences: [{ permid: 'r-2' }, { permid: '1' }] }), true, 'the primary may repeat');
+  assert.equal(validate({ ...body, additionalReferences: [{ permid: 'r-2', title: 'x' }] }), false);
+  assert.ok(validate.errors.some((e) => e.instancePath === '/additionalReferences/0' && e.params?.additionalProperty === 'title'));
+  assert.equal(validate({ ...body, additionalReferences: [{ permid: 'r-2', order: '2' }] }), false, 'no order');
+  assert.equal(validate({ ...body, primaryReference: { permid: '1', title: 'x' } }), false);
+  assert.equal(validate({ ...body, references: [{ permid: '1', order: '1' }] }), false, 'references[] is gone');
+});
+
+test('collection db declares neither reference field', () => {
+  const db = deriveVariant(sources.collection, 'db');
+  for (const name of ['permid', 'primaryReference', 'additionalReferences', 'references']) {
+    assert.equal(name in db.properties, false, name);
+  }
+});
+
+test('collection out: a null primary, an empty or repeating set of links, and no null items', () => {
+  const validate = compile('collection', 'out');
+  const href = (p) => `/api/v1/references/${p}`;
+  const read = (primaryReference, additionalReferences) => ({
+    ...createCollection({ admin0: 'FR' }), permid: 'c-1', primaryReference, additionalReferences,
+  });
+  const r1 = { permid: 'r-1', title: 'T', href: href('r-1') };
+  const r2 = { permid: 'r-2', href: href('r-2') };
+  assert.equal(validate(read(r1, [r1, r2])), true, JSON.stringify(validate.errors));
+  assert.equal(validate(read(r1, [])), true, 'no additional references');
+  assert.equal(validate(read(null, [r2])), true, 'a removed primary');
+  assert.equal(validate(read(r1, [null])), false, 'a removed item is omitted, not null');
+  assert.equal(validate(read(r1, [{ ...r2, order: '2' }])), false, 'no order');
+  assert.equal(validate(read(r1, [{ ...r2, authors: [] }])), false);
 });
 
 test('in-create rejects read-only fields', () => {
@@ -110,7 +169,7 @@ test('db: legacy-shaped row passes; top-level permid fails; admin1 rule absent',
 });
 
 test('patch-guard on the real sources', () => {
-  for (const entity of Object.keys(sources)) {
+  for (const entity of writable) {
     const validate = compile(entity, 'patch-guard');
     assert.equal(validate({ notes: null, name: 'x' }), true);
     assert.equal(validate({ legacyIDs: { oldpbdbID: '1' } }), false);
@@ -340,7 +399,7 @@ const storedAuthority = () => ({
   year: '2022',
   publishedInReference: true,
 });
-const createAuthority = () => ({ reference: 'r-1', citation: 'Gaudry 1865', descriptors: ['Gaudry'], year: '1865', publishedInReference: false });
+const createAuthority = () => ({ reference: { permid: 'r-1' }, citation: 'Gaudry 1865', descriptors: ['Gaudry'], year: '1865', publishedInReference: false });
 
 test('authority db declares neither permid nor reference and requires only the legacy two', () => {
   const db = deriveVariant(sources.authority, 'db');
@@ -376,9 +435,18 @@ test('authority in-create requires reference and a four-digit year when one is g
   assert.equal(validate({ ...createAuthority(), year: 'abc' }), false);
   assert.equal(validate({ ...createAuthority(), year: '1969' }), true);
   // The sentinel stays enterable, without a year.
-  assert.equal(validate({ reference: 'r-1', citation: 'authority unknown', descriptors: [], publishedInReference: false }), true, JSON.stringify(validate.errors));
+  assert.equal(validate({ reference: { permid: 'r-1' }, citation: 'authority unknown', descriptors: [], publishedInReference: false }), true, JSON.stringify(validate.errors));
   assert.equal(validate({ ...createAuthority(), permid: 'x' }), false);
   assert.equal(validate({ ...createAuthority(), legacyIDs: { oldpbdbIDs: ['1'] } }), false);
+});
+
+test('authority in-create takes the reference as a link object carrying only its permid', () => {
+  const validate = compile('authority', 'in-create');
+  for (const reference of ['r-1', {}, null, { permid: 'r-1', title: 'T' }, { permid: 'r-1', href: '/x' }]) {
+    assert.equal(validate({ ...createAuthority(), reference }), false, JSON.stringify(reference));
+  }
+  assert.equal(validate({ ...createAuthority(), reference: { permid: 'r-1', title: 'T' } }), false);
+  assert.ok(validate.errors.some((e) => e.instancePath === '/reference' && e.params?.additionalProperty === 'title'));
 });
 
 test('authority patch-guard blocks exactly permid and legacyIDs', () => {
@@ -387,9 +455,14 @@ test('authority patch-guard blocks exactly permid and legacyIDs', () => {
   assert.equal(compile('authority', 'patch-guard')({ reference: 'r-2', year: '1999' }), true);
 });
 
-test('authority out requires reference', () => {
+test('authority out requires reference: a link object, or null when the reference was removed', () => {
   const validate = compile('authority', 'out');
-  assert.equal(validate({ ...storedAuthority(), permid: 'a-1', reference: 'r-1' }), true, JSON.stringify(validate.errors));
+  const read = (reference) => ({ ...storedAuthority(), permid: 'a-1', reference });
+  assert.equal(validate(read({ permid: 'r-1', title: 'T', href: '/api/v1/references/r-1' })), true, JSON.stringify(validate.errors));
+  assert.equal(validate(read({ permid: 'r-1', href: '/api/v1/references/r-1' })), true, 'an untitled reference');
+  assert.equal(validate(read(null)), true, 'a removed reference');
+  assert.equal(validate(read('r-1')), false, 'the string form is gone');
+  assert.equal(validate(read({ permid: 'r-1', authors: [] })), false);
   assert.equal(validate({ ...storedAuthority(), permid: 'a-1' }), false);
 });
 
@@ -404,10 +477,10 @@ const storedSchema = () => ({
   partsPreserved: ['leaf'],
   notableFeatures: ['trace fossils (e.g., insect damage)'],
 });
-const createSchema = () => ({ ...storedSchema(), legacyIDs: undefined, references: [{ referenceID: 'r-1', order: '1' }] });
+const createSchema = () => ({ ...storedSchema(), legacyIDs: undefined, primaryReference: { permid: 'r-1' } });
 const withoutUndefined = (o) => JSON.parse(JSON.stringify(o));
 
-test('schema db declares neither permid nor references and requires only title and year', () => {
+test('schema db declares neither permid nor a reference field and requires only title and year', () => {
   const db = deriveVariant(sources.schema, 'db');
   assert.deepEqual(Object.keys(db.properties), ['legacyIDs', 'title', 'year', 'purpose', 'authors', 'acknowledgments', 'partsPreserved', 'notableFeatures']);
   assert.deepEqual(db.required, ['title', 'year']);
@@ -432,7 +505,8 @@ test('schema db: a stored payload passes; legacy rules still hold', () => {
   assert.equal(validate({ ...storedSchema(), authors: [] }), false);
   assert.equal(validate({ ...storedSchema(), authors: [{ order: 0, givenName: 'a', familyName: 'b' }] }), false);
   assert.equal(validate({ ...storedSchema(), characters: [] }), false);
-  assert.equal(validate({ ...storedSchema(), references: [{ referenceID: 'r-1', order: '1' }] }), false, 'references live in a column and child rows');
+  assert.equal(validate({ ...storedSchema(), references: [{ permid: 'r-1', order: '1' }] }), false, 'references[] is gone');
+  assert.equal(validate({ ...storedSchema(), primaryReference: { permid: 'r-1' } }), false, 'references live in a column and child rows');
 });
 
 test('schema db: dictionary values are enforced', () => {
@@ -441,16 +515,20 @@ test('schema db: dictionary values are enforced', () => {
   assert.equal(validate({ ...storedSchema(), notableFeatures: ['pith structure'] }), false);
 });
 
-test('schema in-create requires references with permids and a four-digit year', () => {
+test('schema in-create requires a primary reference and a four-digit year', () => {
   const validate = compile('schema', 'in-create');
   const body = withoutUndefined(createSchema());
+  assert.equal('additionalReferences' in body, false);
   assert.equal(validate(body), true, JSON.stringify(validate.errors));
-  const { references, ...noReferences } = body;
-  assert.equal(validate(noReferences), false);
-  assert.ok(validate.errors.some((e) => e.params?.missingProperty === 'references'));
-  assert.equal(validate({ ...body, references: [] }), false);
-  assert.equal(validate({ ...body, references: [{ order: '1' }] }), false);
-  assert.ok(validate.errors.some((e) => e.params?.missingProperty === 'referenceID'));
+  const { primaryReference, ...noPrimary } = body;
+  assert.equal(validate(noPrimary), false);
+  assert.ok(validate.errors.some((e) => e.params?.missingProperty === 'primaryReference'));
+  assert.equal(validate({ ...noPrimary, references: [{ permid: 'r-1', order: '1' }] }), false, 'references[] is gone');
+  assert.equal(validate({ ...body, additionalReferences: [] }), true, JSON.stringify(validate.errors));
+  assert.equal(validate({ ...body, additionalReferences: [{ permid: 'r-1' }] }), true, 'the primary may repeat');
+  assert.equal(validate({ ...body, additionalReferences: [{ permid: 'r-2', order: '2' }] }), false, 'no order');
+  assert.ok(validate.errors.some((e) => e.instancePath === '/additionalReferences/0' && e.params?.additionalProperty === 'order'));
+  assert.equal(validate({ ...body, primaryReference: { permid: 'r-1', title: 'x' } }), false, 'the label is read-only');
   assert.equal(validate({ ...body, year: '0' }), false);
   assert.equal(validate({ ...body, year: 'abc' }), false);
   assert.equal(validate({ ...body, year: '2023' }), true);
@@ -458,16 +536,47 @@ test('schema in-create requires references with permids and a four-digit year', 
   assert.equal(validate({ ...body, legacyIDs: { pbotID: 'p' } }), false);
 });
 
+test('schema references are annotated as on collection', () => {
+  const { primaryReference, additionalReferences } = sources.schema.properties;
+  assert.deepEqual(primaryReference['x-storage'], { column: 'reference_id', codec: 'referencePermid' });
+  assert.deepEqual(primaryReference['x-link'], { target: 'references', label: 'title' });
+  assert.deepEqual(additionalReferences['x-storage'], { table: 'additional_schema_refs', codec: 'referenceLinks' });
+  assert.deepEqual(additionalReferences.items['x-link'], { target: 'references', label: 'title' });
+  for (const node of [primaryReference, additionalReferences, additionalReferences.items]) assert.equal('readOnly' in node, false);
+  for (const key of ['minItems', 'uniqueItems']) assert.equal(key in additionalReferences, false, key);
+  assert.equal('references' in sources.schema.properties, false);
+  assert.deepEqual(sources.schema.required, ['title', 'year']);
+});
+
+test('in-create: a reference item keyed by the old name referenceID is rejected for its missing permid', () => {
+  const cases = {
+    collection: [createCollection({ admin0: 'FR' }), { additionalReferences: [{ referenceID: 'r-1' }] }],
+    schema: [withoutUndefined(createSchema()), { additionalReferences: [{ referenceID: 'r-1' }] }],
+  };
+  for (const [entity, [body, oldKey]] of Object.entries(cases)) {
+    const validate = compile(entity, 'in-create');
+    assert.equal(validate(body), true, `${entity}: ${JSON.stringify(validate.errors)}`);
+    assert.equal(validate({ ...body, ...oldKey }), false, entity);
+    assert.ok(validate.errors.some((e) => e.params?.missingProperty === 'permid'), entity);
+  }
+});
+
 test('schema patch-guard blocks exactly permid and legacyIDs', () => {
   const guard = deriveVariant(sources.schema, 'patch-guard');
   assert.deepEqual(guard.propertyNames.not.enum, ['permid', 'legacyIDs']);
 });
 
-test('schema out requires references', () => {
+test('schema out: a repeated primary, a null primary, an empty set, and no order', () => {
   const validate = compile('schema', 'out');
-  const references = [{ referenceID: 'r-1', order: '1' }];
-  assert.equal(validate({ ...storedSchema(), permid: 's-1', references }), true, JSON.stringify(validate.errors));
-  assert.equal(validate({ ...storedSchema(), permid: 's-1' }), false);
+  const href = (p) => `/api/v1/references/${p}`;
+  const read = (primaryReference, additionalReferences) => ({ ...storedSchema(), permid: 's-1', primaryReference, additionalReferences });
+  const r1 = { permid: 'r-1', title: 'T', href: href('r-1') };
+  const r2 = { permid: 'r-2', href: href('r-2') };
+  assert.equal(validate(read(r1, [r1])), true, JSON.stringify(validate.errors));
+  assert.equal(validate(read(r1, [])), true, 'no additional references');
+  assert.equal(validate(read(null, [r2])), true, 'a removed primary');
+  assert.equal(validate(read(r1, [{ ...r2, order: '2' }])), false, 'no order');
+  assert.equal(validate({ ...storedSchema(), permid: 's-1', references: [{ permid: 'r-1', order: '1' }] }), false, 'references[] is gone');
 });
 
 // ---------- character and state ----------
@@ -508,6 +617,13 @@ for (const entity of ['character', 'state']) {
   });
 }
 
+test('character and state declare no codec, so the schema tree merges them with no codec context', () => {
+  for (const entity of ['character', 'state']) {
+    assert.deepEqual(collectCodecSources(sources[entity]), [], entity);
+    assert.equal(JSON.stringify(sources[entity]).includes('"codec"'), false, entity);
+  }
+});
+
 test('state in-create: quantitative is settable and optional', () => {
   const validate = compile('state', 'in-create');
   assert.equal(validate({ name: 'length', quantitative: true }), true, JSON.stringify(validate.errors));
@@ -523,4 +639,30 @@ test('state quantitative round-trips through its column, and is absent from spli
   const { permid, ...writable } = merged;
   assert.deepEqual(split(sources.state, writable), { jsonb: { name: 'quantity' }, columns: { quantitative: true }, children: {} });
   assert.deepEqual(split(sources.state, { name: 'ovate' }).columns, {});
+});
+
+// ---------- taxon ----------
+
+test('taxon is read-only: no write variants, and nothing in jsonb', () => {
+  assert.equal(sources.taxon.readOnly, true);
+  for (const v of ['in-create', 'patch-guard']) assert.throws(() => deriveVariant(sources.taxon, v), /read-only/);
+  assert.deepEqual(deriveVariant(sources.taxon, 'db').properties, {});
+  for (const [name, prop] of Object.entries(sources.taxon.properties)) assert.ok(prop['x-storage']?.column, name);
+});
+
+test('taxon out validates a taxon read, with null status, authority and accepted links', () => {
+  const validate = createAjv().compile(deriveVariant(sources.taxon, 'out'));
+  const taxon = {
+    permid: 't-1', name: 'Calymene blumenbachii', rank: 'species', nomenclaturalStatus: null,
+    authority: { permid: 'aut-1', citation: 'Brongniart 1822', href: '/api/v1/authorities/aut-1' },
+    accepted: { permid: 't-1', name: 'Calymene blumenbachii', href: '/api/v1/taxa/t-1' },
+  };
+  assert.equal(validate(taxon), true, JSON.stringify(validate.errors));
+  assert.equal(validate({ ...taxon, authority: null, nomenclaturalStatus: 'nomen dubium' }), true, 'no authority');
+  assert.equal(validate({ ...taxon, rank: 'not a dictionary rank' }), true, 'dictionary enums are not enforced on out');
+  assert.equal(validate({ ...taxon, containingTaxa: null }), false, 'the chain is not part of the source');
+  assert.deepEqual(collectEnumSources(sources.taxon), [
+    { table: 'taxonomy_ranks', column: 'taxonomy_rank' },
+    { table: 'nomenclatural_statuses', column: 'status' },
+  ]);
 });

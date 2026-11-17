@@ -1,0 +1,20 @@
+{
+  "name": "migrations",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "node --test \"src/tests/*.test.js\""
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "dependencies": {
+    "ajv": "^8.20.0",
+    "dotenv": "^17.3.1",
+    "mysql2": "^3.17.1",
+    "pg": "^8.18.0",
+    "uuid": "^14.0.1"
+  }
+}

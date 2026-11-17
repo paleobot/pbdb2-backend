@@ -83,6 +83,49 @@ should not be revived as a state rule.
 
 *Reasoning:* the character/state design (Context, D5).
 
+## A schema as a form: domain tree or JSON Schema
+
+**Open.** A client building a description form from a schema could get the domain tree that
+`schema-tree.js` returns today, or a JSON Schema generated from it: characters as `properties`,
+states as `enum` values, quantitative states as `type: "number"`.
+
+- For JSON Schema: form libraries render it directly, the same document validates the submitted
+  description, and any client can read it without knowing the domain model.
+- Against: it loses what JSON Schema has no word for (order, legacy IDs, `definition` as distinct
+  from `description`) unless carried in `x-` fields. Nested sub-states don't map cleanly onto
+  `enum`. Other consumers (export, diffing versions) still want the tree. It ties the API to one
+  JSON Schema version and to form-library assumptions.
+- Middle path: serve the tree, and generate JSON Schema in the client, or offer both through content
+  negotiation (`Accept: application/schema+json`).
+
+This is not [Serving the schemas to clients](#serving-the-schemas-to-clients), which is about each
+entity's payload schema. It depends on the description payload (see the entry above) and on
+[Schema constraints](#schema-constraints-issue-21).
+
+*Reasoning:* `schema-query-json-object-vs-json-schema.md` (e51b649, 2026-04-01), folded in here and
+removed 2026-09-30. It predates the payload conversions and still describes `pbotID` and `order`.
+
+## Schema constraints (issue #21)
+
+**Explored, not decided.** [paleobot/pbdb2-dev#21](https://github.com/paleobot/pbdb2-dev/issues/21)
+asks for constraints on which states a description may assign. Exploration in April 2026 found three
+independent kinds:
+- Cross-character rules ("if height is short, size is not big"), belonging to the schema. Leaning:
+  rules in their own tables (`schema_rules`, `schema_rule_refs`) with real FKs to characters and
+  states, so the version triggers keep them current; rule logic as JSON Logic in an envelope (id,
+  message, severity `error` or `warn`); a rule whose condition is unknown stays dormant.
+- Typed values on a state (number, range, unit), as a `valueSpec` in the state's jsonb.
+- A third, ambiguous scenario, set aside.
+
+Open: the rule language (JSON Logic or AJV `if`/`then`), the description payload (shared with
+[Descriptions and quantitative values](#descriptions-and-quantitative-values)), what deleting a
+character that a rule uses does, and numeric comparisons in rules.
+
+Since then, `states.quantitative` covers "this state needs a value", but not its type, range or unit.
+The notes' line references are to `create_new.sql`, now split into `postgresql/01`–`03`.
+
+*Reasoning:* `docs/schema-constraints-exploration.md`.
+
 ## Which variant validates a merged PATCH document
 
 **Open.** The edit pattern is settled: guard the body with `patch-guard`, merge the stored row with
@@ -96,6 +139,12 @@ be rejected.
 The options, including a ratchet (always validate against `db`, and against `in-create` only if the
 stored row already passed it), are compared in `payloadSchemas/DESIGN_NOTES.md`, "Edit route
 pattern".
+
+**Nested read-only fields (2026-10-06):** a link's `title` and `href` are read-only fields inside a
+writable link object. `patch-guard` checks root keys only. The merged-document check can't catch a
+patch to one either, because read-only fields are removed before it runs. So the write path needs
+its own screen, for example a guard that walks nested `readOnly` paths. See
+`authority-reads-from-payload-schemas` design D2.
 
 *Reasoning:* `openspec/specs/payload-schema-variants/spec.md` (`patch-guard` requirement).
 
@@ -114,6 +163,20 @@ writable in the schema, and privilege is left to the route:
 Open: which roles may set which fields, and whether provenance is ever shown in a response.
 
 *Reasoning:* `openspec/changes/archive/2026-09-22-convert-person-payload-schema/design.md`.
+
+**`enteredBy` filter: parked** (`add-reference-shared-filters`, design.md D8). A references filter
+on the enterer was asked for and deferred. It has four obstacles:
+1. A filter on the enterer exposes provenance, because it lists every reference a person
+   entered, so the open question above has to be decided first.
+2. There is no `/persons` read, so a client cannot learn a person's permid.
+3. Names are ambiguous: 14 persons are named Smith, and Nathan Jud has two records on purpose.
+4. On a head row, `enterer_person_id` is whoever made the latest edit, not the original enterer.
+   "Entered by" means the first row of the lineage.
+
+If one parameter takes either a permid or a name, telling them apart by the value's shape depends
+on the permid format. Two parameters avoid that.
+
+*Trigger:* the provenance decision, plus a `/persons` read.
 
 ## The authority's copy of its reference's data
 
@@ -221,11 +284,88 @@ enrichment relates to `out`:
 
 Whichever is chosen, a create body has to be consistent with what GET returns.
 
+The 2026-10-01 discussion narrowed this to two designs (links declared in the source, or a related
+block in the envelope) and found that GET currently drops column-stored fields; see
+`api/docs/response-contracts.md`.
+
+**Update 2026-10-06:** design A (links inside the payload) was chosen; see
+`api/docs/response-contracts.md` §6. `authority-reads-from-payload-schemas` builds it for authorities:
+GET is `merge()` output, described by `out`, with `reference` as `{ permid, title, href }`. The
+other resources still read as described above.
+
+**Update 2026-10-08:** `collection-reads-from-payload-schemas` does the same for collections. Their
+source adopted the API's shape: `primaryReference` and an unordered `additionalReferences` replace
+`references[]`, pending "Collection reference model" below. GET also returns coordinates now.
+
+**Update 2026-10-16:** `schema-reads-from-payload-schemas` does the same for schemas: the schema
+source takes the collection's `primaryReference` and `additionalReferences` (`referenceList` is
+deleted), every schema GET is `merge()` output, and each character and state in the tree is merged
+through its own source, so states now carry `quantitative`. Every version-chained resource now reads
+this way; only `taxa` keeps descriptor links. Whether `out` describes the schema's characters tree is
+still open (the single read is contract-tested in parts).
+
+**Update 2026-10-21:** `add-openapi-for-reads` publishes the schema single read as one `Schema`
+component that nests the recursive `Character` and `State` components, and the tree is validated
+against it in one pass. `taxa` has a read-only source (`payloadSchemas/taxon.schema.js`) that
+describes its response; its reads still use their own repository.
+
 The API is about 2,000 lines. Its transport layer (envelope, pagination, discovery, filters,
 405 handling; about 950 lines, specified and tested) doesn't depend on payload shape. About
 580 lines of data layer (`repository.js`, `resource-tables.js` links, `link-hydration.js`, parts of
 `schema-tree.js`) would change. That argues for refactoring the API rather than rewriting it. The
 `taxa` reads have no payload and are unaffected.
+
+## Including related resources
+
+**Deferred; one naming rule decided.** Classic's `show` and JSON:API's `include` let a client ask
+for more in one call. Three different things go by that name:
+
+| Kind | Example | In the payload today |
+|---|---|---|
+| Forward link, filled in | an authority's whole `reference` | a stub, `{ permid, title, href }` (design A) |
+| Reverse relation | a collection's specimens | nothing |
+| Optional blocks of the record's own fields | Classic `show=coords`; JSON:API `fields[]` | everything, always |
+
+- Forward links: the stub rules in `api/docs/response-contracts.md` §4 ("Keeping a later include
+  additive") keep a later include additive. Nothing else needs deciding now.
+- Reverse relations: open. A collection can have thousands of specimens, so pagination, a count, and
+  whether an `href` such as `/specimens?collection=…` is enough are questions for the first caller.
+  A cheap first step is the `href` alone, which also helps discoverability.
+- Field blocks: open, and a separate axis from includes.
+
+Decided: no general mechanism until there is a second caller. When the first real need arrives,
+add it as `?include=<name>` on that one route, not a per-route boolean such as
+`includeSpecimens=true`, and reject unknown values with a 400. A later general mechanism then takes
+over the name instead of keeping a compatibility alias. Per-route booleans don't combine, are hard
+to retire, and each gives the response schema a shape that exists only when it is set.
+
+*Reasoning:* discussion of 2026-10-06, recorded in `api/docs/response-contracts.md` §4.
+
+## Full URLs in links
+
+**Done (`absolute-link-urls`, 2026-10-20).** Every link the API emits is an absolute URL: the
+configured `PUBLIC_BASE_URL` followed by the path. That covers each hydrated `href`, the envelope's
+`links.self`, `next` and `prev`, and the discovery links. The base is configured, never derived
+from `Host` or `X-Forwarded-*`, and the server refuses to start outside development without it.
+`groupBase()` (`api/src/lib/link-hydration.js`) still builds paths; the base is prefixed where each
+link is written.
+
+*Reasoning:* discussion of 2026-10-06, during `authority-reads-from-payload-schemas` (design D6);
+`openspec/changes/absolute-link-urls/design.md`.
+
+## Version history (`/versions`)
+
+**Open; needs a public version identifier first.** Reads serve only a lineage's current,
+non-removed head, so `tidy-response-shape` (2026-10-21) removed `meta.removed` and
+`meta.version` from single reads: neither could hold anything but a constant. They return, with
+real values, alongside a `/versions` sub-resource listing a lineage's versions. That cannot be
+designed until a version has a public identifier: every version of a lineage shares its `permid`
+(`db/02-core.sql`), and the only thing that tells versions apart is `preceded_by_id`, an internal
+id the API never exposes. Candidates: a version number counted along the chain, a server-minted
+version permid, or the row's creation timestamp. Not applicable to `taxa`, which has no version
+chain.
+
+*Reasoning:* `openspec/changes/tidy-response-shape/design.md` D3.
 
 ## Serving the schemas to clients
 
@@ -240,6 +380,43 @@ Clients would get the API contract over HTTP instead of depending on backend cod
 
 Open: whether to serve `db` (probably not: it describes storage, not the contract), and caching,
 since resolved enums change only when a dictionary does.
+
+**Update 2026-10-21:** `add-openapi-for-reads` partly serves this. `/api/v1/openapi.json` publishes
+each resource's `out` variant (storage annotations stripped, links as named `<Target>Link`
+components) under `components.schemas`, so a client can read the response contract over HTTP.
+Write variants (`in-create`, `patch-guard`) and resolved dictionary enums are not served; the
+latter wait on [A dictionaries read resource](#a-dictionaries-read-resource).
+
+## A dictionaries read resource
+
+**Deferred** (`add-openapi-for-reads`, design.md D5). The API description documents a
+dictionary-backed field (`x-enumFrom`) as a string whose description names its vocabulary, not as an
+`enum`: `out` does not enforce dictionary values (a stored value may have left its dictionary), the
+document must not depend on the database (`npm test` builds it without one), and some vocabularies
+are large (`admin1`: 3,865 values on localhost). A read resource such as
+`/api/v1/dictionaries/{name}`, linked from each such field, would let a client fetch current values.
+
+*Trigger:* the first dictionary-backed GET filter (likely `?rank=` on taxa, whose 400 must then list
+live values), or the frontend's first dropdown. Runtime enum resolution for validation lands with it.
+
+## Property descriptions
+
+**Follow-up** (`add-openapi-for-reads`, design.md D9). The description publishes each source's
+`description`s as written, and coverage is thin: 62 descriptions across six sources for a few hundred
+properties. Writing them is content work in `payloadSchemas/`, not mechanism. A description must not
+name a table or column: the description is a contract, not storage.
+
+## Docs page branding
+
+**Placeholder in place** (`pbdb-branding-on-docs-page`, 2026-10-22). `/api/v1/docs` carries PBDB
+Classic's branding as a stopgap: the white emblem (at 80px) and favicon copied from paleobiodb.org
+into `api/assets/`, data1.2's teal (`#00A0A0`) for the top bar in light and dark mode and in place of
+Swagger UI's green, the tab title `PBDB2 API`, and the explore bar hidden. All of it is
+`@fastify/swagger-ui` options in `api/src/plugins/openapi.js`.
+
+*Still open:* PBDB2's own visual identity, which replaces these assets and the colour. The logo is
+swapped in by a selector on Swagger UI's top-bar markup, so check the page by eye after a Swagger UI
+upgrade.
 
 ## Repository boundary: backend monorepo vs. frontend
 
@@ -343,13 +520,18 @@ Nothing deploys from these repos yet, so nothing needs re-pointing.
 
 ## Human-facing identifiers
 
-**Deferred; permids stay UUIDv7.** Some advisory committee members have proposed replacing UUID
-permids with integers. The underlying need is probably an identifier people can cite, say and type
-("PBDB col. 12345"). That can be met with a short *handle* beside the permid, without changing the
-permid. The case against integer permids is written up separately for the committee (claude.ai doc
-"Why pbdb2 permids are UUIDs"). In short: integers would collide with 25 years of cited Classic
-integer IDs; an integer permid could be confused with the integer version `id` with no type error;
-and integers need a central sequence to mint.
+**Open; permids stay UUIDv7 until decided. Leaning B with sequences (2026-10-22, see below).** Some advisory committee members have proposed
+replacing UUID permids with integers. The underlying need is probably an identifier people can cite,
+say and type ("PBDB col. 12345"). Two ways to meet it are on the table: a short *handle* beside the
+UUID permid (A), or a prefixed short code that replaces the UUID as the permid (B). The case
+against *integer* permids is written up separately for the committee (claude.ai doc "Why pbdb2
+permids are UUIDs"). In short: integers would collide with 25 years of cited Classic integer IDs;
+an integer permid could be confused with the integer version `id` with no type error; and integers
+need a central sequence to mint. A prefixed random code (`COLL-8K3F2QXA`) answers all three: the
+prefix can't be read as a Classic number, it names the entity type, and random codes need no
+sequence. So B is not ruled out by that doc.
+
+### A. A handle beside the permid
 
 **Where to store it: a registry table.** It shouldn't go in the payload, because a handle is
 system-minted and immutable like the permid, not user-editable data. A column on each versioned
@@ -376,7 +558,7 @@ handles
    starting above the legacy maximum, rules out confusion with Classic numbers. Needs the database to
    mint, and reveals creation order.
 2. *Option 1 plus a check digit* (`COL-300417-6`, e.g. ORCID's ISO 7064 mod 11-2). Catches mistyped
-   citations. The leaning.
+   citations. The leaning for A.
 3. *Random short code* (`COL-8K3F-2QXA`, Crockford base32, 40 bits). Insert, and retry on a key
    collision. Can be minted anywhere and reveals nothing, but is harder to read aloud.
 4. *Legacy continuity*: migrated records keep their Classic number, and new ones are numbered above
@@ -388,7 +570,237 @@ constraint and retry: option 3, only uglier.
 **Minting.** The handle is minted where the permid is, when an entity's first version is inserted:
 in each migration script, and on live writes in the API create path or a version trigger
 (`preceded_by_id IS NULL`). It's purely additive, so it can be backfilled for every existing entity
-in one pass whenever an API or UI needs it. Nothing needs it yet.
+in one pass whenever an API or UI needs it.
+
+### B. A prefixed code as the permid
+
+The permid itself becomes `<PREFIX>-<code>`: one prefix per permid space (references, collections,
+authorities, schemas, characters, states, specimens, persons, each opinion table, names), and a
+Crockford base32 code (no I, L, O or U; case-insensitive, stored uppercase).
+
+**The blocker: nothing enforces a unique permid on a versioned table.** `place_in_lineage()`
+(`db/02-core.sql`) makes a new row the successor of the existing head with the same permid. A
+freshly minted code that collides with an existing one would silently become a new version of an
+unrelated entity, FKs swung and all, with no error. A unique index on lineage roots doesn't catch it,
+because the trigger has already set `preceded_by_id`. UUIDv7 makes this practically impossible, so
+no guard was ever written; a short code makes it a matter of time.
+
+**The fix: a permid registry,** where permids are minted, not a mapping layer:
+
+```
+permids
+ permid (PK, text) │ entity_type │ created_at
+───────────────────┼─────────────┼───────────
+ COLL-8K3F2QXA     │ collection  │ …
+```
+
+- Creating an entity inserts here first and retries on a key conflict; one database function
+  (`mint_permid(prefix)`) could do it for the migrations and the API alike.
+- Every permid column can be a foreign key to it, including `subject_permid`, `concept_permid` and
+  `specimens.name_opinions_permid`, which have no integrity check today. (Many version rows referring
+  to one registry row is an ordinary FK; it is A's `handles.permid` → versioned table that can't be.)
+
+**Length.** Collisions need the retry whatever the length:
+
+| Length | Bits | Expected collisions minting 517k (name opinions) | Chance per insert at 5M rows |
+|---|---|---|---|
+| 8 | 40 | ~0.12 | ~5×10⁻⁶ |
+| 10 | 50 | ~10⁻⁴ | ~4×10⁻⁹ |
+
+Crockford base32 defines an optional check symbol, which gives B the mistyped-citation check that A
+leaned toward.
+
+**Consequences.**
+- `ORDER BY permid` becomes arbitrary instead of creation order. Keyset pagination still works (any
+  total order does). Store as `text COLLATE "C"`. The API fixtures' strictly increasing `newPermid()`
+  and any assertion that relies on it change. If creation order matters to clients, it becomes an
+  explicit `created_at` sort, not a property of the ID.
+- Minting anywhere without coordination is lost. That matters only if something outside this
+  database mints permids (PBot, offline clients, bulk importers). Unanswered.
+- Scope: permid columns and CHECKs in `db/` (including the uuid temporaries, `uuid[]` parameters and
+  `::uuid` casts in `derive_taxa`), the single swap point `migrations/src/lib/uuidv7.js` plus
+  in-run collision handling in the bulk inserts, a `pattern` on each source's `permid`, the API
+  fixtures, and 17 specs that mention UUIDs (`permid-uuidv7` replaced). `homonym_group_id` is never
+  exposed and could stay a UUID.
+- No data conversion: everything rebuilds from MariaDB through the runner. This is cheap only until
+  permids are published or cited.
+
+**A variant: Classic numbers as the code for migrated records.** A collection migrated from
+Classic `collection_no` 12345 would be `COLL-12345`; records created through the API get random
+codes. Not obviously worth it, but worth considering:
+- Old citations ("PBDB collection 12345") map straight onto the permid, which is A's option 4 without
+  a second identifier.
+- Provenance shows in the ID's shape, though `legacyIDs.oldpbdbID` already records it.
+- The two spaces can't collide if their shapes differ. Classic maxima in `pbdb_2026_10_18` are all
+  under 8 digits (collections 281,030; refs 96,229; taxa 526,272; opinions 1,029,177; specimens
+  168,287; persons 1,332), so a fixed 8-character random code is disjoint by length. That rules out
+  zero-padding the legacy numbers to 8 or more.
+- Migration permids become deterministic: a rebuild reproduces them, where today every rebuild mints
+  new UUIDs.
+- Each entity needs a mapping policy. Classic opinions are split across three pbdb2 opinion tables
+  (separate prefixes keep that apart, unless one Classic opinion yields two rows in one table);
+  authorities were restructured; PBot records, sentinel rows and anything the migration creates
+  without a Classic row get random codes; merged records need a rule for whose number wins.
+- Counter-argument: a permid with meaning in it. Sequential numbers are also enumerable, though the
+  data is public anyway.
+
+### Leaning (2026-10-22): B, with sequences, Classic numbers and a check digit
+
+The committee is likely to require prefixed sequence values for each entity type, with migrated
+records keeping their Classic number. If it does, the plan is **B**, the prefixed code as the
+permid, with sequences instead of random codes.
+
+**Why B and not A.** Under these rules the handle would be unique, immutable, system-minted, one
+per entity, and the thing everyone cites. In other words, it would be a permid. Keeping the UUID
+beside it means two identifiers of equal standing on every resource, and the API would have to
+resolve and return both. A's two remaining advantages, an ID with no meaning and minting without
+coordination, don't apply to the identifier people cite. Sequences also remove B's blocker, since a
+sequence that starts above the legacy maximum cannot collide. They also bring back creation order.
+
+**Condition: who mints?** If anything outside this database creates entities (a PBot that keeps
+writing on its own, offline clients, bulk importers), choose A instead. Those systems can mint a
+UUID and get a handle when the record arrives. Under B they would have to call `mint_permid()`.
+
+**Format: `<PREFIX>-<number>-<CC>`**, for example `COL-12345-47`.
+- `<number>` is decimal with no padding.
+- `<CC>` is two check digits, ISO 7064 MOD 97-10 (as in IBAN), computed over the whole
+  uppercased ID with the hyphens removed. Letters become digits as A=10 … Z=35. Including the prefix
+  catches a mistyped prefix, which would otherwise be a valid ID for another entity, since `REF-12345`
+  and `COL-12345` usually both exist.
+- Prefixes are still to be chosen, one per permid space (see B).
+- A resolver can also accept the bare Classic number on an entity's endpoint, because the prefix
+  is known there and the check digits can be computed.
+
+**Storage and ordering (leaning 2026-10-26).** Store the permid as plain `text` (the cited form
+and the FK target). Each table also gets a generated `permid_no` column holding its number, and
+lists order by that column:
+
+```sql
+permid    text NOT NULL,
+permid_no bigint GENERATED ALWAYS AS (split_part(permid, '-', 2)::bigint) STORED
+-- versioned tables: UNIQUE index on (permid_no) WHERE succeeded_by_id IS NULL
+```
+
+Within one table every permid has the same prefix, and the check digits depend only on the
+number. So the number alone is a total order. `ORDER BY permid_no` and keyset pagination follow
+numeric order: Classic order first, then creation order. The cursor still carries the permid, and
+the API decodes it to its number. A client can reproduce the order by sorting on the number in the
+ID. The `permids` registry never needs a meaningful order, so plain `C` collation is fine there.
+The permid text stays the source of truth, and the number is derived from it. Doing it the other way
+round (store the number, generate the text) was rejected because the text is what gets cited and
+what the registry's FKs point at.
+
+Rejected for ordering:
+- **ICU numeric collation** (`CREATE COLLATION permid_num (provider = icu, locale = 'und-u-kn')`
+  on the permid). It gives the same order, but the indexes depend on the ICU version. After an
+  Aurora or OS upgrade they need `REINDEX` plus `ALTER COLLATION … REFRESH VERSION`. Every permid
+  column (`subject_permid`, `concept_permid`, the registry, …) would also have to carry the same
+  collation, or comparisons fail with "could not determine which collation". Only the database
+  could sort correctly.
+- **Plain `C` collation on the text.** Pagination is stable, but `COL-100` sorts before `COL-99`.
+- **Zero-padding** (`COL-00012345-47`). It moves the ID away from the cited Classic number.
+- **`created_at`.** On versioned tables it is per version row, so ordering heads by it means
+  ordering by last-modified time. An edit moves a row while someone is paginating, so they see it
+  twice or skip a row. Bulk migration inserts share one `NOW()` per transaction, so there are huge
+  numbers of ties and the tiebreak falls back on the permid anyway. It also loses Classic order and
+  is nullable in several tables.
+
+**Registry.** The `permids` table from B stays as the place permids are minted and as the FK target
+for every permid column, including `subject_permid`, `concept_permid` and
+`specimens.name_opinions_permid`. It is no longer needed to guard against collisions.
+
+The registry drops B's `entity_type` column (leaning 2026-10-26) and keeps only
+`permid (PK, text COLLATE "C") │ created_at`. The prefix already says which entity a permid belongs
+to, and a second copy of that could disagree with it. What `entity_type` would have done goes
+elsewhere:
+- **Type-checking references.** Each permid column gets a CHECK on its own prefix, next to the
+  format and check-digit check: for example `CHECK (subject_permid LIKE 'NAM-%')`. An FK to
+  `permids(permid)` only proves the permid exists. Proving its type through the registry would take
+  a composite FK `(permid, entity_type)` plus a constant column on every referencing table.
+- **Known prefixes only.** `mint_permid(prefix)` refuses a prefix it doesn't know. If something
+  later needs the prefix-to-entity mapping as data (a resolver endpoint, for example), add a
+  `dictionaries.permid_prefixes(prefix PK, entity_type, …)` table. The registry would then get a
+  generated `split_part(permid, '-', 1)` column with an FK to it.
+- **Reporting by type.** `GROUP BY split_part(permid, '-', 1)`.
+
+The registry's `created_at` is when the **entity** was created, not its latest version. That is the
+place to answer "when was this record created" without walking the version chain. It is not used
+for ordering (see Storage and ordering).
+
+**Numbering for each table:**
+
+| Table | Number taken from |
+|---|---|
+| refs, persons, collections, specimens | the Classic number (`reference_no`, `person_no`, `collection_no`, `specimen_no`). PBot rows and others with no Classic row get a sequence number. |
+| authorities | Classic `taxon_no`. A merged authority takes the **lowest** absorbed `taxon_no`. All of them stay in `legacyIDs.oldpbdbIDs`, so no alias table is needed. Resolving a citation of an absorbed number would mean looking it up in `oldpbdbIDs` (a payload index), and only if that is wanted. |
+| name_opinions | `authorities.taxon_no` for rows migrated from Classic authorities (the authority-opinions root rows). Every other row gets a sequence number: concept and misspelling rows, name backfills from the opinions migration, and lineage rows. One Classic opinion can produce two `name_opinions` rows, so `opinion_no` cannot be used. |
+| assignment_opinions, validity_opinions | the sequence for every row. `opinion_no` is not used, so it doesn't need to be carried through. |
+| schemas, characters, states | the sequence (PBot only). |
+
+`name_opinions` is the only table that draws on more than one Classic table (`taxon_no` and
+`opinion_no`). That's why a single source is fixed for it.
+
+**Sequences.**
+- One sequence per prefix.
+- **Start each one at a fixed floor well above the Classic maximum**, not at max + 1. If Classic
+  keeps taking writes after the dump, its new records would otherwise land on numbers pbdb2 has
+  already issued.
+- The runner sets every sequence before it mints any row without a Classic number. Otherwise PBot
+  persons, sentinels and the like could take a number a later legacy insert needs. The floors are
+  fixed, so this is a setup step, not something read from MariaDB.
+- Legacy-numbered permids are deterministic across rebuilds. Sequence-numbered ones are
+  deterministic as long as the run order is.
+
+**Timing.** B is a broad rewrite (see Scope under B). It is only possible before permids are
+published or cited.
+
+*Reasoning:* the committee doc above; `place_in_lineage()` in `db/02-core.sql`; explored 2026-10-20,
+including azlibrary's trigger-minted `<group>-<epoch ms>-<1..1000>` IDs, rejected because `now()` is
+fixed per transaction (a collision is a coin flip at ~38 rows in one transaction), nothing retries, and the time part makes
+the ID long without making it readable. The 2026-10-22 leaning came from a later explore session that assumed sequences, Classic numbers and a check digit.
+
+## Collection reference model
+
+**With the committee (2026-10-08).** Two questions are open: is reference order real data, and
+where does the primary live? Nothing stores order today. `additional_collection_refs` is a copy of
+Classic's `secondary_refs`, an unordered set. Classic also lists the primary there for 242,311 of
+the 242,423 collections that have rows. For 187,540 collections the primary is the only row.
+
+Until there's an answer, `collection-reads-from-payload-schemas` returns what is stored:
+`primaryReference` from `collections.reference_id`, and an unordered `additionalReferences` with the
+primary usually repeated. The answer decides what comes next:
+- **Order wanted:** keep only the child table, with a position column, and drop
+  `collections.reference_id`. The primary is the first item, and the source goes back to one
+  ordered array.
+- **Order not wanted:** keep `reference_id` as the primary, and change the migration to stop
+  copying it into `additional_collection_refs` (about 242k fewer rows). The two fields stay.
+
+Schemas have had the collection shape since 2026-10-16 (`schema-reads-from-payload-schemas`):
+`primaryReference` from `schemas.reference_id`, and an unordered `additionalReferences` from
+`additional_schema_refs`, whose one localhost row repeats its schema's primary. The answer therefore
+applies to collections and schemas alike, as the same edit to both; for schemas it touches 8 rows.
+
+**Write path, either way:**
+- Does a PATCH that rewrites the references keep a removed reference that GET omitted?
+- May a write cite the primary again among the additional references?
+
+## Reference list filters
+
+**Follow-ups** (`add-reference-shared-filters`). `references` lists filter on `doi`, `title`,
+`authors`, `firstAuthor` and `publicationYear`; `enteredBy` is parked (see "Fields the server
+supplies").
+
+- **Stored DOIs: a question for the team.** 91 stored DOIs carry a resolver URL
+  (`https://doi.org/`, `http://dx.doi.org/`) or a `doi:` prefix, and about 140 are not DOIs at all
+  (handle and JSTOR URLs, `ISSN 1175-5334`, `June 2007`). The filter removes the prefixes when it
+  compares, so it works either way. Open: should the migration normalize them, and where should
+  the values that are not DOIs go?
+- **Family-name matching is exact** on the whole name, so `Fuente` does not find `de la Fuente`.
+  Prefix or particle-aware matching would be a new match kind.
+- **No indexes.** A filtered list scans the current heads (about 40–100 ms on 96k refs). Trigram
+  indexes (`pg_trgm`, available on localhost and Aurora) for `title`, and GIN or `unaccent`
+  expression indexes for authors, can follow without an API change. `unaccent()` is `STABLE`, so
+  an expression index needs an `IMMUTABLE` wrapper.
 
 ## Known data issues that affect the API
 

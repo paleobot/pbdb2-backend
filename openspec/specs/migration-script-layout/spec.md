@@ -4,9 +4,7 @@
 Define the standard `src/` directory layout for migration scripts — one directory per migration,
 shared utilities in `src/lib/`, run artifacts written beside the script that produces them — and
 record which scripts have been relocated under it and which remain at the repository root.
-
 ## Requirements
-
 ### Requirement: One directory per migration under `src/`
 Each migration SHALL live in its own directory directly under `src/`, named for the migration it performs.
 The migration's entry-point script SHALL be named `migrate-<subject>.js` and SHALL sit at the root of that
@@ -241,8 +239,12 @@ name and SHALL NOT be given a `<subject>-migration` directory, because both form
 migrations themselves and would make the script indistinguishable from one in a directory listing or in
 the inventory.
 
-`src/run-migrations.js` is such a script. It SHALL NOT appear in this specification's inventory of
-migration scripts, which records only migrations.
+`src/run-migrations.js` is such a script. So is `src/rebuild-taxa.js`, the entry point of the runner's
+`taxa` step: it derives the taxa tables from migrated opinion data by calling `rebuild_taxa_full()` and
+reads no legacy system, so it operates on migrated data rather than migrating any. Neither SHALL appear in
+this specification's inventory of migration scripts, which records only migrations. A runner step is
+therefore not by itself a migration: what decides the placement is whether the script moves data out of a
+legacy system.
 
 The rule that a migration imports shared code from `src/lib/` rather than from a sibling migration's
 directory applies unchanged to a script placed here. A non-migration script MAY, however, reference
@@ -260,6 +262,10 @@ and SHALL be updated whenever a referenced script is relocated.
 #### Scenario: Entry-point references are executable paths
 - **WHEN** a migration script named in `src/run-migrations.js` is relocated under `src/`
 - **THEN** the relocating change updates the path in the runner, because it is an executable path rather than a prose citation
+
+#### Scenario: A derivation step is not a migration
+- **WHEN** the runner gains its `taxa` step, whose script calls `rebuild_taxa_full()` over tables earlier steps loaded
+- **THEN** the script is placed at `src/rebuild-taxa.js`, not in a `src/taxa-migration/` or `src/taxa-rebuild/` directory, and it is not added to the migration inventory
 
 ### Requirement: A non-migration script writes its run artifacts beside itself
 The requirement that run artifacts are written beside the producing script SHALL extend to a script placed
@@ -328,7 +334,6 @@ name the file's path under the migration's directory.
 - **WHEN** the runner's `opinions` step declares the input its preflight must check
 - **THEN** the declared path is the file's location under `src/opinions-migration/`, so preflight fails on a missing input before any database work rather than inside the step
 
-
 ### Requirement: A migration's mapping documents live under its own directory
 A migration's mapping documents SHALL live in a `docs/` subdirectory of that migration's directory, and SHALL
 NOT live in `payloadSchemas/` or at the repository root. A mapping document records how a legacy source's
@@ -368,3 +373,4 @@ The mapping documents at the time of this requirement are:
 #### Scenario: References follow the move
 - **WHEN** the repository is searched for `payloadSchemas/mappings/` outside `openspec/changes/` (change artifacts, active or archived, record history)
 - **THEN** there are no matches
+

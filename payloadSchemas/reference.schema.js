@@ -166,7 +166,7 @@ const typeRule = ([type, { fields, required, unrestricted }]) => {
 };
 
 export const referenceSource = {
-	$schema: "https://json-schema.org/draft/2019-09/schema",
+	$schema: "https://json-schema.org/draft/2020-12/schema",
 	$id: "https://pbdb2.example.com/schemas/reference.json",
 	title: "Reference",
 	description: "A reference payload in the PBDB database",

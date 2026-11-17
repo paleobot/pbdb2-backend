@@ -30,8 +30,9 @@ function lookup(codecName, source, ctx, direction, value) {
 
 // { latitude, longitude } <-> a geography column. split emits EWKT text, which a
 // geography column accepts on insert; merge expects the column selected as
-// ST_AsGeoJSON(<column>)::json.
+// ST_AsGeoJSON(<column>)::json, which select(column) returns for a reader.
 const wgs84Point = {
+  select: (column) => `ST_AsGeoJSON("${column}")::json`,
   split({ latitude, longitude }, storage) {
     const hasLat = latitude !== undefined && latitude !== null;
     const hasLng = longitude !== undefined && longitude !== null;
@@ -48,53 +49,83 @@ const wgs84Point = {
   },
 };
 
-// references[] <-> the parent's reference_id (the primary) + rows of the child
-// table x-storage names (additional_collection_refs, additional_schema_refs). The
-// child table has no order column, so order is normalized: split sorts by numeric
-// `order`, the first goes to the column, the rest become child rows in sequence;
-// merge emits the primary as order "1" and child rows by ascending id as "2"...
-// The child rows' key back to their parent is the caller's business, not the codec's.
-//
-// referenceID is the reference's permid; the columns hold refs.id. refs is
-// versioned and every version shares one permid, so the source is read from
-// lineage heads only, which is what makes permid -> id a function. refs.id is a
-// bigint, which node-postgres returns as a string, so ids are keyed as strings.
-const REFS_SOURCE = { table: 'refs', key: 'id', value: 'permid', versioned: true };
-const referenceList = {
+// Each reference link names its reference by permid; the columns hold refs.id.
+// refs is versioned and every version shares one permid, so the source is read
+// from lineage heads only, which is what makes permid -> id a function. refs.id
+// is a bigint, which node-postgres returns as a string, so ids are keyed as
+// strings.
+const REFS_SOURCE = { table: 'refs', key: 'id', value: 'permid', versioned: true, payload: 'reference' };
+
+// A reference link <-> a single refs.id column (authorities.reference_id,
+// collections.reference_id, schemas.reference_id). It serves one property, read
+// and emitted under storage.property (authority `reference`, collection and
+// schema `primaryReference`).
+// merge emits { permid } plus the link's label (storage.link) when the context
+// holds one, or null when the reference has been removed. split reads permid
+// only: the label is read-only, and a removed reference may not be cited.
+const referencePermid = {
   sources: [REFS_SOURCE],
-  split({ references }, storage, ctx) {
-    if (references === undefined || references === null) return {};
-    const sorted = [...references].sort((a, b) => Number(a.order) - Number(b.order));
-    const toId = (r) => String(lookup('referenceList', REFS_SOURCE, ctx, 'byValue', r.referenceID));
-    const [primary, ...rest] = sorted;
-    return {
-      columns: { reference_id: primary ? toId(primary) : null },
-      children: { [storage.table]: rest.map((r) => ({ reference_id: toId(r) })) },
-    };
+  split(values, storage, ctx) {
+    const link = values[storage.property];
+    if (link === undefined || link === null) return {};
+    const id = String(lookup('referencePermid', REFS_SOURCE, ctx, 'byValue', link.permid));
+    if (ctx.get(REFS_SOURCE.table).removed?.has(id)) {
+      throw new Error(`referencePermid: reference ${JSON.stringify(link.permid)} has been removed`);
+    }
+    return { columns: { [storage.column]: id } };
   },
-  merge({ columns, children }, storage, ctx) {
-    const primary = columns?.reference_id;
-    if (primary === null || primary === undefined) return {};
-    const toPermid = (id) => lookup('referenceList', REFS_SOURCE, ctx, 'byKey', String(id));
-    const rows = [...(children?.[storage.table] ?? [])].sort((a, b) => Number(a.id) - Number(b.id));
-    const references = [{ referenceID: toPermid(primary), order: '1' }];
-    rows.forEach((r, i) => references.push({ referenceID: toPermid(r.reference_id), order: String(i + 2) }));
-    return { references };
+  merge({ columns }, storage, ctx) {
+    const raw = columns?.[storage.column];
+    if (raw === undefined || raw === null) return {};
+    const id = String(raw);
+    const permid = lookup('referencePermid', REFS_SOURCE, ctx, 'byKey', id);
+    const entry = ctx.get(REFS_SOURCE.table);
+    if (entry.removed?.has(id)) return { [storage.property]: null };
+    return { [storage.property]: linkObject(entry, storage, id, permid) };
   },
 };
 
-// reference permid <-> a single refs.id column (authorities.reference_id). The
-// scalar counterpart of referenceList, over the same heads-only source.
-const referencePermid = {
+// { permid } plus the link's label, when storage.link names one and the
+// context holds it for that id.
+function linkObject(entry, storage, id, permid) {
+  const label = storage.link?.label;
+  const found = label === undefined ? undefined : entry.labels?.get(id)?.[label];
+  return found === undefined ? { permid } : { permid, [label]: found };
+}
+
+// An unordered array of reference links <-> rows of the child table x-storage
+// names (additional_collection_refs, additional_schema_refs), each holding a
+// refs.id in keyColumn. No parent column is written. merge emits the rows by
+// ascending id, so responses are stable, but the order means nothing; a removed
+// reference is left out, and the result is [] rather than absent when nothing
+// remains. split reads permid only and refuses a removed reference. The child
+// rows' key back to their parent is the caller's business.
+const referenceLinks = {
   sources: [REFS_SOURCE],
-  split({ reference }, storage, ctx) {
-    if (reference === undefined || reference === null) return {};
-    return { columns: { [storage.column]: String(lookup('referencePermid', REFS_SOURCE, ctx, 'byValue', reference)) } };
+  keyColumn: 'reference_id',
+  split(values, storage, ctx) {
+    const links = values[storage.property];
+    if (links === undefined || links === null) return {};
+    const rows = links.map((link) => {
+      const id = String(lookup('referenceLinks', REFS_SOURCE, ctx, 'byValue', link.permid));
+      if (ctx.get(REFS_SOURCE.table).removed?.has(id)) {
+        throw new Error(`referenceLinks: reference ${JSON.stringify(link.permid)} has been removed`);
+      }
+      return { reference_id: id };
+    });
+    return { children: { [storage.table]: rows } };
   },
-  merge({ columns }, storage, ctx) {
-    const id = columns?.[storage.column];
-    if (id === undefined || id === null) return {};
-    return { reference: lookup('referencePermid', REFS_SOURCE, ctx, 'byKey', String(id)) };
+  merge({ children }, storage, ctx) {
+    const rows = [...(children?.[storage.table] ?? [])].sort((a, b) => Number(a.id) - Number(b.id));
+    const links = [];
+    for (const row of rows) {
+      const id = String(row.reference_id);
+      const permid = lookup('referenceLinks', REFS_SOURCE, ctx, 'byKey', id);
+      const entry = ctx.get(REFS_SOURCE.table);
+      if (entry.removed?.has(id)) continue;
+      links.push(linkObject(entry, storage, id, permid));
+    }
+    return { [storage.property]: links };
   },
 };
 
@@ -133,7 +164,7 @@ const personPermid = {
   },
 };
 
-export const codecs = { wgs84Point, referenceList, referencePermid, roleName, personPermid };
+export const codecs = { wgs84Point, referencePermid, referenceLinks, roleName, personPermid };
 
 export function getCodec(name) {
   const codec = codecs[name];

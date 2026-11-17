@@ -2,7 +2,8 @@
 // payloadSchemas/ imports or reads a file outside it. Relative import specifiers and
 // new URL('…', import.meta.url) reads must resolve inside the directory; npm packages
 // and node: built-ins pass. Comment lines are skipped, so provenance comments that
-// name a migration script don't count.
+// name a migration script don't count. The one exception is tests/pg.js reading the
+// root .env, which is local configuration, not code.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readdirSync, readFileSync } from 'node:fs';
@@ -10,6 +11,7 @@ import { dirname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+const ALLOWED = { [join(root, 'tests', 'pg.js')]: resolve(root, '..', '.env') };
 
 const PATTERNS = [
   /\bfrom\s*(['"])([^'"]+)\1/g,
@@ -40,7 +42,7 @@ test('payloadSchemas/ imports and reads nothing outside itself', () => {
     for (const spec of specifiers(readFileSync(file, 'utf8'))) {
       if (!spec.startsWith('.')) continue;
       const target = resolve(dirname(file), spec);
-      if (target !== root && !target.startsWith(root + sep)) {
+      if (target !== root && !target.startsWith(root + sep) && ALLOWED[file] !== target) {
         violations.push(`${relative(root, file)}: ${spec}`);
       }
     }

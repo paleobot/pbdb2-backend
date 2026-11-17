@@ -90,7 +90,7 @@ When a migration stops using an externally-sourced identifier (e.g. PBot `pbotID
 - **THEN** the row's JSONB contains `legacyIDs.pbotID` equal to the original PBot `pbotID`
 
 ### Requirement: Database enforces UUIDv7 version on in-scope permid columns
-The target schema (the DDL, `postgresql/02-core.sql` and `postgresql/03-taxa.sql`) SHALL apply a CHECK constraint on each minted permid column
+The target schema (the DDL, `db/02-core.sql` and `db/03-taxa.sql`) SHALL apply a CHECK constraint on each minted permid column
 asserting the UUID version nibble is 7, using `CHECK ((get_byte(uuid_send(permid), 6) >> 4) = 7)`. This form
 is valid on PostgreSQL 16; it MAY be replaced with `uuid_extract_version(permid) = 7` once the database is on
 PostgreSQL 18.
@@ -145,7 +145,7 @@ On a versioned table, many rows share one `permid` — one per edit — and "one
 what holds instead is "one *head* per permid", enforced by `place_in_lineage()`, which raises on a second row
 with the same permid and `succeeded_by_id IS NULL`. An unversioned table has no succession chain to carry that
 guarantee, so `UNIQUE (permid)` carries it directly. `taxa_linnaean` already states this reasoning inline in
-`postgresql/03-taxa.sql`; this requirement generalises it so that the next unversioned minting table does
+`db/03-taxa.sql`; this requirement generalises it so that the next unversioned minting table does
 not have to rediscover it.
 
 `persons` is such a table: it mints a permid and stays unversioned, so `persons.permid` is

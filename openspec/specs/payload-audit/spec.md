@@ -114,11 +114,12 @@ the columns those keys come from, so that no entity table is read more broadly t
 SHALL pre-load the source once for the run when it does not.
 
 Whether `refs` is pre-loaded depends on the entity, not the table. For collection and schema it is pre-loaded:
-`referenceList` is annotated `{ table, codec }`, so it contributes no key columns, and the refs a batch
-cites are split between `collections.reference_id` and the pre-loaded child rows. Reading it whole is also the
-cheaper choice there: the lookup is 93,944 rows of `(bigint, uuid)`, while selecting it per batch would issue
-56 queries across a collections audit. Schema pre-loads it for the same reason, the annotation, although its
-few rows would make either choice cheap. For authority it is selected per batch: `referencePermid` is annotated
+each source's `additionalReferences` is annotated `{ table, codec: "referenceLinks" }`, a child-table codec
+that reads `refs`, so `codecKeyColumns` leaves `refs` out even though `primaryReference` (`referencePermid`)
+names `reference_id`. The refs a batch cites are split between the parent's `reference_id` and the child rows.
+Reading it whole is also the cheaper choice there: the lookup is 93,944 rows of `(bigint, uuid)`, while
+selecting it per batch would issue 56 queries across a collections audit. Schema pre-loads it for the same
+reason, the annotation, although its few rows would make either choice cheap. For authority it is selected per batch: `referencePermid` is annotated
 with `column: "reference_id"`, so `codecKeyColumns` names the column the batch's keys come from.
 
 #### Scenario: Stable round trip
@@ -135,7 +136,7 @@ with `column: "reference_id"`, so `codecKeyColumns` names the column the batch's
 
 #### Scenario: Collection round trip rebuilds its citations as permids
 - **WHEN** `--round-trip` runs on collection
-- **THEN** each row's `references[]` is rebuilt as reference permids, validated against `out`, and split back to the same `collections.reference_id` and the same `additional_collection_refs` rows that are stored
+- **THEN** each row's `primaryReference` and `additionalReferences` are rebuilt as reference links, validated against `out`, and split back to the same `collections.reference_id` and the same `additional_collection_refs` rows that are stored, a row repeating the primary included
 
 #### Scenario: Entity source is selected per batch
 - **WHEN** a person batch of 5,000 rows is round-tripped
@@ -147,7 +148,7 @@ with `column: "reference_id"`, so `codecKeyColumns` names the column the batch's
 
 #### Scenario: Unaddressable source is read once for the run
 - **WHEN** 275,554 collections are round-tripped in 5,000-row batches
-- **THEN** `refs` is read once for the run and reused, not once per batch, because `referenceList` offers no key columns to select on
+- **THEN** `refs` is read once for the run and reused, not once per batch, because `referenceLinks`, a child-table codec reading `refs`, leaves `codecKeyColumns` with no key column for it
 
 #### Scenario: Reference round trip needs no codec context
 - **WHEN** `--round-trip` runs on reference
@@ -163,7 +164,7 @@ with `column: "reference_id"`, so `codecKeyColumns` names the column the batch's
 
 #### Scenario: Schema round trip rebuilds its citations as permids
 - **WHEN** `--round-trip` runs on schema
-- **THEN** each head row's `permid` and `references[]` are rebuilt from `schemas.permid`, `schemas.reference_id` and the `additional_schema_refs` rows keyed by `schema_id`, the payload validates against `out`, and splitting it back yields the stored jsonb, the same `reference_id` and the same child rows in `id` order
+- **THEN** each head row's `permid`, `primaryReference` and `additionalReferences` are rebuilt from `schemas.permid`, `schemas.reference_id` and the `additional_schema_refs` rows keyed by `schema_id`, the payload validates against `out`, and splitting it back yields the stored jsonb, the same `reference_id` and the same child rows in `id` order
 
 #### Scenario: State round trip rebuilds quantitative
 - **WHEN** `--round-trip` runs on state

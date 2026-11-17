@@ -1,7 +1,7 @@
 // Seed fidelity: each x-enumFrom dictionary table must hold exactly the values
 // its schema enum held before the move, in the same order (see
 // openspec/specs/payload-schema-enums/spec.md). Needs a database built from
-// the DDL (the seeds are in postgresql/01-dictionaries.sql). The cases are the
+// the DDL (the seeds are in db/01-dictionaries.sql). The cases are the
 // fixture's keys: dictionaries.roles has none, because no schema ever held its
 // values inline, so there is no legacy array for it to reproduce.
 import { test, after } from 'node:test';

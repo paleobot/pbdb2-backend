@@ -1,0 +1,50 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+
+import { build, DEFAULT_PUBLIC_BASE_URL as BASE } from '../src/app.js';
+
+test('single read returns the { data, meta, links } envelope', async (t) => {
+  const app = build();
+  t.after(() => app.close());
+
+  const res = await app.inject({ method: 'GET', url: '/api/v1/references/ref-123' });
+  assert.equal(res.statusCode, 200);
+
+  const body = res.json();
+  assert.ok(body.data && typeof body.data === 'object' && !Array.isArray(body.data));
+  assert.equal(body.data.permid, 'ref-123');
+  assert.equal('id' in body.data, false, 'internal id must not be exposed');
+
+  // meta is the type alone: no removed/version placeholders
+  assert.deepEqual(body.meta, { type: 'reference' });
+
+  // links is self alone: relationships are inline links in data
+  assert.deepEqual(body.links, { self: `${BASE}/api/v1/references/ref-123` });
+});
+
+test('list read returns an array with counts and reserved pagination slots', async (t) => {
+  const app = build();
+  t.after(() => app.close());
+
+  const res = await app.inject({ method: 'GET', url: '/api/v1/references' });
+  assert.equal(res.statusCode, 200);
+
+  const body = res.json();
+  assert.ok(Array.isArray(body.data));
+  assert.equal(typeof body.meta.returned, 'number');
+  assert.equal('found' in body.meta, false, 'counts are page-scoped; no second count');
+  assert.equal('next' in body.links, true);
+  assert.equal('prev' in body.links, true);
+});
+
+test('schemas single read returns the aggregate tree', async (t) => {
+  const app = build();
+  t.after(() => app.close());
+
+  const res = await app.inject({ method: 'GET', url: '/api/v1/schemas/sch-1' });
+  assert.equal(res.statusCode, 200);
+
+  const body = res.json();
+  assert.ok(Array.isArray(body.data.characters), 'schema carries nested characters');
+  assert.ok(Array.isArray(body.data.characters[0].states), 'characters carry nested states');
+});

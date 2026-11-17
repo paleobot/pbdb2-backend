@@ -81,7 +81,7 @@ const specimenProperties = {
 }
 
 export const specimenSource = {
-	$schema: "https://json-schema.org/draft/2019-09/schema",
+	$schema: "https://json-schema.org/draft/2020-12/schema",
 	$id: "https://pbdb2.example.com/schemas/specimen.json",
 	title: "Specimen",
 	description: "A specimen payload in the PBDB database",
