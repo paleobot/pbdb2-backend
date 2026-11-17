@@ -132,8 +132,8 @@ and `api/`, with placeholder values.
 ### Requirement: Paths in a spec are relative to the area that owns it
 A path written in a spec SHALL be read relative to the area the spec belongs to:
 - Migration specs (`migration-script-layout`, `migration-runner`, `payload-audit`,
-  `db-connection-config`, and every spec named `*-migration`): relative to `migrations/`. In these specs,
-  "the repository root" means `migrations/`.
+  `db-connection-config`, `classic-doi-audit`, and every spec named `*-migration`): relative to
+  `migrations/`. In these specs, "the repository root" means `migrations/`.
 - API specs (`api-discovery`, `api-foundation`, `auth-stub`, `csv-output`, `data-access`, `list-pagination`,
   `reference-enrichment`, `resource-routes`, `taxa-reads`): relative to `api/`.
 - Every other spec, including `prefixed-permids`: relative to the repository root.
@@ -153,4 +153,8 @@ migration or API spec SHALL be added to the lists above.
 #### Scenario: A lasting spec names `payloadSchemas/lib/`
 - **WHEN** `payload-schema-variants` names `payloadSchemas/lib/variants.js`
 - **THEN** the path is relative to the repository root
+
+#### Scenario: The DOI audit spec names its script
+- **WHEN** `classic-doi-audit` names `src/refs-migration/audit-dois.js`
+- **THEN** it means `migrations/src/refs-migration/audit-dois.js`
 

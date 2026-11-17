@@ -183,7 +183,8 @@ anything if any check fails:
 4. **First-writer emptiness.** Every target table that a selected step is the *first* writer of is empty.
 5. **Required input files.** Every file a selected step reads from disk exists and is readable. Each step
    SHALL declare its input files, and the runner SHALL check the declared paths rather than inferring
-   them. The only such input at present is `mistagged-original-spelling.csv`, read by `opinions`.
+   them. The inputs at present are `src/refs-migration/inputs/doi-verdicts.csv`, read by `refs`, and
+   `mistagged-original-spelling.csv`, read by `opinions`.
 
 #### Scenario: Missing token fails before any work
 - **WHEN** `PBOT_TOKEN` is unset and the full pipeline is selected
@@ -212,6 +213,10 @@ anything if any check fails:
 #### Scenario: Missing input file fails before the pipeline starts
 - **WHEN** the full pipeline is selected and `mistagged-original-spelling.csv` is absent
 - **THEN** preflight fails naming that file, rather than the `opinions` step failing on `readFileSync` after the six preceding steps have already loaded their data
+
+#### Scenario: Missing DOI verdict file fails before the pipeline starts
+- **WHEN** the full pipeline is selected and `src/refs-migration/inputs/doi-verdicts.csv` is absent
+- **THEN** preflight fails naming that file, before `persons` is spawned
 
 #### Scenario: Input files are declared, not discovered
 - **WHEN** a step reads a file from disk
