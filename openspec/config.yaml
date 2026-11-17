@@ -21,7 +21,7 @@ context: |
   migrations/ may use db/, payloadSchemas/ and the root .env.
 
   Spec paths: in migration specs (*-migration, migration-runner, migration-script-layout,
-  payload-audit, db-connection-config) paths are relative to migrations/;
+  payload-audit, db-connection-config, classic-doi-audit) paths are relative to migrations/;
   in API specs (api-discovery, api-foundation, auth-stub, csv-output, data-access, list-pagination,
   reference-enrichment, resource-routes, taxa-reads) relative to api/; in every other spec,
   including prefixed-permids, relative to the repository root. A new migration or API spec joins those lists in

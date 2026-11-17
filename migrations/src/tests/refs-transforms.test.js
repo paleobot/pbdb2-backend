@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   hasTwoTitles, mapPublicationType, mapPubtitle, mapVolNo, mapTitle, buildEditors, containerNote, buildJsonb,
-  inReviewGroup, reviewSignals, reviewRow,
+  inReviewGroup, reviewSignals, reviewRow, doiFor,
 } from '../refs-migration/migrate-refs.js';
 import { referenceSource } from '../../../payloadSchemas/reference.schema.js';
 import { applyEnums } from '../../../payloadSchemas/lib/enums.js';
@@ -363,4 +363,47 @@ test('reclassified chapters, single-title books and noted books validate against
     const jsonb = migrate(ref);
     assert.ok(validate(jsonb), JSON.stringify(validate.errors));
   }
+});
+
+// --- DOIs ---
+
+const vrow = (source_doi, verdict) => ({ source_doi, verdict });
+
+test('doiFor: a prefixed DOI with a current match is stored normalized', () => {
+  const ref = row({ doi: 'doi:10.1017/S0022336000020096' });
+  assert.deepEqual(doiFor(ref, vrow('doi:10.1017/S0022336000020096', 'match')),
+    { doi: '10.1017/S0022336000020096', outcome: 'match' });
+});
+
+test('doiFor: dropped verdicts store nothing', () => {
+  for (const verdict of ['wrong', 'related-work', 'unresolvable']) {
+    assert.deepEqual(doiFor(row({ doi: '10.1/x' }), vrow('10.1/x', verdict)), { doi: null, outcome: verdict });
+  }
+  const jstor = 'http://www.jstor.org/stable/1302950';
+  assert.deepEqual(doiFor(row({ doi: jstor }), vrow(jstor, 'malformed')), { doi: null, outcome: 'malformed' });
+});
+
+test('doiFor: uncertain and part-or-container are kept', () => {
+  for (const verdict of ['uncertain', 'part-or-container']) {
+    assert.equal(doiFor(row({ doi: ' 10.1/x ' }), vrow('10.1/x', verdict)).doi, '10.1/x');
+  }
+});
+
+test('doiFor: no row or a stale row is unaudited', () => {
+  assert.deepEqual(doiFor(row({ doi: '10.1234/new.2026' }), undefined), { doi: '10.1234/new.2026', outcome: 'unaudited' });
+  assert.deepEqual(doiFor(row({ doi: '10.1111/new' }), vrow('10.1111/old', 'wrong')), { doi: '10.1111/new', outcome: 'unaudited' });
+  assert.deepEqual(doiFor(row({ doi: '-' }), undefined), { doi: null, outcome: 'unaudited-malformed' });
+});
+
+test('doiFor: a blank DOI has no outcome', () => {
+  assert.deepEqual(doiFor(row({ doi: null }), undefined), { doi: null, outcome: null });
+  assert.deepEqual(doiFor(row({ doi: '  ' }), undefined), { doi: null, outcome: null });
+});
+
+test('buildJsonb stores the given DOI, and omits it when null', () => {
+  const ref = row({ publication_type: 'journal article', reftitle: 'T', doi: 'doi:10.1/x' });
+  const pubType = mapPublicationType(ref, null);
+  const build = (doi) => buildJsonb(ref, [], null, pubType, null, {}, {}, 'English', null, doi);
+  assert.equal(build('10.1/x').doi, '10.1/x');
+  assert.ok(!('doi' in build(null)));
 });

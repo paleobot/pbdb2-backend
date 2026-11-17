@@ -112,7 +112,7 @@ const STEPS = [
     name: 'refs',
     script: 'src/refs-migration/migrate-refs.js',
     env: ['PG', 'MARIADB'],
-    inputs: [],
+    inputs: ['src/refs-migration/inputs/doi-verdicts.csv'],
     writes: ['refs'],
     firstWriterOf: ['refs'],
     preconditions: () => [empty('refs'), nonEmpty('persons')],

@@ -179,3 +179,5 @@ Rollback: revert the migration commit and re-run. The verdict file can stay; not
 ## Open Questions
 
 - The thresholds are provisional until D7's hand check.
+- **Candidate: a wider year gap for identical titles.** The first 517 audited refs gave 20 `related-work`, and about a third of them are the same work with a year 2–3 off (refs 196, 281, 317, 754, 827, 1082). The rest are different works with similar titles (92, 336, 409, 460, 642, 1086). The candidate: T = 1.00 and a year gap of 3 or less → `match`. That keeps the first group and still drops 92 and 336 (T = 0.875). Ref 969, a review of the book, would become `match`. Decided at the D7 hand check (user, 2026-11-17), which samples the rows the rule would flip.
+- **Common short words in short registered titles** ("the", "and") can lift a wrong DOI into `uncertain`. The D7 sample of `uncertain` should show whether that matters.

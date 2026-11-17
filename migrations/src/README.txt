@@ -52,6 +52,20 @@ to build taxa_linnaean, taxa_clades, taxa_attachments and taxa from the opinion
 tables. To rebuild them later, after the opinions change, call
 rebuild_taxa_full() directly; the runner's step requires an empty taxa table.
 
+Classic DOIs are checked offline, not by the refs step. src/refs-migration/
+audit-dois.js resolves each one through Crossref (else doi.org) and writes a
+verdict per ref to src/refs-migration/inputs/doi-verdicts.csv, a committed
+file the refs step reads: match, part-or-container and uncertain DOIs are
+kept, wrong, related-work, unresolvable and malformed ones are dropped. It
+needs MARIADB_* only and sends a generic User-Agent with no contact details.
+    node src/refs-migration/audit-dois.js            # new or changed DOIs only; resumes an interrupted run
+    node src/refs-migration/audit-dois.js --all      # re-resolve all (~3 h at 4 requests/s)
+    node src/refs-migration/audit-dois.js --rescore  # no network: re-apply the rules to stored metadata
+Before migrating a new Classic dump, run the incremental audit, then
+--rescore, and commit the file. A ref with no current row keeps its DOI and
+the refs step warns. Hand edits to a verdict survive incremental runs; --all
+and --rescore overwrite them.
+
 To run one step, or to resume from one:
     node src/run-migrations.js --only specimens
     node src/run-migrations.js --from collections

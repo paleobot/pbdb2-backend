@@ -8,6 +8,7 @@ import { referenceSource } from '../../../payloadSchemas/reference.schema.js';
 import { resolveEnums } from '../../../payloadSchemas/lib/enums.js';
 import { deriveVariant } from '../../../payloadSchemas/lib/variants.js';
 import { createAjv } from '../../../payloadSchemas/lib/ajv.js';
+import { normalizeDoi, isWellFormedDoi, KEPT_VERDICTS, readVerdictFile } from './dois.js';
 
 // --- Publication type mapping ---
 // Legacy value → { referenceType (jsonb publicationType), bookType (jsonb field or null) }.
@@ -267,7 +268,26 @@ export function buildComments(ref, note) {
   return comments || note || null;
 }
 
-export function buildJsonb(ref, authors, editors, pubType, pages, pubtitleFields, volNoFields, language, note = null) {
+// --- DOIs ---
+// The audit (audit-dois.js) gives each Classic DOI a verdict; the migration keeps or
+// drops it by that verdict and makes no network call itself.
+
+const VERDICT_FILE = join(dirname(fileURLToPath(import.meta.url)), 'inputs', 'doi-verdicts.csv');
+
+// { doi, outcome } for a ref: the normalized DOI or null, and the verdict, 'unaudited' or
+// 'unaudited-malformed' it was decided by. A row is current when it audited this DOI.
+// outcome is null when the source DOI is blank.
+export function doiFor(ref, row) {
+  const source = (ref.doi ?? '').trim();
+  if (!source) return { doi: null, outcome: null };
+  const doi = normalizeDoi(source);
+  if (row && row.source_doi === source) {
+    return { doi: KEPT_VERDICTS.has(row.verdict) ? doi : null, outcome: row.verdict };
+  }
+  return isWellFormedDoi(doi) ? { doi, outcome: 'unaudited' } : { doi: null, outcome: 'unaudited-malformed' };
+}
+
+export function buildJsonb(ref, authors, editors, pubType, pages, pubtitleFields, volNoFields, language, note = null, doi = null) {
   const jsonb = {};
 
   jsonb.publicationType = pubType.referenceTypeName;
@@ -281,7 +301,7 @@ export function buildJsonb(ref, authors, editors, pubType, pages, pubtitleFields
   if (authors.length > 0) jsonb.authors = authors;
   if (ref.pubyr && ref.pubyr.trim()) jsonb.publicationYear = ref.pubyr.trim();
   if (pages) jsonb.pages = pages;
-  if (ref.doi && ref.doi.trim()) jsonb.doi = ref.doi.trim();
+  if (doi) jsonb.doi = doi;
   jsonb.language = language;
   jsonb.legacyIDs = { oldpbdbID: String(ref.reference_no) };
 
@@ -371,6 +391,9 @@ async function main() {
   const startTime = new Date();
   console.log(`[${startTime.toISOString()}] Starting refs migration...`);
 
+  const verdicts = readVerdictFile(VERDICT_FILE);
+  console.log(`  Read ${verdicts.size} rows from the DOI verdict file`);
+
   // Resolved before any source row is read, so an empty dictionary aborts up front.
   const validate = createAjv().compile(deriveVariant(await resolveEnums(pg, referenceSource), 'db'));
   console.log('  Resolved and compiled the reference db variant');
@@ -417,6 +440,9 @@ async function main() {
   let singleTitleBookCount = 0;
   const containerNoteCounts = { book: 0, chapter: 0 };
   let warningCount = 0;
+  const doiOutcomes = {};
+  let normalizedDoiCount = 0;
+  const unauditedRefs = [];
   // Refs in the review group, and the title sets two of its signals compare against.
   const reviewCandidates = [];
   const bookTitles = new Set();
@@ -452,7 +478,14 @@ async function main() {
     const language = mapLanguage(ref.language);
     const { authorizerPersonId, entererPersonId } = mapPersonIds(ref);
 
-    const jsonb = buildJsonb(ref, authors, editors, pubType, pages, pubtitleFields, volNoFields, language, note);
+    const { doi, outcome } = doiFor(ref, verdicts.get(ref.reference_no));
+    if (outcome) {
+      doiOutcomes[outcome] = (doiOutcomes[outcome] ?? 0) + 1;
+      if (doi && doi !== ref.doi.trim()) normalizedDoiCount++;
+      if (outcome.startsWith('unaudited')) unauditedRefs.push(ref.reference_no);
+    }
+
+    const jsonb = buildJsonb(ref, authors, editors, pubType, pages, pubtitleFields, volNoFields, language, note, doi);
     // PBDB refs keep fields their type would not allow on create: the db variant
     // applies no per-type rule, and those fields are bibliographic history.
     if (!validate(jsonb)) {
@@ -477,6 +510,12 @@ async function main() {
   });
 
   console.log(`  Transformed ${targetRows.length} rows`);
+  if (unauditedRefs.length > 0) {
+    console.warn(`  WARNING: ${doiOutcomes.unaudited ?? 0} unaudited DOIs kept and ${doiOutcomes['unaudited-malformed'] ?? 0}`
+      + ` unaudited malformed DOIs dropped (no current row in inputs/doi-verdicts.csv; run audit-dois.js).`
+      + ` First reference_nos: ${unauditedRefs.slice(0, 20).join(', ')}`);
+    warningCount++;
+  }
 
   // 5.2 Batched upsert. A row's permid is REF-<reference_no>-<CC>, registered in
   // the batch's transaction for the rows this run creates; a row that already
@@ -594,6 +633,10 @@ async function main() {
   console.log(`  Single-title books review list: ${reviewLines.length} rows`
     + ` ("book/book chapter" ${reviewByType['book/book chapter']}, "book" ${reviewByType.book})`);
   for (const [name, count] of Object.entries(signalCounts)) console.log(`    ${name}: ${count}`);
+  const outcomeLine = (names) => names.map((n) => `${n} ${doiOutcomes[n] ?? 0}`).join(', ');
+  console.log(`  DOIs normalized (prefix removed): ${normalizedDoiCount}`);
+  console.log(`  DOIs kept: ${outcomeLine([...KEPT_VERDICTS, 'unaudited'])}`);
+  console.log(`  DOIs dropped: ${outcomeLine(['wrong', 'related-work', 'unresolvable', 'malformed', 'unaudited-malformed'])}`);
   console.log(`  Total warnings: ${warningCount}`);
   console.log(`[${endTime.toISOString()}] Refs migration complete in ${elapsed}s`);
 }
