@@ -164,7 +164,7 @@ export function mapPubtitle(ref, referenceTypeName) {
   }
 }
 
-function mapVolNo(ref, referenceTypeName) {
+export function mapVolNo(ref, referenceTypeName) {
   const pubvol = ref.pubvol ? ref.pubvol.trim() : null;
   const pubno = ref.pubno ? ref.pubno.trim() : null;
   const result = {};
@@ -240,16 +240,25 @@ export function mapTitle(ref, referenceTypeName) {
 const isPubtitleTitle = (ref, referenceTypeName) =>
   !(ref.reftitle && ref.reftitle.trim()) && !!mapTitle(ref, referenceTypeName);
 
-// A "book" with two titles and no editors stays a standalone book, which has no
-// field for its container. Its pubtitle, pubvol and pubno go into comments.
-export function containerNote(ref, editors) {
-  if (ref.publication_type !== 'book' || editors || !hasTwoTitles(ref)) return null;
+// The container note keeps in comments what no field of the target type holds:
+// - a "book" with two titles and no editors stays a standalone book, which has
+//   no field for its container: its pubtitle, pubvol and pubno;
+// - an article in edited collection has bookTitle but no volume field: when it
+//   has a pubvol or pubno, the note repeats pubtitle (if any) with them.
+// One format for both: "Published in: <pubtitle>, vol. <pubvol>, no. <pubno>",
+// each part present only when non-blank.
+export function containerNote(ref, editors, referenceTypeName) {
+  const pubtitle = (ref.pubtitle ?? '').trim();
   const pubvol = (ref.pubvol ?? '').trim();
   const pubno = (ref.pubno ?? '').trim();
-  let note = `Published in: ${ref.pubtitle.trim()}`;
-  if (pubvol) note += `, vol. ${pubvol}`;
-  if (pubno) note += `, no. ${pubno}`;
-  return note;
+  const isBook = ref.publication_type === 'book' && !editors && hasTwoTitles(ref);
+  const isChapter = referenceTypeName === 'article in edited collection' && !!(pubvol || pubno);
+  if (!isBook && !isChapter) return null;
+  const parts = [];
+  if (pubtitle) parts.push(pubtitle);
+  if (pubvol) parts.push(`vol. ${pubvol}`);
+  if (pubno) parts.push(`no. ${pubno}`);
+  return `Published in: ${parts.join(', ')}`;
 }
 
 export function buildComments(ref, note) {
@@ -406,7 +415,7 @@ async function main() {
   let pubtitleTitleCount = 0;
   const titleRuleCounts = { 'book/book chapter': 0, book: 0 };
   let singleTitleBookCount = 0;
-  let containerNoteCount = 0;
+  const containerNoteCounts = { book: 0, chapter: 0 };
   let warningCount = 0;
   // Refs in the review group, and the title sets two of its signals compare against.
   const reviewCandidates = [];
@@ -421,8 +430,8 @@ async function main() {
     pubTypeCounts[pubType.referenceTypeName] = (pubTypeCounts[pubType.referenceTypeName] || 0) + 1;
     if (classifyByTitles(ref, editors)) titleRuleCounts[ref.publication_type]++;
     else if (ref.publication_type === 'book/book chapter') singleTitleBookCount++;
-    const note = containerNote(ref, editors);
-    if (note) containerNoteCount++;
+    const note = containerNote(ref, editors, pubType.referenceTypeName);
+    if (note) containerNoteCounts[pubType.referenceTypeName === 'article in edited collection' ? 'chapter' : 'book']++;
 
     const pubtitleFields = mapPubtitle(ref, pubType.referenceTypeName);
     const volNoFields = mapVolNo(ref, pubType.referenceTypeName);
@@ -580,7 +589,8 @@ async function main() {
   console.log(`  "book/book chapter" → article in edited collection by titles: ${titleRuleCounts['book/book chapter']}`);
   console.log(`  "book" → article in edited collection by titles and editors: ${titleRuleCounts.book}`);
   console.log(`  "book/book chapter" → standalone book for lacking two titles: ${singleTitleBookCount}`);
-  console.log(`  Container notes written to comments: ${containerNoteCount}`);
+  console.log(`  Container notes written to comments: "book" with two titles and no editors ${containerNoteCounts.book}`
+    + `, article in edited collection with volume or number ${containerNoteCounts.chapter}`);
   console.log(`  Single-title books review list: ${reviewLines.length} rows`
     + ` ("book/book chapter" ${reviewByType['book/book chapter']}, "book" ${reviewByType.book})`);
   for (const [name, count] of Object.entries(signalCounts)) console.log(`    ${name}: ${count}`);

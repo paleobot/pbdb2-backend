@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  hasTwoTitles, mapPublicationType, mapPubtitle, mapTitle, buildEditors, containerNote, buildJsonb,
+  hasTwoTitles, mapPublicationType, mapPubtitle, mapVolNo, mapTitle, buildEditors, containerNote, buildJsonb,
   inReviewGroup, reviewSignals, reviewRow,
 } from '../refs-migration/migrate-refs.js';
 import { referenceSource } from '../../../payloadSchemas/reference.schema.js';
@@ -22,10 +22,10 @@ const row = (over) => ({
 function migrate(ref, refEditorsMap = noEditors) {
   const editors = buildEditors(ref, refEditorsMap);
   const pubType = mapPublicationType(ref, editors);
-  const note = containerNote(ref, editors);
+  const note = containerNote(ref, editors, pubType.referenceTypeName);
   return buildJsonb(
     ref, [{ familyName: 'Smith', givenName: 'J.' }], editors, pubType, null,
-    mapPubtitle(ref, pubType.referenceTypeName), {}, 'English', note,
+    mapPubtitle(ref, pubType.referenceTypeName), mapVolNo(ref, pubType.referenceTypeName), 'English', note,
   );
 }
 
@@ -165,10 +165,80 @@ test('note follows existing comments', () => {
   assert.equal(jsonb.comments, "49 pl.; Published in: Annales du Musée d'Histoire Naturelle de Belgique");
 });
 
-test('no note on a reclassified chapter or a single-title book', () => {
+test('no note on a reclassified chapter without volume or a single-title book', () => {
   assert.equal(migrate(noted({ pubtitle: 'Whole', editors: 'Someone', comments: 'x' })).comments, 'x');
   assert.equal(migrate(noted({ pubtitle: 'Part' })).comments, undefined);
-  assert.equal(migrate(row({ reftitle: 'Part', pubtitle: 'Whole', pubvol: '3' })).comments, undefined);
+});
+
+// A Classic "book chapter": always an article in edited collection.
+const chapter = (over) => row({ publication_type: 'book chapter', reftitle: 'Part', ...over });
+
+test('chapter with a volume: note repeats the whole pubtitle, which stays in bookTitle', () => {
+  const pubtitle = 'The Continental Jurassic. Museum of Northern Arizona Bulletin';
+  const jsonb = migrate(chapter({ pubtitle, pubvol: '60' }));
+  assert.equal(jsonb.publicationType, 'article in edited collection');
+  assert.equal(jsonb.bookTitle, pubtitle);
+  assert.equal(jsonb.comments, `Published in: ${pubtitle}, vol. 60`);
+  assert.equal(jsonb.journalVolume, undefined);
+  assert.equal(jsonb.seriesVolume, undefined);
+  assert.equal(jsonb.journalNumber, undefined);
+});
+
+test('chapter with a number only', () => {
+  assert.equal(migrate(chapter({ pubtitle: 'Whole', pubno: '2' })).comments, 'Published in: Whole, no. 2');
+});
+
+test('chapter with volume and number, trimmed', () => {
+  assert.equal(
+    migrate(chapter({ pubtitle: ' Whole ', pubvol: ' 18 ', pubno: '3\t' })).comments,
+    'Published in: Whole, vol. 18, no. 3',
+  );
+});
+
+test('chapter note follows existing comments', () => {
+  assert.equal(
+    migrate(chapter({ pubtitle: 'Whole', pubvol: '21', comments: ' pl. 3 ' })).comments,
+    'pl. 3; Published in: Whole, vol. 21',
+  );
+});
+
+test('chapter with a volume but no pubtitle', () => {
+  const jsonb = migrate(chapter({ pubtitle: ' ', pubvol: '3', pubno: '2' }));
+  assert.equal(jsonb.publicationType, 'article in edited collection');
+  assert.equal(jsonb.comments, 'Published in: vol. 3, no. 2');
+  assert.equal(jsonb.bookTitle, undefined);
+});
+
+test('chapters by the title rules get a note', () => {
+  for (const ref of [
+    row({ reftitle: 'Part', pubtitle: 'Whole', pubvol: '14' }),
+    row({ publication_type: 'book', reftitle: 'Part', pubtitle: 'Whole', editors: 'Someone', pubvol: '14' }),
+  ]) {
+    const jsonb = migrate(ref);
+    assert.equal(jsonb.publicationType, 'article in edited collection');
+    assert.equal(jsonb.bookTitle, 'Whole');
+    assert.equal(jsonb.comments, 'Published in: Whole, vol. 14');
+  }
+});
+
+test('chapter without volume or number gets no note', () => {
+  const jsonb = migrate(chapter({ pubtitle: 'Whole', pubvol: ' ', pubno: '', comments: 'x' }));
+  assert.equal(jsonb.bookTitle, 'Whole');
+  assert.equal(jsonb.comments, 'x');
+  assert.equal(migrate(chapter({ pubtitle: 'Whole' })).comments, undefined);
+});
+
+test('other types with a volume get no note', () => {
+  const vol = { reftitle: 'Part', pubtitle: 'Whole', pubvol: '42', pubno: '3' };
+  const article = migrate(row({ publication_type: 'journal article', ...vol }));
+  assert.equal(article.comments, undefined);
+  assert.equal(article.journalVolume, '42');
+  const serial = migrate(row({ publication_type: 'serial monograph', ...vol }));
+  assert.equal(serial.publicationType, 'serial monograph');
+  assert.equal(serial.comments, undefined);
+  const single = migrate(row({ pubtitle: 'Acadian Geology', pubvol: '2' }));
+  assert.equal(single.publicationType, 'standalone book');
+  assert.equal(single.comments, undefined);
 });
 
 // --- single-title books review list ---
@@ -286,6 +356,8 @@ test('reclassified chapters, single-title books and noted books validate against
     row({ pubtitle: 'Acadian Geology' }),
     row({ pubtitle: 'Whole', editors: 'Martin and Barnosky' }),
     row({ editors: 'Biggs' }),
+    chapter({ pubtitle: 'Whole', pubvol: '60', comments: 'pl. 3' }),
+    chapter({ pubvol: '3', pubno: '2' }),
   ];
   for (const ref of cases) {
     const jsonb = migrate(ref);
