@@ -158,6 +158,7 @@ function buildReferenceJsonb(ref, pubType) {
   } else if (pubType === 'serial monograph') {
     if (ref.journal) jsonb.seriesTitle = ref.journal.trim();
     if (ref.publicationVolume) jsonb.seriesVolume = ref.publicationVolume.trim();
+    if (ref.publicationNumber) jsonb.seriesNumber = ref.publicationNumber.trim();
   }
 
   // bookTitle, bookType

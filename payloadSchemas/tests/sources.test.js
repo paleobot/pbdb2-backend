@@ -321,6 +321,25 @@ test('serial monograph may name editors', () => {
   assert.equal(inCreate(withEditors), true, JSON.stringify(inCreate.errors));
 });
 
+test('serial monograph may carry a series number, optionally', () => {
+  const inCreate = compile('reference', 'in-create');
+  assert.equal(inCreate({ ...createSerialMonograph(), seriesNumber: '3' }), true, JSON.stringify(inCreate.errors));
+  assert.equal(inCreate(createSerialMonograph()), true, JSON.stringify(inCreate.errors));
+});
+
+test('series number belongs to serial monographs', () => {
+  const inCreate = compile('reference', 'in-create');
+  assert.equal(inCreate({ ...createJournalArticle(), seriesNumber: '3' }), false);
+  assert.ok(propertyNamesErrorFor(inCreate.errors, 'seriesNumber'), JSON.stringify(inCreate.errors));
+});
+
+test('series number is bounded like a journal number', () => {
+  const db = compile('reference', 'db');
+  assert.equal(db({ ...createSerialMonograph(), seriesNumber: 'x'.repeat(11) }), false);
+  assert.equal(db({ ...createJournalArticle(), journalNumber: 'x'.repeat(11) }), false);
+  assert.equal(db({ ...createSerialMonograph(), seriesNumber: 'x'.repeat(10) }), true, JSON.stringify(db.errors));
+});
+
 test('other allows every declared field and still rejects an undeclared one', () => {
   const inCreate = compile('reference', 'in-create');
   const other = {

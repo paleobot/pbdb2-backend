@@ -64,14 +64,41 @@ export function classifyByTitles(ref, editors) {
   return null;
 }
 
+// --- Untyped refs ---
+// Classic refs with a NULL publication_type, entered 1999–2005, are mostly journal
+// articles. Their pubtitle is the evidence: an untyped ref is a journal article when
+// most typed Classic refs with the same pubtitle are. Untyped refs don't vote.
+
+const normTitle = (s) => (s ?? '').trim().toLowerCase();
+
+// Map<trimmed lowercased pubtitle, { journal, typed }> over typed refs with a pubtitle.
+export function journalTitleCounts(refs) {
+  const counts = new Map();
+  for (const ref of refs) {
+    const key = normTitle(ref.pubtitle);
+    if (!ref.publication_type || !key) continue;
+    const entry = counts.get(key) ?? { journal: 0, typed: 0 };
+    entry.typed++;
+    if (ref.publication_type === 'journal article') entry.journal++;
+    counts.set(key, entry);
+  }
+  return counts;
+}
+
+const isMostlyJournal = (ref, journalTitles) => {
+  const entry = journalTitles.get(normTitle(ref.pubtitle));
+  return !!entry && entry.journal * 2 > entry.typed;
+};
+
 // --- Transform functions ---
 
-export function mapPublicationType(ref, editors) {
+export function mapPublicationType(ref, editors, journalTitles = new Map()) {
   const byTitles = classifyByTitles(ref, editors);
   if (byTitles) return byTitles;
 
   const legacyType = ref.publication_type;
   if (!legacyType) {
+    if (isMostlyJournal(ref, journalTitles)) return { referenceTypeName: 'journal article', bookType: null };
     return { referenceTypeName: 'other', bookType: null };
   }
   const mapping = PUB_TYPE_MAP[legacyType];
@@ -175,6 +202,7 @@ export function mapVolNo(ref, referenceTypeName) {
     if (pubno) result.journalNumber = pubno;
   } else if (referenceTypeName === 'serial monograph') {
     if (pubvol) result.seriesVolume = pubvol;
+    if (pubno) result.seriesNumber = pubno;
   }
 
   return result;
@@ -241,26 +269,43 @@ export function mapTitle(ref, referenceTypeName) {
 const isPubtitleTitle = (ref, referenceTypeName) =>
   !(ref.reftitle && ref.reftitle.trim()) && !!mapTitle(ref, referenceTypeName);
 
-// The container note keeps in comments what no field of the target type holds:
-// - a "book" with two titles and no editors stays a standalone book, which has
-//   no field for its container: its pubtitle, pubvol and pubno;
-// - an article in edited collection has bookTitle but no volume field: when it
-//   has a pubvol or pubno, the note repeats pubtitle (if any) with them.
-// One format for both: "Published in: <pubtitle>, vol. <pubvol>, no. <pubno>",
-// each part present only when non-blank.
-export function containerNote(ref, editors, referenceTypeName) {
+// The container note keeps in comments each Classic container value (pubtitle, pubvol,
+// pubno) that no field of the built jsonb holds, so nothing Classic recorded is dropped.
+// A pubtitle is held as journalTitle, seriesTitle or bookTitle, or as the ref's own
+// title; a volume or number as the journal or series field. Any value not held gives a
+// note, which lists the pubtitle (unless it is the ref's own title), vol. and no., so it
+// reads on its own: a chapter's note repeats its bookTitle. The prefix says what the
+// pubtitle is: a source for unpublished refs, theses and compendia; a container
+// otherwise; and a whole work's own volume when there is no pubtitle to list.
+const SOURCE_BOOK_TYPES = new Set(['Ph.D. thesis', 'M.S. thesis', 'compendium']);
+const PART_TYPES = new Set(['article in edited collection', 'other']);
+
+export function containerNote(ref, jsonb) {
   const pubtitle = (ref.pubtitle ?? '').trim();
   const pubvol = (ref.pubvol ?? '').trim();
   const pubno = (ref.pubno ?? '').trim();
-  const isBook = ref.publication_type === 'book' && !editors && hasTwoTitles(ref);
-  const isChapter = referenceTypeName === 'article in edited collection' && !!(pubvol || pubno);
-  if (!isBook && !isChapter) return null;
+  const isOwnTitle = !!pubtitle && pubtitle.toLowerCase() === (jsonb.title ?? '').toLowerCase();
+  const pubtitleHeld = isOwnTitle || [jsonb.journalTitle, jsonb.seriesTitle, jsonb.bookTitle].includes(pubtitle);
+  const pubvolHeld = [jsonb.journalVolume, jsonb.seriesVolume].includes(pubvol);
+  const pubnoHeld = [jsonb.journalNumber, jsonb.seriesNumber].includes(pubno);
+  if ((!pubtitle || pubtitleHeld) && (!pubvol || pubvolHeld) && (!pubno || pubnoHeld)) return null;
+
+  const listsPubtitle = !!pubtitle && !isOwnTitle;
   const parts = [];
-  if (pubtitle) parts.push(pubtitle);
+  if (listsPubtitle) parts.push(pubtitle);
   if (pubvol) parts.push(`vol. ${pubvol}`);
   if (pubno) parts.push(`no. ${pubno}`);
-  return `Published in: ${parts.join(', ')}`;
+  const list = parts.join(', ');
+
+  const type = jsonb.publicationType;
+  if (listsPubtitle && (type === 'unpublished' || SOURCE_BOOK_TYPES.has(jsonb.bookType))) return `Source: ${list}`;
+  if (listsPubtitle || PART_TYPES.has(type)) return `Published in: ${list}`;
+  return `Published as ${list}`;
 }
+
+// The note's prefix, as the log counts it.
+export const noteForm = (note) =>
+  note.startsWith('Source: ') ? 'Source' : note.startsWith('Published in: ') ? 'Published in' : 'Published as';
 
 export function buildComments(ref, note) {
   const comments = (ref.comments ?? '').trim();
@@ -287,7 +332,7 @@ export function doiFor(ref, row) {
   return isWellFormedDoi(doi) ? { doi, outcome: 'unaudited' } : { doi: null, outcome: 'unaudited-malformed' };
 }
 
-export function buildJsonb(ref, authors, editors, pubType, pages, pubtitleFields, volNoFields, language, note = null, doi = null) {
+export function buildJsonb(ref, authors, editors, pubType, pages, pubtitleFields, volNoFields, language, doi = null) {
   const jsonb = {};
 
   jsonb.publicationType = pubType.referenceTypeName;
@@ -320,7 +365,8 @@ export function buildJsonb(ref, authors, editors, pubType, pages, pubtitleFields
     jsonb.publicationCity = ref.pubcity.trim();
   }
 
-  const comments = buildComments(ref, note);
+  // Last: the note is decided from the fields written above.
+  const comments = buildComments(ref, containerNote(ref, jsonb));
   if (comments) jsonb.comments = comments;
 
   return jsonb;
@@ -341,7 +387,6 @@ export function inReviewGroup(ref, editors) {
   return ref.publication_type === 'book/book chapter' || (ref.publication_type === 'book' && !!editors);
 }
 
-const normTitle = (s) => (s ?? '').trim().toLowerCase();
 const EDITED_VOLUME_TITLE = /proceedings|symposium|congress|conference|festschrift|in hono(?:u)?r/i;
 const EDITOR_WORD = /\b(?:eds?\.|editors?\b|edited\b)/i;
 
@@ -370,19 +415,51 @@ function reviewPages(ref, jsonb) {
   return [ref.firstpage, ref.lastpage].map((p) => (p ?? '').trim()).filter(Boolean).join('–');
 }
 
+// Shared by both review lists.
+const familyNames = (jsonb) => (jsonb.authors ?? []).map((a) => a.familyName).join('; ');
+const csvLine = (fields) => fields.map(csvField).join(',');
+
 // One CSV line of the review list.
 export function reviewRow(ref, jsonb, permid, signals) {
-  return [
+  return csvLine([
     ref.reference_no,
     permid,
     ref.publication_type,
-    (jsonb.authors ?? []).map((a) => a.familyName).join('; '),
+    familyNames(jsonb),
     jsonb.editors ?? '',
     jsonb.publicationYear ?? '',
     jsonb.title ?? '',
     reviewPages(ref, jsonb),
     signals.join('; '),
-  ].map(csvField).join(',');
+  ]);
+}
+
+// --- Untyped refs review list ---
+// Every Classic ref with a NULL publication_type, with the type the script gave it and
+// the journal share its pubtitle has among typed refs, for curators to check and retype.
+
+const UNTYPED_REVIEW_FILE = join(dirname(fileURLToPath(import.meta.url)), 'untyped-refs-review.csv');
+const UNTYPED_REVIEW_HEADER = 'reference_no,permid,type,journal_share,authors,year,title,pubtitle,pubvol,pubno';
+
+// "<journal>/<typed>" for the ref's pubtitle; blank when no typed ref has it.
+export function journalShare(ref, journalTitles) {
+  const entry = journalTitles.get(normTitle(ref.pubtitle));
+  return entry ? `${entry.journal}/${entry.typed}` : '';
+}
+
+export function untypedReviewRow(ref, jsonb, permid, journalTitles) {
+  return csvLine([
+    ref.reference_no,
+    permid,
+    jsonb.publicationType,
+    journalShare(ref, journalTitles),
+    familyNames(jsonb),
+    jsonb.publicationYear ?? '',
+    jsonb.title ?? '',
+    (ref.pubtitle ?? '').trim(),
+    (ref.pubvol ?? '').trim(),
+    (ref.pubno ?? '').trim(),
+  ]);
 }
 
 // --- Main ---
@@ -438,7 +515,9 @@ async function main() {
   let pubtitleTitleCount = 0;
   const titleRuleCounts = { 'book/book chapter': 0, book: 0 };
   let singleTitleBookCount = 0;
-  const containerNoteCounts = { book: 0, chapter: 0 };
+  const noteCounts = new Map(); // "<form> | <type>[ / <bookType>]" → count
+  const untypedCounts = { 'journal article': 0, other: 0 };
+  const untypedRefs = [];
   let warningCount = 0;
   const doiOutcomes = {};
   let normalizedDoiCount = 0;
@@ -447,17 +526,17 @@ async function main() {
   const reviewCandidates = [];
   const bookTitles = new Set();
   const journalTitles = new Set();
+  // Untyped refs are typed by how typed refs use their pubtitle.
+  const journalTitleShares = journalTitleCounts(refs);
 
   const targetRows = refs.map((ref) => {
     const authors = buildAuthors(ref, refAuthorsMap);
     const editors = buildEditors(ref, refEditorsMap);
     // Editors first: the "book" title rule depends on them.
-    const pubType = mapPublicationType(ref, editors);
+    const pubType = mapPublicationType(ref, editors, journalTitleShares);
     pubTypeCounts[pubType.referenceTypeName] = (pubTypeCounts[pubType.referenceTypeName] || 0) + 1;
     if (classifyByTitles(ref, editors)) titleRuleCounts[ref.publication_type]++;
     else if (ref.publication_type === 'book/book chapter') singleTitleBookCount++;
-    const note = containerNote(ref, editors, pubType.referenceTypeName);
-    if (note) containerNoteCounts[pubType.referenceTypeName === 'article in edited collection' ? 'chapter' : 'book']++;
 
     const pubtitleFields = mapPubtitle(ref, pubType.referenceTypeName);
     const volNoFields = mapVolNo(ref, pubType.referenceTypeName);
@@ -485,7 +564,16 @@ async function main() {
       if (outcome.startsWith('unaudited')) unauditedRefs.push(ref.reference_no);
     }
 
-    const jsonb = buildJsonb(ref, authors, editors, pubType, pages, pubtitleFields, volNoFields, language, note, doi);
+    const jsonb = buildJsonb(ref, authors, editors, pubType, pages, pubtitleFields, volNoFields, language, doi);
+    const note = containerNote(ref, jsonb);
+    if (note) {
+      const key = `${noteForm(note)} | ${jsonb.publicationType}${jsonb.bookType ? ` / ${jsonb.bookType}` : ''}`;
+      noteCounts.set(key, (noteCounts.get(key) ?? 0) + 1);
+    }
+    if (!ref.publication_type) {
+      untypedCounts[jsonb.publicationType]++;
+      untypedRefs.push({ ref, jsonb });
+    }
     // PBDB refs keep fields their type would not allow on create: the db variant
     // applies no per-type rule, and those fields are bibliographic history.
     if (!validate(jsonb)) {
@@ -602,6 +690,11 @@ async function main() {
   }
   writeFileSync(REVIEW_FILE, [REVIEW_HEADER, ...reviewLines].join('\n') + '\n');
 
+  const untypedLines = untypedRefs
+    .sort((a, b) => a.ref.reference_no - b.ref.reference_no)
+    .map(({ ref, jsonb }) => untypedReviewRow(ref, jsonb, permidById.get(ref.reference_no), journalTitleShares));
+  writeFileSync(UNTYPED_REVIEW_FILE, [UNTYPED_REVIEW_HEADER, ...untypedLines].join('\n') + '\n');
+
   // 6.1 Row count verification
   const { rows: countResult } = await pg.query(`SELECT COUNT(*)::int AS count FROM refs`);
   const pgCount = countResult[0].count;
@@ -628,11 +721,16 @@ async function main() {
   console.log(`  "book/book chapter" → article in edited collection by titles: ${titleRuleCounts['book/book chapter']}`);
   console.log(`  "book" → article in edited collection by titles and editors: ${titleRuleCounts.book}`);
   console.log(`  "book/book chapter" → standalone book for lacking two titles: ${singleTitleBookCount}`);
-  console.log(`  Container notes written to comments: "book" with two titles and no editors ${containerNoteCounts.book}`
-    + `, article in edited collection with volume or number ${containerNoteCounts.chapter}`);
+  console.log(`  Untyped refs: journal article by pubtitle majority ${untypedCounts['journal article']}`
+    + `, left other ${untypedCounts.other}`);
+  const noteTotal = [...noteCounts.values()].reduce((a, b) => a + b, 0);
+  console.log(`  Container notes written to comments: ${noteTotal}`);
+  for (const [key, count] of [...noteCounts].sort(([a], [b]) => a.localeCompare(b))) console.log(`    ${key}: ${count}`);
   console.log(`  Single-title books review list: ${reviewLines.length} rows`
     + ` ("book/book chapter" ${reviewByType['book/book chapter']}, "book" ${reviewByType.book})`);
   for (const [name, count] of Object.entries(signalCounts)) console.log(`    ${name}: ${count}`);
+  console.log(`  Untyped refs review list: ${untypedLines.length} rows`
+    + ` (journal article ${untypedCounts['journal article']}, other ${untypedCounts.other})`);
   const outcomeLine = (names) => names.map((n) => `${n} ${doiOutcomes[n] ?? 0}`).join(', ');
   console.log(`  DOIs normalized (prefix removed): ${normalizedDoiCount}`);
   console.log(`  DOIs kept: ${outcomeLine([...KEPT_VERDICTS, 'unaudited'])}`);

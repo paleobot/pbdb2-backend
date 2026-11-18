@@ -1024,12 +1024,25 @@ Left for curation, whatever the model:
   as an orphan on every run. Fix it in PBot.
 - **PBot person pbotID collision.** Two PBot persons match one PostgreSQL row, so
   `legacyIDs.pbotID` alternates between runs. Pre-existing and unfixed.
-- **Volume and number dropped on book-type refs.** Classic book-type refs have no pbdb2 field for
-  `pubvol`/`pubno`. Two groups keep them in a "Published in:" container note in `comments`: the 236
-  ambiguous `book` refs (`fix-book-chapter-migration` D3) and about 1,900 chapters
-  (`keep-chapter-volume-in-note`). Whole books (`standalone book`) with a volume still lose it.
-  Because a note isn't a field, filters and RIS don't see the volume. See [Series and volumes on
-  book-type references](#series-and-volumes-on-book-type-references).
+- **Container data kept as a note, not a field.** Every Classic `pubtitle`, `pubvol` and `pubno`
+  that no field of a ref's type holds goes into a container note in `comments`
+  (`keep-classic-container-data`). There are three forms:
+  - "Published in: …": chapters, two-title books, abstracts and other `other` refs, guidebooks;
+  - "Source: …": theses, compendia, unpublished refs;
+  - "Published as vol. …": a whole book's own volume.
+
+  In `pbdb_2026_10_18` that is about 5,200 refs. A note isn't a field, so filters don't see it, and
+  RIS carries it only as `N1`. In particular, `other` has no container field: abstracts keep their
+  journal or meeting only in the note. Whether `other` (or a split-out abstract type) should get one
+  is an open model question. See [Series and volumes on book-type
+  references](#series-and-volumes-on-book-type-references).
+- **Untyped Classic refs.** 1,183 Classic refs have no `publication_type`. All were entered
+  1999–2005, mostly in a 2002 bulk import. 658 of them migrate as `journal article`, because most typed
+  Classic refs with the same `pubtitle` are journal articles. The other 525 stay `other`, with a
+  container note. Some are journal articles in journals Classic has no other refs for, some are
+  books or series volumes. The refs migration lists all 1,183, with the type each got and its
+  pubtitle's journal share, in `migrations/src/refs-migration/untyped-refs-review.csv` on every run.
+  Curators retype them in pbdb2.
 - **Edited volumes and chapters stored as standalone books.** Classic records nothing that tells an
   edited volume from an authored book, so no Classic ref migrates as `edited collection`
   (`reclassify-single-title-books`). Two groups contain misclassified refs:

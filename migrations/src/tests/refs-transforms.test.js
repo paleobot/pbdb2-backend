@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   hasTwoTitles, mapPublicationType, mapPubtitle, mapVolNo, mapTitle, buildEditors, containerNote, buildJsonb,
-  inReviewGroup, reviewSignals, reviewRow, doiFor,
+  inReviewGroup, reviewSignals, reviewRow, doiFor, journalTitleCounts, journalShare, untypedReviewRow, noteForm,
 } from '../refs-migration/migrate-refs.js';
 import { referenceSource } from '../../../payloadSchemas/reference.schema.js';
 import { applyEnums } from '../../../payloadSchemas/lib/enums.js';
@@ -19,13 +19,12 @@ const row = (over) => ({
 });
 
 // The migrated payload, as main() assembles it for a row.
-function migrate(ref, refEditorsMap = noEditors) {
+function migrate(ref, refEditorsMap = noEditors, journalTitles = new Map()) {
   const editors = buildEditors(ref, refEditorsMap);
-  const pubType = mapPublicationType(ref, editors);
-  const note = containerNote(ref, editors, pubType.referenceTypeName);
+  const pubType = mapPublicationType(ref, editors, journalTitles);
   return buildJsonb(
     ref, [{ familyName: 'Smith', givenName: 'J.' }], editors, pubType, null,
-    mapPubtitle(ref, pubType.referenceTypeName), mapVolNo(ref, pubType.referenceTypeName), 'English', note,
+    mapPubtitle(ref, pubType.referenceTypeName), mapVolNo(ref, pubType.referenceTypeName), 'English',
   );
 }
 
@@ -136,7 +135,7 @@ test('types outside the title rules keep their fixed mapping', () => {
   const thesis = migrate(row({ publication_type: 'Ph.D. thesis', ...two }));
   assert.equal(thesis.publicationType, 'standalone book');
   assert.equal(thesis.bookType, 'Ph.D. thesis');
-  assert.equal(thesis.comments, undefined);
+  assert.equal(thesis.comments, 'Source: Whole');
   assert.equal(typeOf(row({ publication_type: null })), 'other');
 });
 
@@ -228,7 +227,7 @@ test('chapter without volume or number gets no note', () => {
   assert.equal(migrate(chapter({ pubtitle: 'Whole' })).comments, undefined);
 });
 
-test('other types with a volume get no note', () => {
+test('journal articles and serial monographs hold their volume; a whole book notes its own', () => {
   const vol = { reftitle: 'Part', pubtitle: 'Whole', pubvol: '42', pubno: '3' };
   const article = migrate(row({ publication_type: 'journal article', ...vol }));
   assert.equal(article.comments, undefined);
@@ -236,9 +235,202 @@ test('other types with a volume get no note', () => {
   const serial = migrate(row({ publication_type: 'serial monograph', ...vol }));
   assert.equal(serial.publicationType, 'serial monograph');
   assert.equal(serial.comments, undefined);
+  assert.equal(serial.seriesVolume, '42');
+  assert.equal(serial.seriesNumber, '3');
   const single = migrate(row({ pubtitle: 'Acadian Geology', pubvol: '2' }));
   assert.equal(single.publicationType, 'standalone book');
-  assert.equal(single.comments, undefined);
+  assert.equal(single.comments, 'Published as vol. 2');
+});
+
+// --- untyped refs ---
+
+const typed = (publication_type, pubtitle, n = 1) =>
+  Array.from({ length: n }, () => ({ publication_type, pubtitle }));
+const untyped = (over) => row({ publication_type: null, reftitle: 'An article', ...over });
+
+test('journalTitleCounts counts typed refs by trimmed lowercased pubtitle', () => {
+  const counts = journalTitleCounts([
+    ...typed('journal article', ' Nature '), ...typed('journal article', 'NATURE'), ...typed('serial monograph', 'nature'),
+    ...typed(null, 'Nature', 5), ...typed('journal article', '  '), ...typed('journal article', null),
+  ]);
+  assert.deepEqual([...counts], [['nature', { journal: 2, typed: 3 }]]);
+});
+
+test('untyped ref with a journal majority is a journal article with its journal fields', () => {
+  const titles = journalTitleCounts([...typed('journal article', 'Nature', 2), ...typed('book', 'Nature')]);
+  const jsonb = migrate(untyped({ pubtitle: ' nature ', pubvol: '316', pubno: '6' }), noEditors, titles);
+  assert.equal(jsonb.publicationType, 'journal article');
+  assert.equal(jsonb.journalTitle, 'nature');
+  assert.equal(jsonb.journalVolume, '316');
+  assert.equal(jsonb.journalNumber, '6');
+  assert.equal(jsonb.comments, undefined);
+});
+
+test('untyped ref whose title is mostly a series stays other with a note', () => {
+  const usgs = 'United States Geological Survey Professional Paper';
+  const titles = journalTitleCounts([...typed('journal article', usgs, 153), ...typed('serial monograph', usgs, 183)]);
+  const jsonb = migrate(untyped({ pubtitle: usgs, pubvol: '450' }), noEditors, titles);
+  assert.equal(jsonb.publicationType, 'other');
+  assert.equal(jsonb.journalTitle, undefined);
+  assert.equal(jsonb.comments, `Published in: ${usgs}, vol. 450`);
+});
+
+test('exactly half is not a majority', () => {
+  const titles = journalTitleCounts([...typed('journal article', 'Mixed'), ...typed('serial monograph', 'Mixed')]);
+  assert.equal(migrate(untyped({ pubtitle: 'Mixed' }), noEditors, titles).publicationType, 'other');
+});
+
+test('untyped ref with a blank or unmatched pubtitle stays other', () => {
+  const titles = journalTitleCounts(typed('journal article', 'Nature'));
+  assert.equal(migrate(untyped({ pubtitle: '  ' }), noEditors, titles).publicationType, 'other');
+  assert.equal(migrate(untyped({ pubtitle: 'Unknown Gazette' }), noEditors, titles).publicationType, 'other');
+});
+
+test('untyped refs do not vote', () => {
+  const titles = journalTitleCounts([...typed(null, 'Bulletin X', 10), ...typed('serial monograph', 'Bulletin X')]);
+  assert.equal(migrate(untyped({ pubtitle: 'Bulletin X' }), noEditors, titles).publicationType, 'other');
+});
+
+test('a typed ref is never retyped by the untyped rule', () => {
+  const titles = journalTitleCounts(typed('journal article', 'Nature', 5));
+  assert.equal(migrate(row({ publication_type: 'abstract', pubtitle: 'Nature' }), noEditors, titles).publicationType, 'other');
+});
+
+// --- the general container note ---
+
+test('abstract keeps its venue', () => {
+  const jsonb = migrate(row({
+    publication_type: 'abstract', reftitle: 'Emsian brachiopods',
+    pubtitle: 'Geological Society of America Abstracts with Programs', pubvol: '29',
+  }));
+  assert.equal(jsonb.publicationType, 'other');
+  assert.equal(jsonb.comments, 'Published in: Geological Society of America Abstracts with Programs, vol. 29');
+});
+
+test('untyped ref left other keeps its container', () => {
+  const jsonb = migrate(untyped({ pubtitle: 'Geologisches Jahrbuch, Beihefte', pubvol: '85' }));
+  assert.equal(jsonb.comments, 'Published in: Geologisches Jahrbuch, Beihefte, vol. 85');
+});
+
+test('other with a volume but no pubtitle', () => {
+  assert.equal(migrate(row({ publication_type: 'abstract', reftitle: 'A', pubvol: '7' })).comments, 'Published in: vol. 7');
+});
+
+test('thesis source', () => {
+  const jsonb = migrate(row({
+    publication_type: 'Ph.D. thesis',
+    reftitle: 'Anatomy, phylogeny, and palaeoecology of the basal thalattosuchians (Mesoeucrocodylia) from the Liassic of Central Europe',
+    pubtitle: 'PhD dissertation, Johannes Gutenberg-Universität Mainz',
+  }));
+  assert.equal(jsonb.comments, 'Source: PhD dissertation, Johannes Gutenberg-Universität Mainz');
+});
+
+test('unpublished source follows existing comments', () => {
+  const jsonb = migrate(row({ publication_type: 'unpublished', reftitle: 'Data', pubtitle: 'pers. comm.', comments: 'Primary collection data' }));
+  assert.equal(jsonb.comments, 'Primary collection data; Source: pers. comm.');
+});
+
+test('compendium source with a volume and number', () => {
+  const jsonb = migrate(row({
+    publication_type: 'compendium', reftitle: 'Available generic names for trilobites',
+    pubtitle: 'Memoirs of the Queensland Museum', pubvol: '48', pubno: '2',
+  }));
+  assert.equal(jsonb.comments, 'Source: Memoirs of the Queensland Museum, vol. 48, no. 2');
+});
+
+test('guidebook in a field-conference volume', () => {
+  const jsonb = migrate(row({
+    publication_type: 'guidebook', reftitle: 'Guide to the Late Pennsylvanian paleontology of the Upper Madera Formation',
+    pubtitle: 'New Mexico Geological Society Guidebook', pubvol: '47',
+  }));
+  assert.equal(jsonb.comments, 'Published in: New Mexico Geological Society Guidebook, vol. 47');
+});
+
+test('whole book with its own volume', () => {
+  const jsonb = migrate(row({ publication_type: 'book', reftitle: '', pubtitle: 'Die Saugetiere', pubvol: 'II' }));
+  assert.equal(jsonb.publicationType, 'standalone book');
+  assert.equal(jsonb.title, 'Die Saugetiere');
+  assert.equal(jsonb.comments, 'Published as vol. II');
+});
+
+test('own title is not repeated', () => {
+  assert.equal(migrate(row({ reftitle: 'Corals', pubtitle: 'CORALS', pubvol: '2' })).comments, 'Published as vol. 2');
+});
+
+test('single-title book without a volume gets no note', () => {
+  assert.equal(migrate(row({ pubtitle: 'Acadian Geology', comments: 'x' })).comments, 'x');
+  assert.equal(migrate(row({ reftitle: 'Corals', pubtitle: 'corals' })).comments, undefined);
+});
+
+test('noteForm names each prefix', () => {
+  assert.equal(noteForm('Source: x'), 'Source');
+  assert.equal(noteForm('Published in: x'), 'Published in');
+  assert.equal(noteForm('Published as vol. 2'), 'Published as');
+});
+
+// Every value is held by a field or listed in the note, and only chapters list a
+// container value a field also holds.
+test('held invariant: nothing is dropped, nothing but a chapter book title is both stored and noted', () => {
+  const types = [null, 'journal article', 'serial monograph', 'unpublished', 'book/book chapter', 'book chapter', 'book',
+    'compendium', 'Ph.D. thesis', 'M.S. thesis', 'guidebook', 'news article', 'abstract', 'instcoll'];
+  const titles = journalTitleCounts(typed('journal article', 'Whole'));
+  const shapes = [
+    { reftitle: 'Part', pubtitle: 'Whole' }, { reftitle: '', pubtitle: 'Whole' }, { reftitle: 'Whole', pubtitle: 'whole' },
+    { reftitle: 'Part', pubtitle: '' },
+  ];
+  for (const publication_type of types) {
+    for (const shape of shapes) {
+      for (const [pubvol, pubno] of [['', ''], ['12', ''], ['', '3'], ['12', '3']]) {
+        for (const editors of [null, 'Someone']) {
+          const ref = row({ publication_type, editors, pubvol, pubno, ...shape });
+          const jsonb = migrate(ref, noEditors, titles);
+          const note = containerNote(ref, jsonb) ?? '';
+          const where = `${publication_type} ${JSON.stringify(shape)} vol=${pubvol} no=${pubno} ed=${editors}`;
+          const fields = Object.entries(jsonb).filter(([k]) => k !== 'comments' && k !== 'publicationType').map(([, v]) => v);
+          const own = shape.pubtitle && shape.pubtitle.toLowerCase() === (jsonb.title ?? '').toLowerCase();
+          if (shape.pubtitle && !own) assert.ok(fields.includes(shape.pubtitle) || note.includes(shape.pubtitle), `pubtitle lost: ${where}`);
+          for (const [value, label] of [[pubvol, 'vol.'], [pubno, 'no.']]) {
+            if (!value) continue;
+            const inField = fields.includes(value);
+            const inNote = note.includes(`${label} ${value}`);
+            assert.ok(inField !== inNote, `${label} ${value} must be in exactly one place: ${where}`);
+          }
+          if (note && jsonb.publicationType !== 'article in edited collection') {
+            for (const k of ['journalTitle', 'seriesTitle']) assert.ok(!jsonb[k] || !note.includes(jsonb[k]), `${k} repeated: ${where}`);
+          }
+        }
+      }
+    }
+  }
+});
+
+test('serial monograph number goes to seriesNumber, not the note', () => {
+  const jsonb = migrate(row({ publication_type: 'serial monograph', reftitle: 'T', pubtitle: 'Bulletin AMNH', pubvol: '105', pubno: '3' }));
+  assert.equal(jsonb.seriesTitle, 'Bulletin AMNH');
+  assert.equal(jsonb.seriesVolume, '105');
+  assert.equal(jsonb.seriesNumber, '3');
+  assert.equal(jsonb.comments, undefined);
+});
+
+// --- untyped refs review list ---
+
+test('journal share: counts for the pubtitle, blank when no typed ref has it', () => {
+  const titles = journalTitleCounts([
+    ...typed('journal article', 'Annals of the South African Museum', 111), ...typed('serial monograph', 'Annals of the South African Museum', 3),
+  ]);
+  assert.equal(journalShare(untyped({ pubtitle: ' annals of the south african museum ' }), titles), '111/114');
+  assert.equal(journalShare(untyped({ pubtitle: 'Nowhere' }), titles), '');
+  assert.equal(journalShare(untyped({ pubtitle: null }), titles), '');
+});
+
+test('untyped review rows: columns in order, quoting and trimming', () => {
+  const titles = journalTitleCounts(typed('journal article', 'C. R. Acad. Sci. Paris, Série II'));
+  const ref = untyped({ reference_no: 7, pubtitle: ' C. R. Acad. Sci. Paris, Série II ', pubvol: ' 316 ', pubno: '' });
+  const jsonb = { publicationType: 'journal article', authors: people('Dupont', 'Martin'), publicationYear: '1993', title: 'Nouvelle découverte' };
+  assert.equal(untypedReviewRow(ref, jsonb, 'REF-7-00', titles),
+    '7,REF-7-00,journal article,1/1,Dupont; Martin,1993,Nouvelle découverte,"C. R. Acad. Sci. Paris, Série II",316,');
+  assert.equal(untypedReviewRow(untyped({ reference_no: 8 }), { publicationType: 'other' }, 'REF-8-00', titles),
+    '8,REF-8-00,other,,,,,,,');
 });
 
 // --- single-title books review list ---
@@ -358,11 +550,18 @@ test('reclassified chapters, single-title books and noted books validate against
     row({ editors: 'Biggs' }),
     chapter({ pubtitle: 'Whole', pubvol: '60', comments: 'pl. 3' }),
     chapter({ pubvol: '3', pubno: '2' }),
+    row({ publication_type: 'serial monograph', reftitle: 'T', pubtitle: 'Bulletin', pubvol: '105', pubno: '3' }),
+    row({ publication_type: 'abstract', reftitle: 'A', pubtitle: 'JVP', pubvol: '26', comments: 'suppl.' }),
+    row({ publication_type: 'Ph.D. thesis', reftitle: 'T', pubtitle: 'PhD thesis, Yale' }),
   ];
   for (const ref of cases) {
     const jsonb = migrate(ref);
     assert.ok(validate(jsonb), JSON.stringify(validate.errors));
   }
+  const untypedJournal = migrate(row({ publication_type: null, reftitle: 'T', pubtitle: 'Nature', pubvol: '1', pubno: '2' }),
+    noEditors, journalTitleCounts(typed('journal article', 'Nature')));
+  assert.equal(untypedJournal.publicationType, 'journal article');
+  assert.ok(validate(untypedJournal), JSON.stringify(validate.errors));
 });
 
 // --- DOIs ---
@@ -403,7 +602,7 @@ test('doiFor: a blank DOI has no outcome', () => {
 test('buildJsonb stores the given DOI, and omits it when null', () => {
   const ref = row({ publication_type: 'journal article', reftitle: 'T', doi: 'doi:10.1/x' });
   const pubType = mapPublicationType(ref, null);
-  const build = (doi) => buildJsonb(ref, [], null, pubType, null, {}, {}, 'English', null, doi);
+  const build = (doi) => buildJsonb(ref, [], null, pubType, null, {}, {}, 'English', doi);
   assert.equal(build('10.1/x').doi, '10.1/x');
   assert.ok(!('doi' in build(null)));
 });

@@ -84,6 +84,10 @@ const fieldSchemas = {
 		type: "string",
 		maxLength: 10
 	},
+	seriesNumber: {
+		type: "string",
+		maxLength: 10
+	},
 	publisher: {
 		type: "string",
 		maxLength: 255
@@ -140,7 +144,7 @@ export const PUBLICATION_TYPES = {
 	},
 	"serial monograph": {
 		// editors: an edited volume inside a series (e.g. NMMNH Bulletins) is real.
-		fields: ["publisher", "publicationCity", "seriesTitle", "seriesVolume", "editors"],
+		fields: ["publisher", "publicationCity", "seriesTitle", "seriesVolume", "seriesNumber", "editors"],
 		required: ["seriesTitle", "seriesVolume", "publisher", "authors", "pages"],
 	},
 	"unpublished": {
