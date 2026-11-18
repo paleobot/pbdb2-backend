@@ -277,7 +277,7 @@ The script SHALL log:
 - Number of rows written to the single-title books review list, split by Classic type ("book/book chapter", "book"), and the number of rows carrying each signal
 - Number of rows written to the untyped refs review list, split by target type
 - DOI summary: the number of DOIs normalized (a prefix was removed), the number kept for each kept verdict and for unaudited, and the number dropped for each dropped verdict and for unaudited-malformed
-- Warnings for: NULL publication types, non-numeric pages, unparseable otherauthors, missing authors, zero person IDs, unaudited DOIs
+- Warnings for: non-numeric pages, unparseable otherauthors, missing authors, zero person IDs, unaudited DOIs
 - Elapsed time
 
 #### Scenario: Successful migration log output

@@ -547,11 +547,14 @@ The types, their allowed fields beyond the shared ones, and their create-time re
 |---|---|---|
 | `journal article` | `journalTitle`, `journalVolume`, `journalNumber` | `journalTitle`, `journalVolume` |
 | `standalone book` | `bookType`, `publisher`, `publicationCity` | `publisher`, `authors`, `pages` |
-| `serial monograph` | `publisher`, `publicationCity`, `seriesTitle`, `seriesVolume`, `editors` | `seriesTitle`, `seriesVolume`, `publisher`, `authors`, `pages` |
+| `serial monograph` | `publisher`, `publicationCity`, `seriesTitle`, `seriesVolume`, `seriesNumber`, `editors` | `seriesTitle`, `seriesVolume`, `publisher`, `authors`, `pages` |
 | `article in edited collection` | `bookTitle`, `publisher`, `editors`, `publicationCity` | `bookTitle`, `authors`, `publisher`, `editors`, `pages` |
 | `edited collection` | `publisher`, `editors`, `publicationCity` | `publisher`, `editors`, `pages` |
 | `unpublished` | `description` | `authors`, `description` |
 | `other` | every declared field | — |
+
+`seriesNumber` SHALL be declared, like `journalNumber`, as a string of at most 10 characters, immediately after
+`seriesVolume` in the source's `properties`, so that responses and CSV columns list it there.
 
 The shared fields are `permid`, `legacyIDs`, `publicationType`, `title`, `authors`, `publicationYear`, `pages`,
 `doi`, `language` and `comments`. Base `required` SHALL be `publicationType` and `publicationYear`; `title` SHALL
@@ -597,6 +600,18 @@ The source SHALL carry no hand-written description of per-type fields; the table
 #### Scenario: Book type is allowed where it belongs
 - **WHEN** a complete `standalone book` create body carries `bookType: "Ph.D. thesis"`
 - **THEN** it passes `in-create`, and the same field on a `journal article` fails with a `propertyNames` error naming `bookType`
+
+#### Scenario: Serial monograph may carry a series number
+- **WHEN** a complete `serial monograph` create body carries `seriesNumber: "3"`
+- **THEN** it passes `in-create`, and the same body without `seriesNumber` also passes
+
+#### Scenario: Series number belongs to serial monographs
+- **WHEN** a complete `journal article` create body carries `seriesNumber: "3"`
+- **THEN** `in-create` rejects it with a `propertyNames` error naming `seriesNumber`
+
+#### Scenario: Series number is bounded like a journal number
+- **WHEN** a stored serial monograph carries a `seriesNumber` of 11 characters
+- **THEN** the `db` variant rejects it, as it would a `journalNumber` of 11 characters
 
 ### Requirement: The authority source
 `authoritySource` SHALL declare exactly these root properties:
@@ -1073,3 +1088,4 @@ The `containingTaxa` chain is not part of the source: it is an expansion compose
 #### Scenario: The taxon source stores nothing in jsonb
 - **WHEN** `deriveVariant(taxonSource, 'db')` is derived
 - **THEN** it declares no properties
+
