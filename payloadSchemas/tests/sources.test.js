@@ -6,6 +6,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import * as collectionModule from '../collection.schema.js';
 import * as specimenModule from '../specimen.schema.js';
+import * as occurrenceModule from '../occurrence.schema.js';
 import * as personModule from '../person.schema.js';
 import * as referenceModule from '../reference.schema.js';
 import * as authorityModule from '../authority.schema.js';
@@ -21,6 +22,7 @@ import { collectCodecSources, split, merge } from '../lib/storage.js';
 
 const legacy = JSON.parse(readFileSync(new URL('./fixtures/legacy-enums.json', import.meta.url), 'utf8'));
 const specimenExample = JSON.parse(readFileSync(new URL('./fixtures/specimen-example.json', import.meta.url), 'utf8'));
+const occurrenceExample = JSON.parse(readFileSync(new URL('./fixtures/occurrence-example.json', import.meta.url), 'utf8'));
 const enums = new Map(Object.entries(legacy));
 enums.set('admin0.iso', ['US', 'CN', 'RU', 'AU', 'CA', 'FR']);
 enums.set('admin1.iso', ['US-MT', 'CA-AB']);
@@ -34,6 +36,7 @@ enums.set('languages.name', ['Chinese', 'English', 'French', 'German', 'Italian'
 const sources = {
   collection: collectionModule.collectionSource,
   specimen: specimenModule.specimenSource,
+  occurrence: occurrenceModule.occurrenceSource,
   person: personModule.personSource,
   reference: referenceModule.referenceSource,
   authority: authorityModule.authoritySource,
@@ -50,6 +53,7 @@ const compile = (entity, variant) => createAjv().compile(deriveVariant(applyEnum
 test('modules export only the annotated source', () => {
   assert.deepEqual(Object.keys(collectionModule).sort(), ['collectionSource', 'default']);
   assert.deepEqual(Object.keys(specimenModule).sort(), ['default', 'specimenSource']);
+  assert.deepEqual(Object.keys(occurrenceModule).sort(), ['default', 'occurrenceSource']);
   assert.deepEqual(Object.keys(personModule).sort(), ['default', 'personSource']);
   assert.deepEqual(Object.keys(authorityModule).sort(), ['authoritySource', 'default']);
   assert.deepEqual(Object.keys(schemaModule).sort(), ['default', 'schemaSource']);
@@ -178,6 +182,25 @@ test('patch-guard on the real sources', () => {
 test('specimen example is a valid stored payload', () => {
   const validate = compile('specimen', 'db');
   assert.equal(validate(specimenExample), true, JSON.stringify(validate.errors));
+});
+
+test('occurrence example is a valid stored payload', () => {
+  const validate = compile('occurrence', 'db');
+  assert.equal(validate(occurrenceExample), true, JSON.stringify(validate.errors));
+});
+
+test('occurrence payload admits the data quirks Classic holds', () => {
+  const validate = compile('occurrence', 'db');
+  // No taxon name at all (50 genus_name and 2,301 species_name are empty in Classic).
+  assert.equal(validate({}), true);
+  assert.equal(validate({ identification: { species: { name: 'sp.' } } }), true);
+  // The ditto mark is kept verbatim.
+  assert.equal(validate({ identification: { genus: { resolution: '"', name: 'Foo' } } }), true);
+  // A resolution belongs to one rank: n. sp. is not a genus resolution.
+  assert.equal(validate({ identification: { genus: { resolution: 'n. sp.' } } }), false);
+  assert.equal(validate({ identification: { genus: { resolution: '' } } }), false);
+  assert.equal(validate({ plantOrgans: ['not an organ'] }), false);
+  assert.equal(validate({ unknownKey: 1 }), false);
 });
 
 // ---------- person ----------
