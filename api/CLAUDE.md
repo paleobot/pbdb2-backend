@@ -59,8 +59,9 @@ src/
   lib/query-schemas.js  GET querystring schemas, query normalizer, 400 formatter
   lib/field-filter-ops.js  field-filter match kinds (eq, doi, foldedEq, allWords, …)
   lib/published-schemas.js  published response components (Collection, ReferenceLink, …)
-  lib/formats.js        non-JSON format registry (text/csv) + negotiate(accept, offered)
+  lib/formats.js        non-JSON format registry (text/csv, RIS) + negotiate(accept, offered)
   lib/csv.js            CSV columns from a source's `out` variant, cells, RFC 4180 lines
+  lib/ris.js            RIS records for references: TY by type, tags in a fixed order
   lib/export.js         a list read in a non-JSON format: page, ids, or streamed whole result
   plugins/              autoloaded first (fastify-plugin wrapped, global)
     envelope.js         reply.sendData / reply.sendList → { data, meta, links }, + their schemas
@@ -90,19 +91,24 @@ docs/                   design notes (e.g. response-envelope rationale)
   an array with counts in `meta`. The rationale and the comparison against the
   legacy `data1.2` envelope are in `docs/api-response-envelope-comparison.md`.
   The only unenveloped successes are the description's own routes
-  (`/api/v1/openapi.json`, `/api/v1/docs`) and CSV.
-- **Formats by `Accept` only:** a list route offering a non-JSON format declares it
-  in `config.formats` (`registerCrudRoutes({ formats, exportSource })`); today the
-  four large lists offer `text/csv`. `negotiate()` (`lib/formats.js`) serves JSON
-  unless the request ranks an offered format strictly above `application/json`. An
+  (`/api/v1/openapi.json`, `/api/v1/docs`), CSV and RIS.
+- **Formats by `Accept` only:** a route offering a non-JSON format declares it
+  in `config.formats` (`registerCrudRoutes({ formats, singleFormats, exportSource })`);
+  today the four large lists offer `text/csv`, and references also offer
+  `application/x-research-info-systems` (RIS) on the list and, through
+  `singleFormats`, on the single read, which sends one record as
+  `<permid>.ris`. A single read never offers CSV. Serializers are built once per
+  route as `serializer(source, { baseHref })`; RIS uses `baseHref` for `UR`.
+  `negotiate()` (`lib/formats.js`) serves JSON unless the request ranks an
+  offered format strictly above `application/json`. An
   `onRequest` hook in `app.js` sets `Vary: Accept` on every GET/HEAD and answers 406
   when a request selects a registry format its route does not offer. A CSV list with
   no `limit` streams the whole result in batches of `MAX_LIMIT`
   (`lib/export.js`), capped per instance by `MAX_CONCURRENT_EXPORTS` (default 4,
   `build({ maxConcurrentExports })`); the first batch is read before the response
-  starts, and a later failure aborts the connection. Client-facing rules:
-  `docs/csv-output.md`. A new format adds a registry entry and a serializer; the
-  record source in `lib/export.js` is format-agnostic.
+  starts, and a later failure aborts the connection; RIS shares the slots. Client-facing
+  rules: `docs/csv-output.md`, `docs/ris-output.md`. A new format adds a registry
+  entry and a serializer; the record source in `lib/export.js` is format-agnostic.
 - **Absolute links:** every URL in a response body (`links.self`, `next`/`prev`,
   each `href`, discovery links) is the public base URL followed by the path.
   `build({ publicBaseUrl })` validates it and decorates `fastify.publicBaseUrl`;
@@ -215,7 +221,7 @@ The backend is spec-driven via one OpenSpec root at the repository root
 (`openspec/config.yaml`, `schema: spec-driven`), shared with the DDL, payload
 schemas and migrations. The API's capability specs (`api-discovery`,
 `api-foundation`, `auth-stub`, `csv-output`, `data-access`, `list-pagination`,
-`reference-enrichment`, `resource-routes`, `taxa-reads`) live in
+`reference-enrichment`, `resource-routes`, `ris-output`, `taxa-reads`) live in
 `openspec/specs/` with the others; completed changes are in
 `openspec/changes/archive/`. The workflow is exposed as skills/slash commands:
 

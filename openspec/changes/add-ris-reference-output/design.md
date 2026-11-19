@@ -92,9 +92,9 @@ Tags are written in this order, and each is omitted when its value is absent or 
 | `T2` | the container title: `journalTitle`, else `bookTitle`, else `seriesTitle` |
 | `M3` | `bookType`, on `THES` only |
 | `VL` | `journalVolume`, else `seriesVolume` |
-| `IS` | `journalNumber`, else `seriesNumber` (added by `keep-classic-container-data`) |
-| `SP` | `pages.first` |
-| `EP` | `pages.last`, only when it differs from `pages.first` |
+| `IS` / `M1` | `journalNumber`, else `seriesNumber` (added by `keep-classic-container-data`): `M1` on `SER`, `EDBOOK`, `BOOK` and `THES`, `IS` otherwise |
+| `SP` | `pages.first`; on `SER`, `EDBOOK`, `BOOK`, `THES` and `UNPD` the pages as one value (below) |
+| `EP` | `pages.last`, only when it differs from `pages.first`; not on the types above |
 | `PB` | `publisher` |
 | `CY` | `publicationCity` |
 | `N1` | `comments`; then, on its own `N1`, `description` |
@@ -105,6 +105,10 @@ Tags are written in this order, and each is omitted when its value is absent or 
 Container, volume and number use one precedence across every type, not a table per type. The db variant lets a legacy ref of any type carry any of these fields, and one rule exports what is stored. In practice each type carries only its own field (journal articles `journalTitle`, chapters `bookTitle`, serial monographs `seriesTitle`), so the precedence decides nothing for current data beyond `other`.
 
 For serial monographs the series goes in `T2`, not `T3`: Zotero reads a book's `T2` as its series.
+
+*Corrected after the Zotero import (tasks 5.4, 2026-11-19):*
+- **Pages on book types.** Zotero reads `SP` on a book, thesis or manuscript as the number of pages and drops `EP`, so `1`–`94` imported as 1 page and `834`–`848` as 834 pages. On `SER`, `EDBOOK`, `BOOK`, `THES` and `UNPD` the pages are now one `SP`. It holds `pages.last` when the range starts at page 1, so 4,001 of the 5,575 book-type refs on localhost get a real page count. It holds the one page when there is only one, and otherwise `first-last`, so a range inside a series volume is kept (1,574 refs). The RIS spec's `SP` on a book is also the number of pages.
+- **The number on book types.** Zotero's book has no issue field, so `IS` was dropped, which lost the series number of the 863 serial monographs that have one. Zotero reads `M1` on a book as its series number. On `SER`, `EDBOOK`, `BOOK` and `THES` the number is written as `M1`; only `SER` has values today.
 
 *Alternatives:*
 - Classic's compact `AU  - Bone,D.A.` and `PY  - 1998///`. Most importers expect `Last, First` and a plain year.
@@ -117,6 +121,12 @@ For serial monographs the series goes in `T2`, not `T3`: Zotero reads a book's `
 The tag is the one Zotero reads as *editor* for the item type:
 - `A3` on `SER`, `EDBOOK`, `BOOK` and `THES`, where Zotero's book type reads `A2` as series editor.
 - `A2` on `CHAP`, `JOUR`, `GEN` and `UNPD`.
+
+How Zotero reads the one line (checked in the import, tasks 5.3):
+- A value with no comma becomes a one-field name, e.g. `J. Shoshani and P. Tassy`.
+- A value with a comma is split at the first comma into family and given name, e.g. `K. M. Stewart, K. L. Seymour`. Zotero shows it as written, but a citation style would reorder it. Nothing is lost.
+- On `THES`, Zotero has no editor role, so `A3` imports as *contributor* (`A2` would be dropped).
+- On `UNPD` (Zotero's manuscript), there is no editor role and both `A2` and `A3` are dropped. `A2` is kept for other importers. One unpublished ref on localhost has editors, and the docs say so.
 
 *Alternatives:*
 - Parsing the string the way Classic's `risOtherAuthors` does. It is wrong on real values, e.g. `"R. G. a. E. Jiménez-Hidalgo"`.
@@ -148,10 +158,34 @@ The `api/docs/` RIS section lists each difference:
 ## Risks / Trade-offs
 
 - **[EndNote or Mendeley read some tags differently from Zotero]** → Verification imports into Zotero only. The docs say which importer the mapping was checked against, and a report from another importer is a small follow-up.
-- **[The `A2`/`A3` choice for `THES`, `UNPD` and `GEN` is not confirmed by the translator read]** → It is checked during the Zotero import (tasks), and the table in D6 is corrected if needed.
+- **[The `A2`/`A3` choice for `THES`, `UNPD` and `GEN` is not confirmed by the translator read]** → Checked in the Zotero import (below). `GEN` imports `A2` as editor. `THES` imports `A3` as contributor, since Zotero's thesis has no editor role. `UNPD` drops both (D6).
+- **Zotero import check (2026-11-19, tasks 5).**
+  - Setup: `zotero/translation-server` at `00032f6` (2026-11-05), translators submodule `9d04f4b`, 752 translators loaded, run on localhost and `POST /import`.
+  - Sample: 22 records, at least two per `TY`. Eighteen were real localhost refs served by the new single read: chapters with editors and DOIs; serial monographs with and without editors and series numbers; a Ph.D. and an M.S. thesis; books with and without editors; unpublished refs with descriptions; journal articles; `other` with and without editors; a multi-line comment; non-ASCII authors; a single page; a ref with no title. Four were made by hand, because localhost has no `edited collection`, no thesis with editors and no unpublished ref with pages: two `EDBOOK`, a thesis with editors and an unpublished ref with editors and pages.
+  - Item types follow D4. Authors import as authors. `EDBOOK` authors import as editors. `A2` imports as editor on `CHAP` and `GEN`, and `A3` as editor on `BOOK`, `SER` and `EDBOOK`.
+  - `T2` lands as `publicationTitle` (journal), `bookTitle` (chapter) or `series` (book). `VL` lands as volume, `IS` as issue on journals, and `M1` as `seriesNumber` on books. `SP`/`EP` land as pages on articles and chapters, and the one `SP` as `numPages` on books, theses and manuscripts. `M3` lands as `thesisType`.
+  - `DO`, `UR`, `LA`, `PB` and `CY` land as DOI, URL, language, publisher and place. Each `N1` becomes a child note. `DB` lands in Zotero's *archive* field. `ID` is ignored. Non-ASCII names arrive intact.
+  - Two corrections were made (D5): book pages and the number on book types. In the first import, before them, `numPages` held the first page and the series number was dropped. One finding is documented and not worked around: `UNPD` editors are dropped (D6). The clone was deleted after the check.
 - **[`EDBOOK` turns the authors of a whole book into editors]** → Settled by `reclassify-single-title-books`: the whole books that Classic stored as `book/book chapter` are now `standalone book`, so `edited collection` holds only real edited volumes. Classic edited volumes that migrated as `standalone book` export as `BOOK` until a curator corrects their type.
 - **[One-line editors look wrong in a reference manager]** → Documented. The real fix is structured editors in the reference model.
 - **[A large unbounded RIS export]** → It shares the existing per-instance cap and streaming, as CSV does. Each record costs about the same as a CSV row.
+
+## Verification
+
+**Whole export against localhost (2026-11-19, tasks 4.3).** `GET /api/v1/references` with `Accept: application/x-research-info-systems`, no `limit`, from a server on localhost `pbdb`: 200, 39.5 MB, 1.7 s, 96,119 records. Every line has the `TAG  - value` form and ends in CRLF, and there is no byte order mark. The count of records by `TY` equals the count of current references by type:
+
+| `TY` | Records | References |
+|---|---|---|
+| `JOUR` | 81,050 | journal article 81,050 |
+| `CHAP` | 5,712 | article in edited collection 5,712 |
+| `SER` | 3,564 | serial monograph 3,564 |
+| `BOOK` | 2,623 | standalone book, not a thesis, 2,623 |
+| `GEN` | 2,459 | other 2,459 |
+| `THES` | 435 | standalone book, `Ph.D. thesis` or `M.S. thesis`, 435 |
+| `UNPD` | 276 | unpublished 276 |
+| `EDBOOK` | 0 | edited collection 0 |
+
+Localhost has no `edited collection` references, so `EDBOOK` is exercised only by the unit tests and by a hand-made record in the Zotero check.
 
 ## Migration Plan
 

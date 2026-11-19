@@ -9,7 +9,8 @@ export default async function references(fastify) {
     source: descriptorFor('references').source,
     filters: descriptorFor('references').filters,
     component: 'Reference',
-    formats: ['text/csv'],
+    formats: ['text/csv', 'application/x-research-info-systems'],
+    singleFormats: ['application/x-research-info-systems'],
     // A payload in the reference source's shape, as a merged read returns it.
     stub: (permid = 'ref-00000000') => ({
       permid,

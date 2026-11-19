@@ -75,18 +75,41 @@ test('a list documents its filters and bounds; an expansion is a boolean', () =>
   assert.equal(taxa.schema.type, 'boolean');
 });
 
+const RIS = 'application/x-research-info-systems';
+const JSON_CSV = ['application/json', 'text/csv'];
+
 test('the four large lists document a CSV response beside JSON; nothing else does', () => {
   const CSV_LISTS = ['/api/v1/authorities', '/api/v1/collections', '/api/v1/references', '/api/v1/taxa'];
   for (const [path, { get }] of Object.entries(doc.paths)) {
     const content = get.responses['200'].content ?? {};
     if (CSV_LISTS.includes(path)) {
-      assert.deepEqual(Object.keys(content), ['application/json', 'text/csv'], path);
+      const expected = path === '/api/v1/references' ? [...JSON_CSV, RIS] : JSON_CSV;
+      assert.deepEqual(Object.keys(content), expected, path);
       assert.equal(content['text/csv'].schema.type, 'string', path);
       assert.match(content['text/csv'].schema.description, /Without `limit` the response holds the whole result/, path);
       assert.match(get.responses['200'].description, /whole result unless `limit` is sent/, path);
     } else {
       assert.equal('text/csv' in content, false, path);
     }
+  }
+});
+
+test('the references list and single read document RIS; nothing else does (ris-output)', () => {
+  const list = doc.paths['/api/v1/references'].get.responses['200'];
+  assert.deepEqual(Object.keys(list.content), ['application/json', 'text/csv', RIS]);
+  assert.equal(list.content[RIS].schema.type, 'string');
+  assert.match(list.content[RIS].schema.description, /RIS, for reference managers/);
+  assert.match(list.description, /whole result unless `limit` is sent/);
+
+  const single = doc.paths['/api/v1/references/{permid}'].get.responses['200'];
+  assert.deepEqual(Object.keys(single.content), ['application/json', RIS]);
+  assert.equal(single.content[RIS].schema.type, 'string');
+  assert.match(single.content[RIS].schema.description, /RIS, for reference managers/);
+  assert.ok(single.content['application/json'].schema, 'the JSON envelope is still documented');
+
+  for (const [path, { get }] of Object.entries(doc.paths)) {
+    if (path === '/api/v1/references' || path === '/api/v1/references/{permid}') continue;
+    assert.equal(RIS in (get.responses['200'].content ?? {}), false, path);
   }
 });
 

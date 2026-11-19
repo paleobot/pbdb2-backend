@@ -363,12 +363,9 @@ authorities, collections and taxa return CSV when `Accept` asks for `text/csv`
   plain `<a href>` download, or `read.csv(url)` with no headers), use `?format=csv`: unknown
   parameters are a 400 today, so the name is free and adding it breaks nothing. A `.csv` suffix
   would need an extra route per list.
-- **RIS for references**, list and single read. Classic serves it (`refs/list.ris`,
-  `application/x-research-info-systems`). The negotiation, the 406 rule, the streaming and the
-  export cap already take another format; RIS needs a registry entry in `api/src/lib/formats.js`
-  and its own serializer. Open: the `TY` mapping per publication type, author formatting (Classic
-  writes `AU  - Bone,D.A.`), whether to write Classic's preamble lines (`Provider:`, `Database:`),
-  and whether `ID` holds the permid.
+- **RIS for references**, list and single read: built by `add-ris-reference-output`
+  (`api/docs/ris-output.md`, spec `ris-output`). Whether this entry is marked done or removed is
+  decided when that change is archived.
 - **TSV** (`text/tab-separated-values`). Nearly free, since only the separator and quoting differ.
   Waits for someone to ask.
 - **Classification columns** (`phylum`, `class`, `order`, `family`) on taxa, as Classic's

@@ -9,19 +9,26 @@
  */
 
 import { csvSerializer } from './csv.js';
+import { risSerializer } from './ris.js';
 
 export const JSON_TYPE = 'application/json';
 
 /**
- * The API's non-JSON formats, by media type. `serializer(source)` builds, once
- * per route, the object that turns records into text; `extension` names the
- * downloaded file; `contentType` is the full header value.
+ * The API's non-JSON formats, by media type. `serializer(source, { baseHref })`
+ * builds, once per route, the object that turns records into text (`baseHref`
+ * is the route group's absolute URL; RIS needs it, CSV ignores it);
+ * `extension` names the downloaded file; `contentType` is the full header value.
  */
 export const FORMATS = {
   'text/csv': {
     contentType: 'text/csv; charset=utf-8; header=present',
     extension: 'csv',
     serializer: csvSerializer,
+  },
+  'application/x-research-info-systems': {
+    contentType: 'application/x-research-info-systems; charset=utf-8',
+    extension: 'ris',
+    serializer: risSerializer,
   },
 };
 

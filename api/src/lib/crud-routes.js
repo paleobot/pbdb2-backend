@@ -56,7 +56,9 @@ const HIDDEN = { hide: true };
  *   override the default link hydration, for a group with no payload source
  *   (taxa, whose descriptor links and containing chain hydrate themselves)
  * @param {string[]} [opts.formats]  non-JSON media types (formats.js) the list
- *   read offers; single reads offer none (csv-output)
+ *   read offers (csv-output)
+ * @param {string[]} [opts.singleFormats]  non-JSON media types the single read
+ *   offers; none by default, and never CSV (references offer RIS; ris-output)
  * @param {object} [opts.exportSource]  the payload source a format's output is
  *   derived from; defaults to `source` (taxa, which has no `source`, passes
  *   `taxonSource`)
@@ -65,7 +67,7 @@ export function registerCrudRoutes(
   fastify,
   {
     type, stub, repository, source, filters, expansions, component, hidden = false, readOnly = false,
-    hydrate: customHydrate, formats = [], exportSource = source,
+    hydrate: customHydrate, formats = [], singleFormats = [], exportSource = source,
   },
 ) {
   const write = { preHandler: fastify.authenticate, schema: HIDDEN };
@@ -84,15 +86,33 @@ export function registerCrudRoutes(
 
   // Single read. It takes no filters and no pagination, so its schema recognizes
   // no query parameters — but it is validated on the same terms as a list, so
-  // strictness does not differ by endpoint shape.
-  fastify.get('/:permid', { schema: singleRouteSchema({ component, hidden }) }, async (request, reply) => {
-    if (!repository) return reply.sendData(hydrate(stub(request.params.permid)), { type });
-
-    const record = await repository.readHead(request.params.permid);
-    if (!record) {
-      throw fastify.httpErrors.notFound(`No ${type} with permid '${request.params.permid}'`);
+  // strictness does not differ by endpoint shape. A format it offers serves the
+  // one record as that format's header and record (ris-output; design D3).
+  const singleSerializers = buildSerializers(fastify, singleFormats, exportSource);
+  const single = {
+    schema: singleRouteSchema({ component, hidden, formats: singleFormats }),
+    config: { formats: singleFormats },
+  };
+  fastify.get('/:permid', single, async (request, reply) => {
+    const { permid } = request.params;
+    let record;
+    if (repository) {
+      record = await repository.readHead(permid);
+      if (!record) throw fastify.httpErrors.notFound(`No ${type} with permid '${permid}'`);
+    } else {
+      record = stub(permid);
     }
-    return reply.sendData(hydrate(record), { type });
+    record = hydrate(record);
+
+    const mediaType = negotiate(request.headers.accept, singleFormats);
+    if (mediaType === JSON_TYPE) return reply.sendData(record, { type });
+
+    const format = FORMATS[mediaType];
+    const serializer = singleSerializers[mediaType];
+    reply
+      .type(format.contentType)
+      .header('Content-Disposition', `attachment; filename="${permid}.${format.extension}"`);
+    return reply.send(request.method === 'HEAD' ? '' : serializer.header() + serializer.record(record));
   });
 
   if (readOnly) {
@@ -158,7 +178,16 @@ function registerMethodNotAllowed(fastify, type) {
   }
 }
 
-/** How the description words each non-JSON format a list offers. */
+/**
+ * Each offered format's serializer, built once per route. `baseHref` is the
+ * group's absolute URL, for a format that links back to the record (RIS's `UR`).
+ */
+function buildSerializers(fastify, formats, exportSource) {
+  const baseHref = fastify.publicBaseUrl + fastify.prefix;
+  return Object.fromEntries(formats.map((f) => [f, FORMATS[f].serializer(exportSource, { baseHref })]));
+}
+
+/** How the description words each non-JSON format a read offers. */
 const FORMAT_DOCS = {
   'text/csv':
     'CSV, when `Accept` ranks `text/csv` above `application/json`. One header line, then one line per ' +
@@ -166,7 +195,15 @@ const FORMAT_DOCS = {
     'and further pages are in the `Link` header. Columns come from the record schema: nested fields as ' +
     'dotted paths, array elements joined with `|` (an array inside one with `;`), and `\\`, `|` and `;` ' +
     'inside an element escaped with `\\`. A link gives its permid and label.',
+  'application/x-research-info-systems':
+    'RIS, for reference managers, when `Accept` ranks `application/x-research-info-systems` above ' +
+    '`application/json`. One record per reference, from `TY` to `ER`, records separated by a blank line; ' +
+    'UTF-8, CRLF line endings.',
 };
+
+/** A format's 200 content entry: a string, worded by FORMAT_DOCS. */
+const formatContent = (formats) =>
+  Object.fromEntries(formats.map((f) => [f, { schema: { type: 'string', description: FORMAT_DOCS[f] } }]));
 
 /**
  * The schema of a list read: its querystring, from what the resource declares,
@@ -182,7 +219,7 @@ export function listRouteSchema({ filters, source, expansions, component, hidden
         description: `${json.description}; in another format, the whole result unless \`limit\` is sent`,
         content: {
           [JSON_TYPE]: { schema: json },
-          ...Object.fromEntries(formats.map((f) => [f, { schema: { type: 'string', description: FORMAT_DOCS[f] } }])),
+          ...formatContent(formats),
         },
       },
     };
@@ -196,12 +233,27 @@ export function listRouteSchema({ filters, source, expansions, component, hidden
   };
 }
 
-/** The schema of a single read: its `permid`, no query parameters, one `component` record. */
-export function singleRouteSchema({ component, hidden = false }) {
+/**
+ * The schema of a single read: its `permid`, no query parameters, one
+ * `component` record, plus the text of each non-JSON format it offers.
+ */
+export function singleRouteSchema({ component, hidden = false, formats = [] }) {
+  const json = component ? singleEnvelope({ $ref: `${component}#` }) : undefined;
+  let response;
+  if (json && formats.length > 0) {
+    response = {
+      200: {
+        description: json.description,
+        content: { [JSON_TYPE]: { schema: json }, ...formatContent(formats) },
+      },
+    };
+  } else if (json) {
+    response = { 200: json };
+  }
   return {
     params: PERMID_PARAMS_SCHEMA,
     querystring: SINGLE_QUERY_SCHEMA,
-    ...(component ? { response: { 200: singleEnvelope({ $ref: `${component}#` }) } } : {}),
+    ...(response ? { response } : {}),
     ...(hidden ? HIDDEN : {}),
   };
 }
@@ -225,7 +277,7 @@ export function listReadHandler(
   { type, stub, repository, hydrate, filters: filterDefs, expansions, formats = [], exportSource },
 ) {
   // Each offered format's serializer, built once: its columns come from the schema.
-  const serializers = Object.fromEntries(formats.map((f) => [f, FORMATS[f].serializer(exportSource)]));
+  const serializers = buildSerializers(fastify, formats, exportSource);
 
   return async function listRead(request, reply) {
     const filters = collectListFilters(request.query, fastify.httpErrors, filterDefs, expansions);

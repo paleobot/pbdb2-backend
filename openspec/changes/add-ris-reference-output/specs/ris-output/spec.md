@@ -129,9 +129,9 @@ A record SHALL consist of the following tags, in this order. A tag whose value i
 | `T2` | `journalTitle`, else `bookTitle`, else `seriesTitle` |
 | `M3` | `bookType`, on `THES` only |
 | `VL` | `journalVolume`, else `seriesVolume` |
-| `IS` | `journalNumber`, else `seriesNumber` |
-| `SP` | `pages.first` |
-| `EP` | `pages.last`, only when it differs from `pages.first` |
+| `IS` or `M1` | `journalNumber`, else `seriesNumber`: `M1` when `TY` is `SER`, `EDBOOK`, `BOOK` or `THES`, `IS` otherwise |
+| `SP` | `pages.first`; on `SER`, `EDBOOK`, `BOOK`, `THES` and `UNPD`, the pages as one value (below) |
+| `EP` | `pages.last`, only when it differs from `pages.first`; never on `SER`, `EDBOOK`, `BOOK`, `THES` or `UNPD` |
 | `PB` | `publisher` |
 | `CY` | `publicationCity` |
 | `N1` | `comments` |
@@ -140,7 +140,9 @@ A record SHALL consist of the following tags, in this order. A tag whose value i
 | `DO` | `doi`, as stored |
 | `ER` | empty |
 
-The same precedence for `T2`, `VL` and `IS` SHALL apply to every publication type. No other field SHALL be exported; in particular `legacyIDs` SHALL NOT be.
+The same precedence for `T2`, `VL` and the number SHALL apply to every publication type. No other field SHALL be exported; in particular `legacyIDs` SHALL NOT be.
+
+On `SER`, `EDBOOK`, `BOOK`, `THES` and `UNPD`, where Zotero reads `SP` as the number of pages and drops `EP`, the pages SHALL be one `SP` value: `pages.last` when `pages.first` is 1 (a page count); the one page when only one is present or both are equal; otherwise `pages.first`, a hyphen and `pages.last`.
 
 #### Scenario: A journal article
 
@@ -150,12 +152,23 @@ The same precedence for `T2`, `VL` and `IS` SHALL apply to every publication typ
 #### Scenario: A serial monograph's series
 
 - **WHEN** a serial monograph with `seriesTitle` `Bulletin of the New Mexico Museum of Natural History and Science`, `seriesVolume` `62` and `seriesNumber` `2` is exported
-- **THEN** the record has `T2` with the series title, `VL  - 62` and `IS  - 2`
+- **THEN** the record has `T2` with the series title, `VL  - 62` and `M1  - 2`
+- **AND** it has no `IS` line
 
 #### Scenario: A chapter's book
 
 - **WHEN** an `article in edited collection` with `bookTitle` `Dinosaur Tracks` is exported
 - **THEN** the record has `T2  - Dinosaur Tracks`
+
+#### Scenario: A book's pages from page 1
+
+- **WHEN** a `standalone book` with `pages.first` 1 and `pages.last` 94 is exported
+- **THEN** the record has `SP  - 94` and no `EP` line
+
+#### Scenario: A range inside a series volume
+
+- **WHEN** a `serial monograph` with `pages.first` 834 and `pages.last` 848 is exported
+- **THEN** the record has `SP  - 834-848` and no `EP` line
 
 #### Scenario: A single page
 
