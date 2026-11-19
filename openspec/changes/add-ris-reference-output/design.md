@@ -12,14 +12,14 @@ The reference payload (`payloadSchemas/reference.schema.js`) has:
 - seven publication types
 - structured `authors` (`familyName`, `givenName`)
 - a free-text `editors` string
-- type-specific container fields (`journalTitle`, `bookTitle`, `seriesTitle`, with volume and number fields)
+- type-specific container fields (`journalTitle`, `bookTitle`, `seriesTitle`, with volume and number fields, including `seriesNumber` on serial monographs)
 - `pages: { first, last }`, `doi`, `language`, `comments`, and `description` for unpublished refs
 
 The db variant accepts any declared field on any type, so legacy refs can carry fields their type would not allow on create.
 
 Classic's writer (`classic/lib/PBDB/ReferenceEntry.pm`, `formatRISRef`) is the precedent, but it has quirks: an unreachable `SER` branch, `UNPD`, compact author forms and slash dates. The tag mapping below was checked against Zotero's RIS translator (`zotero/translators` `RIS.js`): how each `TY` and tag imports.
 
-This change assumes `fix-book-chapter-migration` and `reclassify-single-title-books` have been applied. After them, chapters are `article in edited collection` with a `bookTitle`, the 665 single-title Classic `book/book chapter` refs are `standalone book`, and no Classic ref maps to `edited collection`. That type holds only PBot refs and references created through the API, which are real edited volumes.
+This change assumes `fix-book-chapter-migration`, `reclassify-single-title-books` and `keep-classic-container-data` have been applied (all are archived, and localhost was rebuilt after each). After them, chapters are `article in edited collection` with a `bookTitle`, the 665 single-title Classic `book/book chapter` refs are `standalone book`, and no Classic ref maps to `edited collection`. That type holds only PBot refs and references created through the API, which are real edited volumes.
 
 ## Goals / Non-Goals
 
@@ -92,7 +92,7 @@ Tags are written in this order, and each is omitted when its value is absent or 
 | `T2` | the container title: `journalTitle`, else `bookTitle`, else `seriesTitle` |
 | `M3` | `bookType`, on `THES` only |
 | `VL` | `journalVolume`, else `seriesVolume` |
-| `IS` | `journalNumber` |
+| `IS` | `journalNumber`, else `seriesNumber` (added by `keep-classic-container-data`) |
 | `SP` | `pages.first` |
 | `EP` | `pages.last`, only when it differs from `pages.first` |
 | `PB` | `publisher` |
@@ -155,7 +155,7 @@ The `api/docs/` RIS section lists each difference:
 
 ## Migration Plan
 
-Additive, with no data step. Apply after `fix-book-chapter-migration` has been applied and localhost re-migrated, so the integration tests and the Zotero import see chapters as `CHAP` with a `T2`. Rollback is a revert: no client depends on RIS until it ships.
+Additive, with no data step. The migration changes it depends on are applied and localhost is re-migrated, so the integration tests and the Zotero import see chapters as `CHAP` with a `T2`, serial monographs with an `IS`, and container notes in `N1`. Rollback is a revert: no client depends on RIS until it ships.
 
 ## Open Questions
 

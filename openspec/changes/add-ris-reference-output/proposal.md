@@ -2,7 +2,7 @@
 
 Classic serves references as RIS (`refs/list.ris`, `application/x-research-info-systems`), the format reference managers (Zotero, EndNote, Mendeley) import. pbdb2 has no equivalent, so a user who wants PBDB references in their library has to go back to Classic or convert JSON by hand. `add-csv-list-output` built the format registry, negotiation, 406 rule, streaming and export cap so that a second format could be added without changing them. RIS is that second format, and the backlog has carried it since then.
 
-The decisions were settled in exploration on 2026-11-10 and are recorded in `design.md`. That includes a check of how Zotero's RIS importer reads each tag. This change depends on `fix-book-chapter-migration`: until it is applied, 3,045 chapters are stored as edited collections with no book title, and they would export as whole books.
+The decisions were settled in exploration on 2026-11-10 and are recorded in `design.md`. That includes a check of how Zotero's RIS importer reads each tag. It builds on `fix-book-chapter-migration`, `reclassify-single-title-books` and `keep-classic-container-data`, all now applied: chapters are stored with their book title, single-title books as standalone books, and serial monograph numbers and other Classic container values are kept, so each exports to the right RIS type and tags.
 
 ## What Changes
 
@@ -47,5 +47,5 @@ No change to stored data, schemas or DDL. CSV behaviour is unchanged.
   - `api/src/routes/api/v1/references/index.js` (offering the format)
 - **Tests:** unit tests for the serializer, covering each type and tag; route tests for negotiation, 406, single read and streaming; integration against localhost.
 - **Docs:** `api/docs/` gets a RIS section. `api/CLAUDE.md` gets a mention if it lists formats. The "Output formats beyond CSV" entry in `docs/api-design-backlog.md` is updated to point here.
-- **Dependency:** `fix-book-chapter-migration` must be applied and localhost re-migrated before this change's integration tests and the Zotero import check, so that chapters export as `CHAP` with their book title.
+- **Dependency:** none outstanding. The migration changes above are applied and localhost is re-migrated, so the integration tests and the Zotero import check see current data.
 - **Clients:** this only adds behaviour. JSON stays the default, and no existing response changes.
