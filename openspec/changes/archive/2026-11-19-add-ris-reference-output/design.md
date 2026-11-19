@@ -194,4 +194,4 @@ Additive, with no data step. The migration changes it depends on are applied and
 ## Open Questions
 
 - ~~`EDBOOK` or `BOOK` for edited collections~~ Settled (2026-11-13): `EDBOOK`. `reclassify-single-title-books` moved the 665 single-title Classic refs, mostly authored books, to `standalone book`, so `edited collection` holds only real edited volumes.
-- Whether to add `RIS` to the `api-design-backlog` "Output formats beyond CSV" entry as done, or remove the entry. Decided when this change is archived.
+- ~~Whether to mark the `api-design-backlog` "Output formats beyond CSV" RIS bullet done, or remove it~~ Settled at archive (2026-11-19): removed. The entry's intro names RIS beside CSV, and its bullets keep only what is still deferred.

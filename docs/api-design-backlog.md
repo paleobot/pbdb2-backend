@@ -357,15 +357,14 @@ link is written.
 
 **Deferred** (`add-csv-list-output`, 2026-11-09). The lists and `ids` reads of references,
 authorities, collections and taxa return CSV when `Accept` asks for `text/csv`
-(`api/docs/csv-output.md`). Left out on purpose:
+(`api/docs/csv-output.md`). References also return RIS, list and single read, when `Accept` asks
+for `application/x-research-info-systems` (`add-ris-reference-output`, 2026-11-19;
+`api/docs/ris-output.md`). Left out on purpose:
 
 - **A format selector in the URL.** Formats are chosen by `Accept` only. If one is asked for (for a
   plain `<a href>` download, or `read.csv(url)` with no headers), use `?format=csv`: unknown
   parameters are a 400 today, so the name is free and adding it breaks nothing. A `.csv` suffix
   would need an extra route per list.
-- **RIS for references**, list and single read: built by `add-ris-reference-output`
-  (`api/docs/ris-output.md`, spec `ris-output`). Whether this entry is marked done or removed is
-  decided when that change is archived.
 - **TSV** (`text/tab-separated-values`). Nearly free, since only the separator and quoting differ.
   Waits for someone to ask.
 - **Classification columns** (`phylum`, `class`, `order`, `family`) on taxa, as Classic's

@@ -135,7 +135,7 @@ A path written in a spec SHALL be read relative to the area the spec belongs to:
   `db-connection-config`, `classic-doi-audit`, and every spec named `*-migration`): relative to
   `migrations/`. In these specs, "the repository root" means `migrations/`.
 - API specs (`api-discovery`, `api-foundation`, `auth-stub`, `csv-output`, `data-access`, `list-pagination`,
-  `reference-enrichment`, `resource-routes`, `taxa-reads`): relative to `api/`.
+  `reference-enrichment`, `resource-routes`, `ris-output`, `taxa-reads`): relative to `api/`.
 - Every other spec, including `prefixed-permids`: relative to the repository root.
 
 A path that crosses areas SHALL be written from the repository root and say so (for example, "`db/`
@@ -157,4 +157,3 @@ migration or API spec SHALL be added to the lists above.
 #### Scenario: The DOI audit spec names its script
 - **WHEN** `classic-doi-audit` names `src/refs-migration/audit-dois.js`
 - **THEN** it means `migrations/src/refs-migration/audit-dois.js`
-

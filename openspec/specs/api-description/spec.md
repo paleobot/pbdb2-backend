@@ -51,6 +51,10 @@ allows a field when its `fields` list names it or it is unrestricted). Each oper
 SHALL describe its HTTP 200 response as the envelope with its `data` schema, under
 `application/json`. An operation that offers CSV (`csv-output`) SHALL also describe a `text/csv`
 200 response as a string, and SHALL state that a request with no `limit` returns the whole result.
+An operation that offers RIS (`ris-output`), list or single read, SHALL also describe an
+`application/x-research-info-systems` 200 response as a string whose description says the format is
+RIS for reference managers; on a list it SHALL state that a request with no `limit` returns the
+whole result.
 
 #### Scenario: A list's filters are discoverable
 
@@ -92,10 +96,26 @@ SHALL describe its HTTP 200 response as the envelope with its `data` schema, und
 - **WHEN** the document's `GET /api/v1/collections` operation is read
 - **THEN** its 200 response has `application/json` and `text/csv` content
 
+#### Scenario: The references list documents three formats
+
+- **WHEN** the document's `GET /api/v1/references` operation is read
+- **THEN** its 200 response has `application/json`, `text/csv` and `application/x-research-info-systems` content
+
+#### Scenario: The reference single read documents RIS
+
+- **WHEN** the document's `GET /api/v1/references/{permid}` operation is read
+- **THEN** its 200 response has `application/json` and `application/x-research-info-systems` content
+- **AND** it has no `text/csv` content
+
 #### Scenario: A read with no CSV documents JSON only
 
 - **WHEN** the document's `GET /api/v1/schemas` operation is read
 - **THEN** its 200 response has no `text/csv` content
+
+#### Scenario: Only references document RIS
+
+- **WHEN** the document's `GET /api/v1/authorities` and `GET /api/v1/collections/{permid}` operations are read
+- **THEN** neither 200 response has `application/x-research-info-systems` content
 
 ### Requirement: The document covers exactly the operations a client can rely on
 
@@ -167,4 +187,3 @@ from a schema can never be dropped, coerced or blanked in a response.
 
 - **WHEN** a handler's result carries a field its response schema does not declare
 - **THEN** the field is present in the response body as the handler built it
-
