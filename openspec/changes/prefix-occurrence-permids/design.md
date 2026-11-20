@@ -145,3 +145,22 @@ what the registry held.
 | Table contents vs `pbdb_pre_floor10m` | identical for all 20 populated or empty data tables (`refs`, `persons`, `authorities`, `collections`, `specimens`, `schemas`, `characters`, `states`, both child-ref tables, the four opinion tables, `homonyms`, `taxa`, `taxa_linnaean`, `taxa_clades`, `taxa_attachments`, `cycle_cuts`): md5 of each row's jsonb minus `id`, version links, `created_at` and `permid_no`, after mapping every old 7-digit sequence permid to its number plus 9,000,000. FK ids repeat too |
 
 Suites: `npm test` (root) 149 + 126 pass; `npm run test:integration` 78 pass; none skipped.
+
+**Aurora** `pbdb2_migration_test`, rebuilt 2026-11-19 at 6357625 in place (DROP/CREATE,
+`CREATE EXTENSION postgis` 3.6.3, runner `--createdb`; all 11 steps, audit clean, 37m31s), compared
+with the rebuilt localhost:
+
+| Check | Result |
+|---|---|
+| Row counts (48 tables) | identical |
+| Legacy permids (1,237,522), sequence permids (1,214,936), per-prefix counts | identical md5 and counts |
+| Permids numbered 1,000,000 – 9,999,999; `uuid` permid columns | 0 on both |
+| `occurrences` | empty on both; `permid` and `taxon_permid` are `text`, collation `C` |
+| Table contents (same 21 tables, rows sorted bytewise) | identical for every table except `collections` |
+| `collections` | payload and every other column identical. `location` differs on 1,039 rows (1,022 NAD27 CONUS, 16 NAD83, 1 WGS72), mean 12.7 m, max 30 m |
+
+The `location` difference is not this change's. Those rows are reprojected to WGS84 by
+`ST_Transform` in `migrate-collections.js`, and the two servers run different PROJ (localhost
+PostGIS 3.4.2 / PROJ 9.4.0, Aurora 3.6.3 / PROJ 9.5.0), so they pick different datum
+transformations. Localhost reproduced its own locations exactly across the rebuild. Earlier
+Aurora comparisons checked payloads, not `location`, so this is the first time it shows.

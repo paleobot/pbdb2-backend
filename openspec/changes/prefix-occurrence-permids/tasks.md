@@ -28,4 +28,4 @@
 - [x] 4.2 Rebuild localhost with the full runner (`--createdb`)
 - [x] 4.3 Check D6: row counts unchanged; legacy permid md5 unchanged; no number from 1,000,000 to 9,999,999; per-prefix counts at or above 10,000,000 equal the old counts; whether each sequence number is the old one plus 9,000,000; `occurrences` exists, empty
 - [x] 4.4 Record the results in a Verification section of `design.md`
-- [ ] 4.5 With the user's go-ahead and the VPN up, rebuild Aurora `pbdb2_migration_test` and compare its counts and permid checks with localhost
+- [x] 4.5 With the user's go-ahead and the VPN up, rebuild Aurora `pbdb2_migration_test` and compare its counts and permid checks with localhost
