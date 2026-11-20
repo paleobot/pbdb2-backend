@@ -26,7 +26,7 @@ floor, above every Classic number that becomes a permid.
   Classic `reid_no` overlaps `occurrence_no`, so it is not used as a number; it stays in
   `legacyIDs.oldpbdbReidID`.
 - **BREAKING (permid values):** every sequence starts at 10,000,000 instead of 1,000,000, and
-  `register_permids` accepts legacy numbers up to 9,999,999. On the next rebuild about 1.23 million
+  `register_permids` accepts legacy numbers up to 9,999,999. On the next rebuild about 1.21 million
   sequence-numbered permids get new numbers (`AOP`, non-root `TXN`, `VOP`, `STA`, `CHR`, `SCH`, and
   PBot-only `REF` and `PRS`). Classic-numbered permids do not change. Nothing outside our own
   databases stores a permid yet, so nothing external breaks.

@@ -8,9 +8,9 @@ behind every line here: `openspec/changes/create-occurrences-schema/design.md`.
 
 | 2.0 column / payload field | Classic source | Notes |
 | --- | --- | --- |
-| `permid` | minted | uuidv7 |
+| `permid` | `occurrence_no` | `register_permids('OCC', …)` → `OCC-<occurrence_no>-<CC>`, in batches (`prefixed-permids`) |
 | `authorizer_person_id`, `enterer_person_id` | `authorizer_no`, `enterer_no` | resolves to `persons.id` = `person_no`. The 20 rows holding `0` are all excluded blank placeholders, so no fallback is needed |
-| `taxon_permid` | `taxon_no` | via `name_opinions.oldpbdb_taxon_no`. `0` and NULL are both unset (52,787 + 7, less the excluded rows) → NULL. 10 rows (2 distinct values) are orphans → NULL, logged |
+| `taxon_permid` | `taxon_no` | the `TXN` permid of the root name opinion. Its number is the Classic `taxon_no`, so this is `TXN-<taxon_no>-<CC>` (format with `format_permid('TXN', …)`), but only after checking the root name opinion exists (`name_opinions.oldpbdb_taxon_no`). `0` and NULL are both unset (52,787 + 7, less the excluded rows) → NULL. 10 rows (2 distinct values) are orphans → NULL, logged |
 | `collection_id` | `collection_no` | via collections `legacyIDs.oldpbdbID`. **NOT NULL.** The 626 occurrences with no resolvable collection (621 zero + 5 orphan) are not migrated: see "Excluded rows" |
 | `reference_id` | `reference_no` | via refs `legacyIDs.oldpbdbID`. **NOT NULL.** When unset or not in `refs` (11 rows), use the collection's reference |
 | `reidentifies_id` | — | NULL: an occurrence is the first identification |
@@ -33,6 +33,7 @@ Same as above except:
 
 | 2.0 column / payload field | Classic source | Notes |
 | --- | --- | --- |
+| `permid` | — | minted: `mint_permids('OCC', …)`, numbered from 10,000,000. `reid_no` overlaps `occurrence_no`, so it is not the number |
 | `reidentifies_id` | — | the previous row of the chain: the occurrence for the first reidentification, else the previous reidentification, ordered by `reid_no` ascending |
 | `oldpbdb_occurrence_no` | `occurrence_no` | the same value as the chain's root |
 | `oldpbdb_reid_no` | `reid_no` | |

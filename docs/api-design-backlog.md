@@ -754,6 +754,7 @@ for ordering (see Storage and ordering).
 | name_opinions | `authorities.taxon_no` for rows migrated from Classic authorities (the authority-opinions root rows). Every other row gets a sequence number: concept and misspelling rows, name backfills from the opinions migration, and lineage rows. One Classic opinion can produce two `name_opinions` rows, so `opinion_no` cannot be used. |
 | assignment_opinions, validity_opinions | the sequence for every row. `opinion_no` is not used, so it doesn't need to be carried through. |
 | schemas, characters, states | the sequence (PBot only). |
+| occurrences | Classic `occurrence_no`. Reidentifications and new occurrences get a sequence number: `reid_no` overlaps `occurrence_no`, so it stays in `legacyIDs.oldpbdbReidID`. (Added by `prefix-occurrence-permids`.) |
 
 `name_opinions` is the only table that draws on more than one Classic table (`taxon_no` and
 `opinion_no`). That's why a single source is fixed for it.
@@ -789,10 +790,13 @@ The leaning above was adopted, with these decisions the backlog didn't have. The
   Names have no prefix of their own: a taxon is cited by its root name opinion's `TXN` permid,
   whose number is the Classic `taxon_no`. (Revised 2026-10-29: name_opinions was `NOP`, and `TXL`
   and `TXC` were reserved for the derived taxa tables. `TXN` is Classic's taxon prefix, used so
-  that taxa read as taxa; see design.md decision 20.)
-- **One floor, 1,000,000, for every sequence**, above the largest Classic number that becomes a
-  permid (`taxon_no` 526,272). Legacy numbers at or above it are refused.
-- **No runner step.** Each sequence is created with `START WITH 1000000` in the DDL.
+  that taxa read as taxa; see design.md decision 20.) `OCC` occurrences, Classic's occurrence
+  prefix, was added by `prefix-occurrence-permids` (2026-11-19).
+- **One floor, 10,000,000, for every sequence**, above the largest Classic number that becomes a
+  permid (`occurrence_no` 2,078,017). Legacy numbers at or above it are refused. (Raised from
+  1,000,000, which was above `taxon_no` 526,272, by `prefix-occurrence-permids`, so that occurrences
+  keep their Classic number.)
+- **No runner step.** Each sequence is created with `START WITH 10000000` in the DDL.
 - **Check digits only in SQL.** `register_permids(prefix, bigint[])` and `mint_permids(prefix, n)`
   in `db/02-core.sql` format, register and return permids in batches; nothing in JavaScript computes
   them. The API never needs to: cursors seek on `permid_no` and lookups go by the text.
@@ -806,7 +810,7 @@ The leaning above was adopted, with these decisions the backlog didn't have. The
 ### Open: one `TXN` permid, two resources (2026-10-29)
 
 A root name opinion and the taxon derived from it share one `TXN` permid, while a spelling or
-synonymy opinion (`TXN-1000123-…`) has a `TXN` permid that is never a taxon. That was true of `NOP`
+synonymy opinion (`TXN-10000123-…`) has a `TXN` permid that is never a taxon. That was true of `NOP`
 and of the UUIDs before it. It is harmless while every link carries its `href` and nothing picks an
 endpoint from a permid's prefix. To decide when it matters:
 

@@ -17,7 +17,7 @@ Classic numbers measured on `pbdb_2026_10_18`:
 | `occurrences.occurrence_no` | 2,011,484 | 1 – 2,078,017 |
 | `reidentifications.reid_no` | 35,492 | 1 – 43,526 |
 
-The registry on localhost holds 2,452,458 permids (251 MB), 1,215,436 of them sequence-numbered
+The registry on localhost holds 2,452,458 permids (251 MB), 1,214,936 of them sequence-numbered
 (`AOP` 944,933, `TXN` 256,555, `VOP` 11,467, `STA` 1,325, `CHR` 336, `REF` 241, `PRS` 71, `SCH` 8).
 
 ## Goals / Non-Goals
@@ -123,3 +123,25 @@ Rollback: revert the commit and rebuild. Nothing outside our databases holds a p
 ## Open Questions
 
 None.
+
+## Verification
+
+Localhost `pbdb`, rebuilt 2026-11-19 at 16ec2d1 plus this change's working tree, with
+`node src/run-migrations.js --createdb` (all 11 steps, audit clean, 10m43s). The database before it
+was kept as `pbdb_pre_floor10m` (built at d700308, before the occurrences merge). Snapshot, check
+script and output: the session scratchpad (`check-d6.sh`, `check-d6-localhost.txt`).
+
+The Context figure 1,215,436 was an addition slip; the per-prefix counts sum to 1,214,936, which is
+what the registry held.
+
+| Check (D6) | Result |
+|---|---|
+| Row count of every table (47 before) | unchanged; the one difference is the new `occurrences`, 0 rows (absent before) |
+| md5 of the sorted permids numbered below 1,000,000 | `269c0f16…ff98` before and after |
+| Permids numbered 1,000,000 – 9,999,999 | 0 |
+| Per prefix, count at or above 10,000,000 vs at or above 1,000,000 before | equal for all eight: `AOP` 944,933, `TXN` 256,555, `VOP` 11,467, `STA` 1,325, `CHR` 336, `REF` 241, `PRS` 71, `SCH` 8; each range is the old one shifted by 9,000,000 |
+| Each sequence permid is the old one plus 9,000,000 | yes, all 1,214,936: every expected permid is registered, and no other permid at or above 10,000,000 exists. Minting is deterministic |
+| `occurrences` | exists, empty; `permid` and `taxon_permid` are `text`, collation `C`; no public `*permid` column is `uuid` |
+| Table contents vs `pbdb_pre_floor10m` | identical for all 20 populated or empty data tables (`refs`, `persons`, `authorities`, `collections`, `specimens`, `schemas`, `characters`, `states`, both child-ref tables, the four opinion tables, `homonyms`, `taxa`, `taxa_linnaean`, `taxa_clades`, `taxa_attachments`, `cycle_cuts`): md5 of each row's jsonb minus `id`, version links, `created_at` and `permid_no`, after mapping every old 7-digit sequence permid to its number plus 9,000,000. FK ids repeat too |
+
+Suites: `npm test` (root) 149 + 126 pass; `npm run test:integration` 78 pass; none skipped.

@@ -1,7 +1,7 @@
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { setupTestDb, seedPerson } from './helpers.js';
+import { insertCollection, insertRef, mintPermid, seedPerson, setupTestDb } from './helpers.js';
 
 /**
  * The permid format, registry and minting functions in db/02-core.sql
@@ -72,8 +72,8 @@ test('register_permids formats and registers legacy numbers in input order', asy
 
 test('register_permids refuses the floor, zero, repeats and registered permids, all or nothing', async (t) => {
   if (!ctx.available) return t.skip(ctx.reason);
-  await rejects(`SELECT register_permids('COL', ARRAY[1000000]::bigint[])`, [], /between 1 and 999999/);
-  await rejects(`SELECT register_permids('COL', ARRAY[0]::bigint[])`, [], /between 1 and 999999/);
+  await rejects(`SELECT register_permids('COL', ARRAY[10000000]::bigint[])`, [], /between 1 and 9999999/);
+  await rejects(`SELECT register_permids('COL', ARRAY[0]::bigint[])`, [], /between 1 and 9999999/);
   await rejects(`SELECT register_permids('COL', ARRAY[71, 71]::bigint[])`, [], /more than once/);
 
   await one(`SELECT register_permids('AUT', ARRAY[526271]::bigint[])`);
@@ -84,7 +84,15 @@ test('register_permids refuses the floor, zero, repeats and registered permids, 
 test('the first mint for a prefix is the floor', async (t) => {
   if (!ctx.available) return t.skip(ctx.reason);
   const { permids } = await one(`SELECT mint_permids('SCH', 1) AS permids`);
-  assert.deepEqual(permids, ['SCH-1000000-26']);
+  assert.deepEqual(permids, ['SCH-10000000-57']);
+  assert.equal(await registered(permids), 1);
+});
+
+test('occurrences have their own prefix, and their Classic numbers fit below the floor', async (t) => {
+  if (!ctx.available) return t.skip(ctx.reason);
+  assert.deepEqual((await one(`SELECT mint_permids('OCC', 1) AS permids`)).permids, ['OCC-10000000-29']);
+  const { permids } = await one(`SELECT register_permids('OCC', ARRAY[2078017]::bigint[]) AS permids`);
+  assert.deepEqual(permids, ['OCC-2078017-88']);
   assert.equal(await registered(permids), 1);
 });
 
@@ -94,7 +102,7 @@ test('mint_permids mints a batch in one call, registered and in numeric order', 
   assert.equal(permids.length, 5000);
   assert.equal(new Set(permids).size, 5000);
   const numbers = permids.map((p) => Number(p.split('-')[1]));
-  assert.ok(numbers.every((n, i) => n >= 1_000_000 && (i === 0 || n === numbers[i - 1] + 1)));
+  assert.ok(numbers.every((n, i) => n >= 10_000_000 && (i === 0 || n === numbers[i - 1] + 1)));
   assert.equal(await registered(permids), 5000);
 });
 
@@ -157,4 +165,66 @@ test('a registered permid cannot be registered again', async (t) => {
   if (!ctx.available) return t.skip(ctx.reason);
   const { permids: [p] } = await one(`SELECT mint_permids('COL', 1) AS permids`);
   await rejects('INSERT INTO permids (permid) VALUES ($1)', [p], /duplicate key/);
+});
+
+// The occurrences table (occurrence-schema): an OCC permid and a TXN taxon_permid,
+// both text permids. OCC numbers come from register_permids so they never take the
+// first mint, which the prefix test above asserts.
+async function occurrenceParents() {
+  const ref = await insertRef(ctx.pool, { permid: await mintPermid(ctx.pool, 'REF'), personId });
+  const col = await insertCollection(ctx.pool, {
+    permid: await mintPermid(ctx.pool, 'COL'),
+    personId,
+    referenceId: ref.id,
+  });
+  return { referenceId: ref.id, collectionId: col.id };
+}
+const insertOccurrence = `INSERT INTO occurrences
+    (permid, authorizer_person_id, enterer_person_id, occurrence, taxon_permid, collection_id, reference_id)
+  VALUES ($1, $2, $2, '{}', $3, $4, $5)`;
+const occ = async (n) => (await one(`SELECT register_permids('OCC', ARRAY[$1]::bigint[]) AS p`, [n])).p[0];
+
+test('an occurrence takes an OCC permid and a registered TXN taxon, or none', async (t) => {
+  if (!ctx.available) return t.skip(ctx.reason);
+  const { referenceId, collectionId } = await occurrenceParents();
+  const txn = await mintPermid(ctx.pool, 'TXN');
+  const [withTaxon, withoutTaxon] = [await occ(12345), await occ(12346)];
+  assert.equal(withTaxon, 'OCC-12345-35', 'a Classic occurrence keeps its number');
+  await ctx.pool.query(insertOccurrence, [withTaxon, personId, txn, collectionId, referenceId]);
+  await ctx.pool.query(insertOccurrence, [withoutTaxon, personId, null, collectionId, referenceId]);
+  const { n } = await one(`SELECT count(*) AS n FROM occurrences WHERE permid = ANY ($1)`, [[withTaxon, withoutTaxon]]);
+  assert.equal(Number(n), 2);
+});
+
+test('an occurrence refuses another prefix, an unregistered permid and a non-TXN taxon', async (t) => {
+  if (!ctx.available) return t.skip(ctx.reason);
+  const { referenceId, collectionId } = await occurrenceParents();
+  const col = await mintPermid(ctx.pool, 'COL');
+  await rejects(insertOccurrence, [col, personId, null, collectionId, referenceId], /check constraint/);
+  const { p: unregistered } = await one(`SELECT format_permid('OCC', 4242) AS p`);
+  await rejects(insertOccurrence, [unregistered, personId, null, collectionId, referenceId], /foreign key/);
+  await rejects(insertOccurrence, [await occ(12347), personId, col, collectionId, referenceId], /check constraint/);
+});
+
+test('a second version of an occurrence keeps one head', async (t) => {
+  if (!ctx.available) return t.skip(ctx.reason);
+  const { referenceId, collectionId } = await occurrenceParents();
+  const permid = await occ(12348);
+  for (let i = 0; i < 2; i += 1) {
+    await ctx.pool.query(insertOccurrence, [permid, personId, null, collectionId, referenceId]);
+  }
+  const { heads, versions } = await one(
+    `SELECT count(*) FILTER (WHERE succeeded_by_id IS NULL) AS heads, count(*) AS versions FROM occurrences WHERE permid = $1`,
+    [permid],
+  );
+  assert.deepEqual([Number(heads), Number(versions)], [1, 2]);
+});
+
+test('no public permid column is a uuid', async (t) => {
+  if (!ctx.available) return t.skip(ctx.reason);
+  const { rows } = await ctx.pool.query(
+    `SELECT table_name || '.' || column_name AS col FROM information_schema.columns
+      WHERE table_schema = 'public' AND column_name LIKE '%permid' AND data_type = 'uuid'`,
+  );
+  assert.deepEqual(rows.map((r) => r.col), []);
 });
