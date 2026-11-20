@@ -74,7 +74,7 @@ PBot `pbotID` SHALL remain in the entity JSONB at `legacyIDs.pbotID`.
 
 #### Scenario: Schema permid assignment
 - **WHEN** a PBot Schema with `pbotID = 'abc-123'` is the first schema inserted
-- **THEN** the resulting `schemas` row has `permid` `SCH-1000000-26` (not `abc-123`), and the `schema` JSONB contains `legacyIDs.pbotID = 'abc-123'`
+- **THEN** the resulting `schemas` row has `permid` `SCH-10000000-57` (not `abc-123`), and the `schema` JSONB contains `legacyIDs.pbotID = 'abc-123'`
 
 #### Scenario: Character permid assignment
 - **WHEN** a PBot Character with `pbotID = 'char-bbb'` is inserted
@@ -406,3 +406,4 @@ lines SHALL be unchanged by the reordering.
 #### Scenario: A record later skipped is still validated
 - **WHEN** a fetched schema has no resolvable enterer, or a fetched character would be an orphan, and its payload is invalid
 - **THEN** the script exits non-zero on the validation failure rather than skipping the record
+

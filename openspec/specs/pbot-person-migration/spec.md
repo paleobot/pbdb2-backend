@@ -2,9 +2,7 @@
 
 ## Purpose
 Migrate PBot GraphQL Person nodes into the new PostgreSQL persons table.
-
 ## Requirements
-
 ### Requirement: Fetch Person nodes from PBot GraphQL API
 The script SHALL fetch all Person nodes from `https://pbot.paleobiodb.org/graphql` using a single POST request. The query SHALL retrieve `pbotID`, `given`, `surname`, `email`, `orcid`, and `registered` fields.
 
@@ -126,7 +124,7 @@ cross-entity lookups expect it.
 
 #### Scenario: Permid is not the pbotID
 - **WHEN** a PBot Person with `pbotID = 'ec4353ee-467a-43cc-8383-524bd63987a7'` is inserted as a new person
-- **THEN** the row's `permid` is a minted `PRS` permid numbered from 1,000,000 up, and `person->legacyIDs->>'pbotID'` still equals `'ec4353ee-467a-43cc-8383-524bd63987a7'`
+- **THEN** the row's `permid` is a minted `PRS` permid numbered from 10,000,000 up, and `person->legacyIDs->>'pbotID'` still equals `'ec4353ee-467a-43cc-8383-524bd63987a7'`
 
 ### Requirement: Gender handling
 The script SHALL set `gender` as a string property in the `person` JSONB instead of looking up `gender_id` from `dictionaries.genders`. New PBot persons SHALL have `gender: 'Anonymous'`. The `dictionaries.genders` lookup is no longer required.
@@ -193,6 +191,7 @@ at all, by the audit long afterwards.
 #### Scenario: Resolution precedes the fetch
 - **WHEN** a dictionary the person source reads is empty
 - **THEN** the script exits non-zero before issuing the PBot GraphQL request
+
 ### Requirement: ORCID normalization
 All ORCID values from PBot SHALL be normalized by stripping the `https://orcid.org/` or `http://orcid.org/` URL prefix if present. A null or empty ORCID after trimming SHALL be treated as NULL.
 
@@ -247,6 +246,7 @@ The script SHALL be safe to re-run. Matching is based on ORCID, email, and name 
 #### Scenario: Re-run after new PBot persons added
 - **WHEN** the script runs a second time and PBot has new Person nodes
 - **THEN** only the new persons are inserted; previously migrated persons are matched and not duplicated
+
 ### Requirement: Matched persons keep their existing permid
 When a PBot Person matches an existing PG person via the ORCID, email, or name cascade, the script SHALL NOT
 mint, write, or overwrite that person's `permid`. The matched row keeps the permid it was given by
@@ -273,3 +273,4 @@ matched row never receives from this script.
 #### Scenario: Permid is not a merge key
 - **WHEN** two `persons` rows legitimately describe the same human, as persons 414 and 911 do
 - **THEN** they hold two distinct permids, and the script does not merge, alias, or reconcile them
+

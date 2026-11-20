@@ -70,7 +70,7 @@ The script SHALL mint the `permid` of each PBot reference it inserts from `mint_
 
 #### Scenario: permid assignment
 - **WHEN** a PBot Reference with `pbotID = 'ec4353ee-467a-43cc-8383-524bd63987a7'` is inserted
-- **THEN** the resulting `refs` row has a minted `REF` permid numbered from 1,000,000 up, and the JSONB still contains `legacyIDs.pbotID = 'ec4353ee-467a-43cc-8383-524bd63987a7'`
+- **THEN** the resulting `refs` row has a minted `REF` permid numbered from 10,000,000 up, and the JSONB still contains `legacyIDs.pbotID = 'ec4353ee-467a-43cc-8383-524bd63987a7'`
 
 ### Requirement: Set authorizer_person_id to Douglas Meredith
 The script SHALL set `authorizer_person_id = 1106` (Douglas Meredith) for all PBot-sourced reference records.

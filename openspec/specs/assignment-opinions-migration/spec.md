@@ -2,9 +2,7 @@
 
 ## Purpose
 Migrate the `belongs to` + `original spelling` subset of the legacy MariaDB `opinions` table into the new PostgreSQL `assignment_opinions` table as containment edges — resolving subject/containing permids through the already-migrated `name_opinions` root rows and reference/attribution/year provenance per the second-hand rule — with an explicit five-bucket skip-and-log policy and a counted reconciliation invariant (`inserted + skipped == in-scope`).
-
 ## Requirements
-
 ### Requirement: Read the in-scope opinions subset from MariaDB
 The script SHALL read from the MariaDB `opinions` table only the rows matching `status = 'belongs to' AND spelling_reason = 'original spelling'` (743,712 rows). Required columns: `child_spelling_no`, `parent_spelling_no`, `basis`, `pubyr`, `ref_has_opinion`, `reference_no`, `authorizer_no`, `enterer_no`, and the author fields (`author1last`, `author2last`, `otherauthors`) used to build attribution. Opinions with any other `status` or `spelling_reason` SHALL NOT be read; they are out of scope for this slice.
 
@@ -19,7 +17,6 @@ The script SHALL read from the MariaDB `opinions` table only the rows matching `
 #### Scenario: Streaming, not buffering
 - **WHEN** the source query executes against the in-scope rows
 - **THEN** rows are processed in streaming fashion and the source result set is not held entirely in memory
-
 
 ### Requirement: Preload name identities from name_opinions
 The script SHALL preload an in-memory Map from `name_opinions.oldpbdb_taxon_no` (current heads, `succeeded_by_id IS NULL`) to that row's `permid`. This Map resolves both `subject_permid` and `containing_permid`. It relies on the original-only invariant: `oldpbdb_taxon_no` is carried only by root/original rows, where `permid` and `subject_permid` are identically the same value, so a lookup by `oldpbdb_taxon_no` is unambiguous.
@@ -36,7 +33,6 @@ The script SHALL preload an in-memory Map from `name_opinions.oldpbdb_taxon_no` 
 - **WHEN** a `child_spelling_no` or `parent_spelling_no` has no `name_opinions` row
 - **THEN** the Map returns no value for that key (driving a skip, per the skip requirement)
 
-
 ### Requirement: Emit one assignment_opinion per resolvable in-scope row
 For every in-scope `opinions` row that resolves cleanly, the script SHALL insert exactly one `assignment_opinions` row. It SHALL set: `subject_permid` from the Map keyed by `child_spelling_no`; `containing_permid` from the Map keyed by `parent_spelling_no`; `questioned = false`; `removed = false`; and a fresh minted `permid`.
 
@@ -52,13 +48,12 @@ For every in-scope `opinions` row that resolves cleanly, the script SHALL insert
 - **WHEN** two in-scope rows are migrated
 - **THEN** they receive distinct `permid` values (each is a distinct published statement, not a version of the other)
 
-
 ### Requirement: permid is minted from the AOP sequence
 The script SHALL mint the `permid` of each `assignment_opinions` row it inserts from `mint_permids('AOP', …)` (`prefixed-permids`), in batches. Classic `opinion_no` SHALL NOT be used as the number. Each classic opinion is its own opinion identity; the script SHALL NOT collapse multiple in-scope opinions on the same taxon into one permid.
 
 #### Scenario: Minted permid accepted
 - **WHEN** an `assignment_opinions` row is inserted with a permid from `mint_permids('AOP', …)`
-- **THEN** it satisfies the `AOP` CHECK and the FK to `permids`, and its number is at least 1,000,000
+- **THEN** it satisfies the `AOP` CHECK and the FK to `permids`, and its number is at least 10,000,000
 
 #### Scenario: Multiple placements on one taxon are separate rows
 - **WHEN** a taxon has two in-scope `belongs to` original-spelling opinions from different references
@@ -75,7 +70,6 @@ The script SHALL resolve `reference_id` from the migrated `refs` record whose `r
 - **WHEN** an in-scope row has `reference_no = 42348`, which exists in no migrated ref (opinion_no 422326)
 - **THEN** no `assignment_opinions` row is inserted and the script logs the `opinion_no` and `reference_no`
 
-
 ### Requirement: Map basis to the evidence boolean
 The script SHALL set `evidence = true` when the source `basis = 'stated with evidence'`, and `evidence = false` for every other value including NULL.
 
@@ -86,7 +80,6 @@ The script SHALL set `evidence = true` when the source `basis = 'stated with evi
 #### Scenario: Everything else is false
 - **WHEN** an in-scope row has `basis = 'stated without evidence'`, `'implied'`, `'second hand'`, or NULL
 - **THEN** `evidence = false`
-
 
 ### Requirement: Set publication_year and attribution as second-hand fields gated on ref_has_opinion
 The script SHALL treat `publication_year` and `attribution` as second-hand overrides driven by the same switch. When `ref_has_opinion = 'YES'` (first-hand: the reference is the source), `publication_year` SHALL be NULL and `attribution` SHALL be omitted — `derive_taxa()` reads the year from the reference via `COALESCE(publication_year, ref.publicationYear)`. When `ref_has_opinion IS NULL` (second-hand: attributed to an earlier author), `publication_year` SHALL be `pubyr` parsed as an integer and `attribution` SHALL be a jsonb object built per `payloadSchemas/opinionAttribution.schema.js` from `author1last`/`author2last`/`otherauthors` using the `buildCitationFromFields`/`buildDescriptorsFromFields` helpers from `src/lib/authorities-builders.js` with `publishedInReference = false`.
@@ -120,7 +113,6 @@ path-qualified to the file that actually holds the helpers.
 - **WHEN** a reader follows this requirement to the implementation of `buildCitationFromFields` and `buildDescriptorsFromFields`
 - **THEN** they arrive at `src/lib/authorities-builders.js`, the single definition shared by the authorities and opinions migrations, rather than at a migration entry point
 
-
 ### Requirement: Resolve person FKs with zero-sentinel fallback
 The script SHALL use `authorizer_no` and `enterer_no` directly as `persons.id` values (persons were inserted with `id = person_no`). When `authorizer_no = 0` or `enterer_no = 0`, the script SHALL substitute the other field's value; when both are 0, it SHALL fall back to `person_no = 1`. In scope no row exercises the fallback, but it SHALL be present.
 
@@ -131,7 +123,6 @@ The script SHALL use `authorizer_no` and `enterer_no` directly as `persons.id` v
 #### Scenario: Zero-sentinel fallback available
 - **WHEN** a row has `authorizer_no = 0`, `enterer_no = 7`
 - **THEN** both person FKs resolve to 7
-
 
 ### Requirement: Skip and log rows that cannot satisfy the target constraints
 The script SHALL skip and log any in-scope row that cannot produce a valid `assignment_opinions` row, in these disjoint buckets: (a) `parent_spelling_no` is 0/NULL — 322 rows; (b) `parent_spelling_no` does not resolve in the name Map — 6 rows; (c) `reference_no` does not resolve — 1 row; (d) `child_spelling_no` does not resolve — 1 row; (e) `child_spelling_no = parent_spelling_no`, which would violate `assignment_not_self` — 1 row. Total: 331 rows. Each skip SHALL log the `opinion_no` and the bucket.
@@ -148,7 +139,6 @@ The script SHALL skip and log any in-scope row that cannot produce a valid `assi
 - **WHEN** a `parent_spelling_no` or `child_spelling_no` has no `name_opinions` row
 - **THEN** the row is skipped and logged with the corresponding bucket
 
-
 ### Requirement: Validate each attribution payload before any DB write
 Every constructed `attribution` jsonb SHALL be validated against `payloadSchemas/opinionAttribution.schema.js` during the in-memory build phase, before any DB write. On validation failure the script SHALL log the offending `opinion_no` and failing payload and exit non-zero, needing no cleanup because no insert has happened.
 
@@ -159,7 +149,6 @@ Every constructed `attribution` jsonb SHALL be validated against `payloadSchemas
 #### Scenario: Invalid attribution aborts before any insert
 - **WHEN** a constructed attribution object fails schema validation
 - **THEN** the script logs the offending `opinion_no` and payload, exits non-zero, and no rows have been inserted
-
 
 ### Requirement: Bulk insert is transaction-wrapped
 The script SHALL wrap the bulk insert of all `assignment_opinions` rows in a single Postgres transaction (`BEGIN` … `COMMIT`). On any failure before `COMMIT`, Postgres SHALL roll back atomically, leaving the table in its pre-run state with no manual cleanup required.
@@ -176,7 +165,6 @@ The script SHALL wrap the bulk insert of all `assignment_opinions` rows in a sin
 - **WHEN** a prior run aborted before commit
 - **THEN** re-running on the same source data produces the same result without a `TRUNCATE` step
 
-
 ### Requirement: Log counts and enforce the reconciliation invariant
 The script SHALL log in-scope rows read, `assignment_opinions` inserted, and skipped rows broken down by bucket, and SHALL assert the reconciliation invariant `inserted + skipped == in-scope`. If the invariant does not hold, the script SHALL abort without committing.
 
@@ -187,3 +175,4 @@ The script SHALL log in-scope rows read, `assignment_opinions` inserted, and ski
 #### Scenario: Reconciliation failure aborts
 - **WHEN** inserted plus skipped does not equal the in-scope count
 - **THEN** the script reports the discrepancy and exits non-zero without committing
+
