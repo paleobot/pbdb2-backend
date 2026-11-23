@@ -167,9 +167,9 @@ test('a registered permid cannot be registered again', async (t) => {
   await rejects('INSERT INTO permids (permid) VALUES ($1)', [p], /duplicate key/);
 });
 
-// The occurrences table (occurrence-schema): an OCC permid and a TXN taxon_permid,
-// both text permids. OCC numbers come from register_permids so they never take the
-// first mint, which the prefix test above asserts.
+// The identifications table (identification-schema): an OCC permid, a TXN taxon_permid and,
+// on the root only, a collection. OCC numbers come from register_permids so they never take
+// the first mint, which the prefix test above asserts.
 async function occurrenceParents() {
   const ref = await insertRef(ctx.pool, { permid: await mintPermid(ctx.pool, 'REF'), personId });
   const col = await insertCollection(ctx.pool, {
@@ -179,45 +179,81 @@ async function occurrenceParents() {
   });
   return { referenceId: ref.id, collectionId: col.id };
 }
-const insertOccurrence = `INSERT INTO occurrences
-    (permid, authorizer_person_id, enterer_person_id, occurrence, taxon_permid, collection_id, reference_id)
-  VALUES ($1, $2, $2, '{}', $3, $4, $5)`;
+// A root identification: its occurrence_permid is its own permid, and it carries the collection.
+const insertRoot = `INSERT INTO identifications
+    (permid, authorizer_person_id, enterer_person_id, occurrence_permid, identification, taxon_permid, collection_id, reference_id)
+  VALUES ($1, $2, $2, $1, '{}', $3, $4, $5)`;
+// A further identification of an occurrence: no collection of its own.
+const insertFurther = `INSERT INTO identifications
+    (permid, authorizer_person_id, enterer_person_id, occurrence_permid, identification, collection_id, reference_id)
+  VALUES ($1, $2, $2, $3, '{}', $4, $5)`;
 const occ = async (n) => (await one(`SELECT register_permids('OCC', ARRAY[$1]::bigint[]) AS p`, [n])).p[0];
 
-test('an occurrence takes an OCC permid and a registered TXN taxon, or none', async (t) => {
+test('a root identification takes an OCC permid and a registered TXN taxon, or none', async (t) => {
   if (!ctx.available) return t.skip(ctx.reason);
   const { referenceId, collectionId } = await occurrenceParents();
   const txn = await mintPermid(ctx.pool, 'TXN');
   const [withTaxon, withoutTaxon] = [await occ(12345), await occ(12346)];
   assert.equal(withTaxon, 'OCC-12345-35', 'a Classic occurrence keeps its number');
-  await ctx.pool.query(insertOccurrence, [withTaxon, personId, txn, collectionId, referenceId]);
-  await ctx.pool.query(insertOccurrence, [withoutTaxon, personId, null, collectionId, referenceId]);
-  const { n } = await one(`SELECT count(*) AS n FROM occurrences WHERE permid = ANY ($1)`, [[withTaxon, withoutTaxon]]);
+  await ctx.pool.query(insertRoot, [withTaxon, personId, txn, collectionId, referenceId]);
+  await ctx.pool.query(insertRoot, [withoutTaxon, personId, null, collectionId, referenceId]);
+  const { n } = await one(`SELECT count(*) AS n FROM identifications WHERE permid = ANY ($1)`, [[withTaxon, withoutTaxon]]);
   assert.equal(Number(n), 2);
 });
 
-test('an occurrence refuses another prefix, an unregistered permid and a non-TXN taxon', async (t) => {
+test('an identification refuses another prefix, an unregistered permid and a non-TXN taxon', async (t) => {
   if (!ctx.available) return t.skip(ctx.reason);
   const { referenceId, collectionId } = await occurrenceParents();
   const col = await mintPermid(ctx.pool, 'COL');
-  await rejects(insertOccurrence, [col, personId, null, collectionId, referenceId], /check constraint/);
+  await rejects(insertRoot, [col, personId, null, collectionId, referenceId], /check constraint/);
   const { p: unregistered } = await one(`SELECT format_permid('OCC', 4242) AS p`);
-  await rejects(insertOccurrence, [unregistered, personId, null, collectionId, referenceId], /foreign key/);
-  await rejects(insertOccurrence, [await occ(12347), personId, col, collectionId, referenceId], /check constraint/);
+  await rejects(insertRoot, [unregistered, personId, null, collectionId, referenceId], /foreign key/);
+  await rejects(insertRoot, [await occ(12347), personId, col, collectionId, referenceId], /check constraint/);
 });
 
-test('a second version of an occurrence keeps one head', async (t) => {
+test('only the root identification carries a collection', async (t) => {
+  if (!ctx.available) return t.skip(ctx.reason);
+  const { referenceId, collectionId } = await occurrenceParents();
+  const root = await occ(12350);
+  await ctx.pool.query(insertRoot, [root, personId, null, collectionId, referenceId]);
+  const [withCollection, without] = [await occ(12351), await occ(12352)];
+  await rejects(insertFurther, [withCollection, personId, root, collectionId, referenceId], /check constraint/);
+  await ctx.pool.query(insertFurther, [without, personId, root, null, referenceId]);
+  const { n } = await one(`SELECT count(*) AS n FROM identifications WHERE occurrence_permid = $1`, [root]);
+  assert.equal(Number(n), 2, 'the root and its further identification');
+});
+
+test('a second version of an identification keeps one head', async (t) => {
   if (!ctx.available) return t.skip(ctx.reason);
   const { referenceId, collectionId } = await occurrenceParents();
   const permid = await occ(12348);
   for (let i = 0; i < 2; i += 1) {
-    await ctx.pool.query(insertOccurrence, [permid, personId, null, collectionId, referenceId]);
+    await ctx.pool.query(insertRoot, [permid, personId, null, collectionId, referenceId]);
   }
   const { heads, versions } = await one(
-    `SELECT count(*) FILTER (WHERE succeeded_by_id IS NULL) AS heads, count(*) AS versions FROM occurrences WHERE permid = $1`,
+    `SELECT count(*) FILTER (WHERE succeeded_by_id IS NULL) AS heads, count(*) AS versions FROM identifications WHERE permid = $1`,
     [permid],
   );
   assert.deepEqual([Number(heads), Number(versions)], [1, 2]);
+});
+
+// occurrence_abundances (occurrence-abundance-schema): an ABD permid of its own, the
+// occurrence's OCC permid, and at most one head per occurrence.
+const insertAbundance = `INSERT INTO occurrence_abundances
+    (permid, authorizer_person_id, enterer_person_id, occurrence_permid, reference_id, abundance)
+  VALUES ($1, $2, $2, $3, $4, '{"value":"3","unit":"specimens"}')`;
+
+test('an abundance has an ABD permid, and one head per occurrence', async (t) => {
+  if (!ctx.available) return t.skip(ctx.reason);
+  const { referenceId, collectionId } = await occurrenceParents();
+  const root = await occ(12360);
+  await ctx.pool.query(insertRoot, [root, personId, null, collectionId, referenceId]);
+  const [abd, other] = [await mintPermid(ctx.pool, 'ABD'), await mintPermid(ctx.pool, 'ABD')];
+  assert.equal(abd, 'ABD-10000000-93', 'the first ABD mint');
+  await ctx.pool.query(insertAbundance, [abd, personId, root, referenceId]);
+  await ctx.pool.query(insertAbundance, [abd, personId, root, referenceId]); // a new version: still one head
+  await rejects(insertAbundance, [other, personId, root, referenceId], /exclusion constraint/);
+  await rejects(insertAbundance, [await mintPermid(ctx.pool, 'COL'), personId, root, referenceId], /check constraint/);
 });
 
 test('no public permid column is a uuid', async (t) => {

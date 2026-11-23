@@ -2,7 +2,9 @@
 
 ## Purpose
 Define pbdb2's permanent identifiers: prefixed, check-digited text permids of the form `<PREFIX>-<number>-<CC>`, where the prefix names the permid space, the number is a legacy Classic/PBot number or a value from that prefix's sequence, and `CC` is an ISO 7064 MOD 97-10 check pair. Every permid is held once in the `permids` registry table, every permid column is text with a format and check-digit CHECK and a foreign key to that registry, and permids are minted or registered only in SQL, never in application code.
+
 ## Requirements
+
 ### Requirement: A permid is a prefixed number with two check digits
 Every permid SHALL be text of the form `<PREFIX>-<number>-<CC>`:
 - `<PREFIX>` is one of the prefixes in "Each permid space has one prefix", in upper case.
@@ -43,13 +45,15 @@ Each table that creates entities SHALL have exactly one prefix:
 | `intervals` | `INT` | | `schemas` | `SCH` |
 | `timescales` | `TSC` | | `characters` | `CHR` |
 | `authorities` | `AUT` | | `states` | `STA` |
-| `occurrences` | `OCC` | | | |
+| `identifications` | `OCC` | | `occurrence_abundances` | `ABD` |
 
 `REF`, `PRS`, `COL`, `SPM`, `INT`, `TSC` and `OCC` are the PBDB Classic data service's identifier
 prefixes for the same record types, upper-cased. `TXN` reuses Classic's taxon prefix so that a
 taxon, whose permid is its root name opinion's, reads as a taxon; `TXN-<n>` is not promised to
 equal Classic `txn:<n>`. The derived taxa tables have no prefix of their own, because their rows
-have no identity of their own, and no prefix is reserved.
+have no identity of their own, and no prefix is reserved. The derived `occurrences` table is the same: an occurrence's permid is its root
+identification's, and every identification of the occurrence, root or not, takes an `OCC` permid, as every
+`name_opinions` row takes a `TXN` one. `ABD` is new, for a count recorded about an occurrence: Classic numbers no abundance.
 
 #### Scenario: Unknown prefix is refused
 - **WHEN** `mint_permids('XYZ', 1)` is called
@@ -58,6 +62,10 @@ have no identity of their own, and no prefix is reserved.
 #### Scenario: The retired names are unknown prefixes
 - **WHEN** `mint_permids('NOP', 1)` or `mint_permids('TXL', 1)` is called
 - **THEN** it raises an error and registers nothing
+
+#### Scenario: Abundances have their own prefix
+- **WHEN** `mint_permids('ABD', 1)` is the first mint for `ABD` in a database built from the DDL
+- **THEN** it returns `{ABD-10000000-93}`
 
 #### Scenario: Occurrences have their own prefix
 - **WHEN** `mint_permids('OCC', 1)` is the first mint for `OCC` in a database built from the DDL
@@ -89,7 +97,8 @@ prefix. This applies to:
 - the own `permid` of every table in "Each permid space has one prefix";
 - `name_opinions.subject_permid` and `target_permid`, `assignment_opinions.subject_permid` and
   `containing_permid`, `validity_opinions.subject_permid`, `taxon_annotations.subject_permid`,
-  `homonyms.permid`, `specimens.name_opinions_permid` and `occurrences.taxon_permid`, all `TXN`;
+  `homonyms.permid`, `specimens.name_opinions_permid` and `identifications.taxon_permid`, all `TXN`;
+- `identifications.occurrence_permid`, `occurrence_abundances.occurrence_permid` and the derived `occurrences.permid`, all `OCC`;
 - every permid column of the derived tables `taxa_linnaean`, `taxa_clades`, `taxa_attachments`,
   `taxa` and `cycle_cuts`, all `TXN`.
 
@@ -114,7 +123,7 @@ prefix. This applies to:
   `text COLLATE "C"` with the `TXN` CHECK and an FK to `permids`
 
 #### Scenario: An occurrence's taxon is a TXN permid
-- **WHEN** an `occurrences` row is inserted whose `taxon_permid` is a valid, registered `COL-…` permid
+- **WHEN** an `identifications` row is inserted whose `taxon_permid` is a valid, registered `COL-…` permid
 - **THEN** PostgreSQL rejects the write with a check-constraint violation
 
 #### Scenario: Every permid column compares bytewise
@@ -191,7 +200,8 @@ Each table's permid numbers SHALL come from exactly one of these sources:
 | `specimens` | Classic `specimen_no` |
 | `authorities` | the survivor's Classic `taxon_no`, which is the lowest `taxon_no` the authority absorbed |
 | `name_opinions` | root rows migrated from a Classic `authorities` row: that row's own `taxon_no`. Every other row (concept, misspelling and backfilled rows, lineage rows): the sequence |
-| `occurrences` | rows migrated from a Classic `occurrences` row: its `occurrence_no`. Rows migrated from a Classic `reidentifications` row, and new rows: the sequence |
+| `identifications` | the root row migrated from a Classic `occurrences` row: its `occurrence_no`, which is also the occurrence's permid. Rows migrated from a Classic `reidentifications` row, and new rows: the sequence |
+| `occurrence_abundances` | the sequence: Classic numbers no abundance |
 | `assignment_opinions`, `validity_opinions`, `taxon_annotations` | the sequence |
 | `schemas`, `characters`, `states` | the sequence |
 | sentinel rows, and any row with no Classic row | the sequence |
@@ -246,7 +256,7 @@ table, a constraint `<table>_one_head_per_number`, `EXCLUDE (permid_no WITH =) W
 IS NULL) DEFERRABLE INITIALLY DEFERRED`, SHALL guarantee one head per number. It is deferred because a
 new version is inserted as a head before `handle_new_version()` closes the old head in its AFTER
 trigger; a non-deferrable unique index would reject every new version. On an unversioned table
-(`persons`, and the derived `taxa_linnaean`, `taxa_clades` and `taxa`), `permid` and `permid_no` SHALL
+(`persons`, and the derived `taxa_linnaean`, `taxa_clades`, `taxa` and `occurrences`), `permid` and `permid_no` SHALL
 be `UNIQUE`. The permid text SHALL stay the source of truth, and `permid_no` is derived from it.
 
 Within one table every permid has the same prefix, and the check digits depend only on the number,
@@ -301,4 +311,3 @@ any legacy one. One floor serves every prefix.
 #### Scenario: A batch is minted in one call
 - **WHEN** `mint_permids('AOP', 5000)` is called
 - **THEN** it returns 5,000 distinct registered permids in increasing numeric order
-
