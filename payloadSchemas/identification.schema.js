@@ -1,15 +1,17 @@
 /*
- * Annotated source for the occurrence payload. Every schema used anywhere (jsonb
+ * Annotated source for the identification payload. Every schema used anywhere (jsonb
  * at rest, create body, PATCH guard, response) is derived from this one object;
  * see payloadSchemas/lib/variants.js and payloadSchemas/DESIGN_NOTES.md.
  * Annotations are described in collection.schema.js.
  *
- * An occurrence is one identification of a fossil in a collection. A
- * reidentification is another occurrence row that points back at the one it
- * supersedes (occurrences.reidentifies_id), so this one payload serves both.
+ * An identification is one statement of what a fossil in a collection is. The first
+ * one mints the occurrence; a reidentification is another identification of the same
+ * occurrence (identifications.occurrence_permid), so this one payload serves both.
+ * The occurrences table is derived from these. How many were found is a different
+ * fact with its own provenance: see occurrenceAbundance.schema.js.
  *
- * The occurrence's other links (taxon_permid, collection_id, reference_id,
- * reidentifies_id) get API fields when the API is designed.
+ * The identification's other links (taxon_permid, collection_id, reference_id,
+ * occurrence_permid) get API fields when the API is designed.
  *
  * The resolution enums mirror Classic's and are kept inline: code will depend on
  * their meaning. The ditto mark '"' is admitted verbatim; Classic's data-entry
@@ -27,7 +29,7 @@ const rank = (extraResolutions = []) => ({
 	}
 });
 
-const occurrenceProperties = {
+const identificationProperties = {
 	permid: {
 		type: "string",
 		readOnly: true,
@@ -40,11 +42,11 @@ const occurrenceProperties = {
 		properties: {
 			oldpbdbID: {
 				type: "string",
-				description: "Legacy occurrence_no for occurrences migrated from old PBDB"
+				description: "Legacy occurrence_no, on every identification migrated from old PBDB"
 			},
 			oldpbdbReidID: {
 				type: "string",
-				description: "Legacy reid_no; set only on rows that came from reidentifications"
+				description: "Legacy reid_no; set only on identifications that came from reidentifications"
 			},
 		}
 	},
@@ -56,13 +58,6 @@ const occurrenceProperties = {
 			subgenus: rank(['n. subgen.']),
 			species: rank(['n. sp.']),
 			subspecies: rank(['n. ssp.', 'var', 'morph', 'forma', 'mut'])
-		}
-	},
-	abundance: {
-		type: "object",
-		properties: {
-			value: {type: "string"},
-			unit: {type: "string"}
 		}
 	},
 	plantOrgans: {
@@ -77,14 +72,14 @@ const occurrenceProperties = {
 	comments: {type: "string"},
 }
 
-export const occurrenceSource = {
+export const identificationSource = {
 	$schema: "https://json-schema.org/draft/2020-12/schema",
-	$id: "https://pbdb2.example.com/schemas/occurrence.json",
-	title: "Occurrence",
-	description: "An occurrence (one identification of a fossil in a collection) payload in the PBDB database",
+	$id: "https://pbdb2.example.com/schemas/identification.json",
+	title: "Identification",
+	description: "An identification (one statement of what a fossil in a collection is) payload in the PBDB database",
 	type: "object",
-	properties: occurrenceProperties,
+	properties: identificationProperties,
 	unevaluatedProperties: false,
 };
 
-export default occurrenceSource;
+export default identificationSource;

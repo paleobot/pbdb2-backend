@@ -152,10 +152,12 @@ $$ LANGUAGE plpgsql;
 --   REF refs        PRS persons            COL collections   SPM specimens
 --   INT intervals   TSC timescales         AUT authorities   TXN name_opinions
 --   AOP assignment_opinions  VOP validity_opinions  TAN taxon_annotations
---   SCH schemas     CHR characters         STA states       OCC occurrences
+--   SCH schemas     CHR characters         STA states       OCC identifications
+--   ABD occurrence_abundances
 -- TXN is Classic's taxon prefix: a taxon's permid is its root name opinion's, so
 -- the derived taxa tables have no prefix of their own (TXN-<n> is not promised to
--- equal Classic txn:<n>).
+-- equal Classic txn:<n>). OCC likewise: an occurrence's permid is its root
+-- identification's, so the derived occurrences table has none.
 -- ============================================================
 
 -- One row per entity, written once when its permid is created. Every permid
@@ -186,6 +188,7 @@ CREATE SEQUENCE permid_sch_seq START WITH 10000000;
 CREATE SEQUENCE permid_chr_seq START WITH 10000000;
 CREATE SEQUENCE permid_sta_seq START WITH 10000000;
 CREATE SEQUENCE permid_occ_seq START WITH 10000000;
+CREATE SEQUENCE permid_abd_seq START WITH 10000000;
 
 -- The ELSE of permid_prefix_digits: a SQL function can't raise by itself.
 CREATE OR REPLACE FUNCTION permid_unknown_prefix(prefix text)
@@ -206,6 +209,7 @@ RETURNS text AS $$
         WHEN 'AUT' THEN '103029'  WHEN 'TXN' THEN '293323'  WHEN 'AOP' THEN '102425'
         WHEN 'VOP' THEN '312425'  WHEN 'TAN' THEN '291023'  WHEN 'SCH' THEN '281217'
         WHEN 'CHR' THEN '121727'  WHEN 'STA' THEN '282910'  WHEN 'OCC' THEN '241212'
+        WHEN 'ABD' THEN '101113'
         ELSE permid_unknown_prefix(prefix)
     END
 $$ LANGUAGE sql IMMUTABLE PARALLEL SAFE;
@@ -843,19 +847,28 @@ CREATE INDEX assignment_opinions_permid_head_idx ON assignment_opinions (permid)
 CREATE INDEX validity_opinions_permid_head_idx   ON validity_opinions (permid)   WHERE succeeded_by_id IS NULL;
 
 
--- One identification of a fossil in a collection. A reidentification is NOT a
--- separate table and NOT a new version: it is another row here whose reidentifies_id
--- points at the identification it supersedes, so a chain is a linked list
--- (occurrence <- reid1 <- reid2 ...). The version columns mean "this record was
--- edited"; a different scientist re-identifying a specimen is a taxonomic act with
--- its own reference and people, so it gets its own permid and its own row.
--- Nothing here records which identification is "current": that is the chain head
--- (the row no other row reidentifies_id-points to), derived at read time.
+-- ============================================================================
+-- IDENTIFICATIONS — the ledger behind occurrences
+-- ----------------------------------------------------------------------------
+-- Modelled on name_opinions. An occurrence (a fossil in a collection) is minted by
+-- its ROOT identification: the row whose occurrence_permid equals its own permid,
+-- exactly as a root name_opinions row has subject_permid = permid. Every other row
+-- is a further identification of that occurrence (a reidentification, in Classic's
+-- words), with its own people, reference and taxon. Nothing here records which one
+-- is current: derive_occurrences() (03-taxa.sql) picks the winner, and `occurrences`
+-- is its cache, as `taxa` is derive_taxa()'s.
 --
--- permid: a migrated occurrence keeps its Classic occurrence_no
--- (OCC-<occurrence_no>-<CC>, registered). A reidentification and any new
--- occurrence take a number from permid_occ_seq: Classic reid_no overlaps
+-- permid: like name_opinions, one prefix serves root and non-root rows. A migrated
+-- occurrence's root keeps its Classic occurrence_no (OCC-<occurrence_no>-<CC>,
+-- registered), which is therefore the occurrence's permid. A reidentification and any
+-- new occurrence take a number from permid_occ_seq: Classic reid_no overlaps
 -- occurrence_no, so it stays in the payload's legacyIDs.oldpbdbReidID.
+--
+-- The occurrence's identity lives on the root only: collection_id is set on the
+-- root and on no other row, like new_name/rank_id on a minting opinion. An
+-- occurrence does not move between collections; if one is wrong, the root is
+-- versioned. occurrence_permid is an FK to the permids registry, not to
+-- identifications: permid is not unique on a versioned table.
 --
 -- taxon_permid is the TXN permid of a root name_opinions row (the name AS SPELLED,
 -- §9.8.5), which is also that name's taxa.permid. Like specimens.name_opinions_permid
@@ -865,40 +878,71 @@ CREATE INDEX validity_opinions_permid_head_idx   ON validity_opinions (permid)  
 -- resolved to a taxon (about 2.7% of Classic rows); the as-written names live in the
 -- payload for every row regardless.
 --
--- collection_id and reference_id are NOT NULL: an occurrence has no meaning outside
--- its collection. The 626 Classic occurrences with no resolvable collection are
--- deleted-collection tombstones, blank placeholders and strays; the migration does not
--- load them and lists them in docs/occurrences-excluded.csv. A reference that does not
--- resolve falls back to the collection's.
--- reidentifies_id is an ordinary FK, so swing_fks_to_new_version() keeps it
--- pointing at the current version of the prior identification.
-CREATE TABLE occurrences (
-    id bigint GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY, -- Unique per version of the occurrence record.
-    permid text COLLATE "C" NOT NULL REFERENCES permids CHECK (permid_is_valid(permid, 'OCC')), -- Constant across versions.
+-- reference_id is NOT NULL, and so is the root's collection_id: an occurrence has no
+-- meaning outside its collection. The 626 Classic occurrences with no resolvable
+-- collection are not loaded; they are listed in docs/occurrences-excluded.csv. A
+-- reference that does not resolve falls back to the collection's.
+-- ============================================================================
+CREATE TABLE identifications (
+    id bigint GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY, -- Unique per version of the identification record.
+    permid text COLLATE "C" NOT NULL REFERENCES permids CHECK (permid_is_valid(permid, 'OCC')), -- Constant across versions. On the root, also the occurrence's permid.
     permid_no bigint GENERATED ALWAYS AS (split_part(permid, '-', 2)::bigint) STORED,
     authorizer_person_id integer REFERENCES persons("id") NOT NULL, -- Whoever was the authorizer of the enterer
     enterer_person_id integer REFERENCES persons("id") NOT NULL, -- Whoever made the entry or edit
-    occurrence jsonb NOT NULL,
+    occurrence_permid text COLLATE "C" NOT NULL REFERENCES permids CHECK (permid_is_valid(occurrence_permid, 'OCC')), -- the occurrence identified; = permid on the root
+    collection_id bigint REFERENCES collections("id"), -- root only: the occurrence's collection
     taxon_permid text COLLATE "C" REFERENCES permids CHECK (permid_is_valid(taxon_permid, 'TXN')), -- root name opinion's permid of the identified name (not an FK to taxa); NULL if unresolved
-    collection_id bigint REFERENCES collections("id") NOT NULL, -- an occurrence belongs to a collection
-    reference_id bigint REFERENCES refs("id") NOT NULL, -- NOT NULL; falls back to the collection's reference when the occurrence's does not resolve
-    reidentifies_id bigint REFERENCES occurrences("id"), -- the identification this one supersedes; NULL for the first
-    oldpbdb_occurrence_no integer, -- For migration. Can be dropped after.
+    reference_id bigint REFERENCES refs("id") NOT NULL, -- the reference that makes this identification; falls back to the collection's during migration
+    identification jsonb NOT NULL,
+    oldpbdb_occurrence_no integer, -- For migration; set on every row. Can be dropped after.
     oldpbdb_reid_no integer, -- For migration; set only on rows that came from reidentifications. Can be dropped after.
-    preceded_by_id bigint REFERENCES occurrences("id"),
-    succeeded_by_id bigint REFERENCES occurrences("id"),
+    preceded_by_id bigint REFERENCES identifications("id"),
+    succeeded_by_id bigint REFERENCES identifications("id"),
+    removed boolean,
+    created_at timestamptz DEFAULT NOW(),
+
+    -- The root carries the collection and nothing else does (cf. name_opinion_shape).
+    CONSTRAINT identification_root_shape
+        CHECK ((occurrence_permid = permid) = (collection_id IS NOT NULL))
+);
+SELECT install_version_triggers('identifications');
+
+-- taxon_permid is head-only (reads want current versions). The FK columns get
+-- plain indexes because swing_fks_to_new_version() updates them by old id across
+-- every version, and without one a new version of a collection, a reference or an
+-- identification would scan the whole table.
+CREATE INDEX identifications_occurrence_idx      ON identifications (occurrence_permid); -- all versions: derive reads each lineage's first entry
+CREATE INDEX identifications_taxon_head_idx      ON identifications (taxon_permid)      WHERE succeeded_by_id IS NULL;
+CREATE INDEX identifications_collection_idx      ON identifications (collection_id);
+CREATE INDEX identifications_reference_idx       ON identifications (reference_id);
+CREATE INDEX identifications_oldpbdb_occurrence_idx ON identifications (oldpbdb_occurrence_no);
+
+-- ============================================================================
+-- OCCURRENCE ABUNDANCES — how many were recorded, apart from what they were
+-- ----------------------------------------------------------------------------
+-- Keyed by occurrence_permid (an OCC permid, the root identification's). An
+-- abundance has its own people and reference, so re-identifying an occurrence never
+-- touches it. Its own permid is ABD-<n>, minted from permid_abd_seq: Classic has no
+-- abundance number. One head per occurrence_permid is enforced below, next to the
+-- one-head-per-number constraints.
+-- ============================================================================
+CREATE TABLE occurrence_abundances (
+    id bigint GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+    permid text COLLATE "C" NOT NULL REFERENCES permids CHECK (permid_is_valid(permid, 'ABD')),
+    permid_no bigint GENERATED ALWAYS AS (split_part(permid, '-', 2)::bigint) STORED,
+    authorizer_person_id integer REFERENCES persons("id") NOT NULL,
+    enterer_person_id integer REFERENCES persons("id") NOT NULL,
+    occurrence_permid text COLLATE "C" NOT NULL REFERENCES permids CHECK (permid_is_valid(occurrence_permid, 'OCC')), -- the occurrence counted: the root identification's permid
+    reference_id bigint REFERENCES refs("id") NOT NULL,
+    abundance jsonb NOT NULL,
+    preceded_by_id bigint REFERENCES occurrence_abundances("id"),
+    succeeded_by_id bigint REFERENCES occurrence_abundances("id"),
     removed boolean,
     created_at timestamptz DEFAULT NOW()
 );
-SELECT install_version_triggers('occurrences');
+SELECT install_version_triggers('occurrence_abundances');
+CREATE INDEX occurrence_abundances_reference_idx ON occurrence_abundances (reference_id);
 
--- Head-only, like the opinion tables: reads and the lineage lookup only ever want
--- current versions. reidentifies_id is NOT head-only: swing_fks_to_new_version()
--- updates it by old id and must find rows of any version.
-CREATE INDEX occurrences_taxon_head_idx        ON occurrences (taxon_permid)   WHERE succeeded_by_id IS NULL;
-CREATE INDEX occurrences_collection_head_idx   ON occurrences (collection_id)  WHERE succeeded_by_id IS NULL;
-CREATE INDEX occurrences_reidentifies_idx      ON occurrences (reidentifies_id);
-CREATE INDEX occurrences_oldpbdb_occurrence_idx ON occurrences (oldpbdb_occurrence_no);
 
 -- ============================================================================
 -- ONE HEAD PER PERMID NUMBER (prefixed-permids)
@@ -923,4 +967,7 @@ ALTER TABLE name_opinions       ADD CONSTRAINT name_opinions_one_head_per_number
 ALTER TABLE assignment_opinions ADD CONSTRAINT assignment_opinions_one_head_per_number EXCLUDE (permid_no WITH =) WHERE (succeeded_by_id IS NULL) DEFERRABLE INITIALLY DEFERRED;
 ALTER TABLE validity_opinions   ADD CONSTRAINT validity_opinions_one_head_per_number   EXCLUDE (permid_no WITH =) WHERE (succeeded_by_id IS NULL) DEFERRABLE INITIALLY DEFERRED;
 ALTER TABLE taxon_annotations   ADD CONSTRAINT taxon_annotations_one_head_per_number   EXCLUDE (permid_no WITH =) WHERE (succeeded_by_id IS NULL) DEFERRABLE INITIALLY DEFERRED;
-ALTER TABLE occurrences         ADD CONSTRAINT occurrences_one_head_per_number         EXCLUDE (permid_no WITH =) WHERE (succeeded_by_id IS NULL) DEFERRABLE INITIALLY DEFERRED;
+ALTER TABLE identifications    ADD CONSTRAINT identifications_one_head_per_number     EXCLUDE (permid_no WITH =) WHERE (succeeded_by_id IS NULL) DEFERRABLE INITIALLY DEFERRED;
+ALTER TABLE occurrence_abundances ADD CONSTRAINT occurrence_abundances_one_head_per_number EXCLUDE (permid_no WITH =) WHERE (succeeded_by_id IS NULL) DEFERRABLE INITIALLY DEFERRED;
+-- At most one abundance per occurrence: one head per occurrence_permid (deferred for the same reason).
+ALTER TABLE occurrence_abundances ADD CONSTRAINT occurrence_abundances_one_head_per_occurrence EXCLUDE (occurrence_permid WITH =) WHERE (succeeded_by_id IS NULL) DEFERRABLE INITIALLY DEFERRED;

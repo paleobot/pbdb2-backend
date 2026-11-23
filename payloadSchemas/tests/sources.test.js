@@ -6,7 +6,8 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import * as collectionModule from '../collection.schema.js';
 import * as specimenModule from '../specimen.schema.js';
-import * as occurrenceModule from '../occurrence.schema.js';
+import * as identificationModule from '../identification.schema.js';
+import * as occurrenceAbundanceModule from '../occurrenceAbundance.schema.js';
 import * as personModule from '../person.schema.js';
 import * as referenceModule from '../reference.schema.js';
 import * as authorityModule from '../authority.schema.js';
@@ -22,7 +23,8 @@ import { collectCodecSources, split, merge } from '../lib/storage.js';
 
 const legacy = JSON.parse(readFileSync(new URL('./fixtures/legacy-enums.json', import.meta.url), 'utf8'));
 const specimenExample = JSON.parse(readFileSync(new URL('./fixtures/specimen-example.json', import.meta.url), 'utf8'));
-const occurrenceExample = JSON.parse(readFileSync(new URL('./fixtures/occurrence-example.json', import.meta.url), 'utf8'));
+const identificationExample = JSON.parse(readFileSync(new URL('./fixtures/identification-example.json', import.meta.url), 'utf8'));
+const occurrenceAbundanceExample = JSON.parse(readFileSync(new URL('./fixtures/occurrence-abundance-example.json', import.meta.url), 'utf8'));
 const enums = new Map(Object.entries(legacy));
 enums.set('admin0.iso', ['US', 'CN', 'RU', 'AU', 'CA', 'FR']);
 enums.set('admin1.iso', ['US-MT', 'CA-AB']);
@@ -36,7 +38,8 @@ enums.set('languages.name', ['Chinese', 'English', 'French', 'German', 'Italian'
 const sources = {
   collection: collectionModule.collectionSource,
   specimen: specimenModule.specimenSource,
-  occurrence: occurrenceModule.occurrenceSource,
+  identification: identificationModule.identificationSource,
+  occurrenceAbundance: occurrenceAbundanceModule.occurrenceAbundanceSource,
   person: personModule.personSource,
   reference: referenceModule.referenceSource,
   authority: authorityModule.authoritySource,
@@ -53,7 +56,8 @@ const compile = (entity, variant) => createAjv().compile(deriveVariant(applyEnum
 test('modules export only the annotated source', () => {
   assert.deepEqual(Object.keys(collectionModule).sort(), ['collectionSource', 'default']);
   assert.deepEqual(Object.keys(specimenModule).sort(), ['default', 'specimenSource']);
-  assert.deepEqual(Object.keys(occurrenceModule).sort(), ['default', 'occurrenceSource']);
+  assert.deepEqual(Object.keys(identificationModule).sort(), ['default', 'identificationSource']);
+  assert.deepEqual(Object.keys(occurrenceAbundanceModule).sort(), ['default', 'occurrenceAbundanceSource']);
   assert.deepEqual(Object.keys(personModule).sort(), ['default', 'personSource']);
   assert.deepEqual(Object.keys(authorityModule).sort(), ['authoritySource', 'default']);
   assert.deepEqual(Object.keys(schemaModule).sort(), ['default', 'schemaSource']);
@@ -184,13 +188,13 @@ test('specimen example is a valid stored payload', () => {
   assert.equal(validate(specimenExample), true, JSON.stringify(validate.errors));
 });
 
-test('occurrence example is a valid stored payload', () => {
-  const validate = compile('occurrence', 'db');
-  assert.equal(validate(occurrenceExample), true, JSON.stringify(validate.errors));
+test('identification example is a valid stored payload', () => {
+  const validate = compile('identification', 'db');
+  assert.equal(validate(identificationExample), true, JSON.stringify(validate.errors));
 });
 
-test('occurrence payload admits the data quirks Classic holds', () => {
-  const validate = compile('occurrence', 'db');
+test('identification payload admits the data quirks Classic holds', () => {
+  const validate = compile('identification', 'db');
   // No taxon name at all (50 genus_name and 2,301 species_name are empty in Classic).
   assert.equal(validate({}), true);
   assert.equal(validate({ identification: { species: { name: 'sp.' } } }), true);
@@ -201,6 +205,24 @@ test('occurrence payload admits the data quirks Classic holds', () => {
   assert.equal(validate({ identification: { genus: { resolution: '' } } }), false);
   assert.equal(validate({ plantOrgans: ['not an organ'] }), false);
   assert.equal(validate({ unknownKey: 1 }), false);
+});
+
+test('abundance is not an identification field', () => {
+  const validate = compile('identification', 'db');
+  assert.equal(validate({ abundance: { value: '3', unit: 'specimens' } }), false);
+});
+
+test('occurrence abundance example is a valid stored payload', () => {
+  const validate = compile('occurrenceAbundance', 'db');
+  assert.equal(validate(occurrenceAbundanceExample), true, JSON.stringify(validate.errors));
+});
+
+test('occurrence abundance holds text, not numbers, and nothing else', () => {
+  const validate = compile('occurrenceAbundance', 'db');
+  assert.equal(validate({}), true);
+  assert.equal(validate({ value: '3-5', unit: 'specimens' }), true);
+  assert.equal(validate({ value: 3 }), false);
+  assert.equal(validate({ count: '3' }), false);
 });
 
 // ---------- person ----------

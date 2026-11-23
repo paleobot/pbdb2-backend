@@ -9,7 +9,6 @@
     "species": { "resolution": "n. sp.", "name": "rex" },
     "subspecies": { "resolution": "var", "name": "imperator" }
   },
-  "abundance": { "value": "3", "unit": "specimens" },
   "plantOrgans": ["leaf", "cuticle"],
   "comments": "Reidentified from the original field label."
 }
