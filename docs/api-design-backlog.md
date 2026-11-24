@@ -1021,6 +1021,30 @@ Left for curation, whatever the model:
 - chapters whose book title is inside `reftitle` ("X, in Y")
 - Classic chapters of one series volume entered as `journal article`
 
+## Classic entry dates
+
+**Open (2026-11-24).** No migration keeps when a record was entered in Classic. Every migrated table's
+`created_at` is the load time, and Classic's `created` and `modified` are not read anywhere: collections,
+specimens, refs, opinions, and (by `create-occurrences-migration` D4) identifications. So pbdb2 can't
+answer "when was this entered in PBDB", and analyses of the database's own entry history would have to go
+back to the Classic dump.
+
+If they are wanted, decide it once for every table rather than per migration. The likely shape is an
+`oldpbdb_created timestamp` column (no time zone, the value verbatim), alongside the other `oldpbdb_*`
+columns, and not `created_at`, which should keep one meaning everywhere. Things to settle:
+- `modified` as well, or only `created`.
+- Classic's own data problems: `modified < created` on 53% of occurrences, `created` before 1998 on about
+  11K records, and the zero date `0000-00-00` (99 on occurrences and reidentifications). The value would be
+  kept as-is, with the zero date as NULL.
+- The time zone of Classic's server, which isn't recorded; storing `timestamp` without a zone avoids
+  guessing.
+- Whether it is exposed through the API, and as what (`legacyIDs` holds identifiers, not dates).
+
+It can be added later without re-migrating: every table carries its Classic number (`legacyIDs.oldpbdbID` or
+an `oldpbdb_*` column), so the dates can be backfilled from the dump while it exists.
+
+*Trigger:* a request for entry dates, or Classic's retirement date, whichever comes first.
+
 ## Known data issues that affect the API
 
 - **PBot self-parent state.** One PBot state (`ed088383…`, "other") is its own parent and is skipped

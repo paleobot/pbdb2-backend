@@ -31,7 +31,7 @@ Targets: `db/02-core.sql` (`identifications`, `occurrence_abundances`) and `db/0
 | `reference_id` | `reference_no` | via refs `legacyIDs.oldpbdbID`. **NOT NULL.** When unset or not in `refs` (11 rows), use the collection's reference |
 | `oldpbdb_occurrence_no` | `occurrence_no` | |
 | `oldpbdb_reid_no` | — | NULL |
-| `created_at` | `created` | 66 rows are NULL: pass an explicit NULL, do not let the default stamp the migration time |
+| `created_at` | — | not carried: the column default (the load time), as on every other migrated table. See rule 6 |
 | `identification.legacyIDs.oldpbdbID` | `occurrence_no` | |
 | `identification.identification.<rank>.resolution` | `genus_reso`, `subgenus_reso`, `species_reso`, `subspecies_reso` | NULL and `''` → key omitted. Keep `"` verbatim |
 | `identification.identification.<rank>.name` | `genus_name`, `subgenus_name`, `species_name`, `subspecies_name` | NULL and `''` → key omitted |
@@ -49,7 +49,7 @@ is data, so it is kept rather than dropped.
 | `permid` | minted | `mint_permids('ABD', …)`, numbered from 10,000,000: Classic has no abundance number |
 | `occurrence_permid` | the root identification's `permid` | an `OCC` permid; an FK to the registry |
 | `authorizer_person_id`, `enterer_person_id`, `reference_id` | the occurrence's, as resolved for the root | Classic recorded no separate authorship, so the abundance copies the occurrence's. The reference includes the collection fallback |
-| `created_at` | the occurrence's `created` | explicit NULL where NULL |
+| `created_at` | — | not carried (rule 6) |
 | `abundance.legacyIDs.oldpbdbID` | `occurrence_no` | |
 | `abundance.value`, `abundance.unit` | `abund_value`, `abund_unit` | NULL and `''` → key omitted. Both stay text (`value` is not always a number) |
 
@@ -67,7 +67,7 @@ At most one abundance lineage may exist per occurrence; the table enforces it.
 | persons | the reidentification's own `authorizer_no`, `enterer_no` | not inherited from the occurrence |
 | `oldpbdb_occurrence_no` | `occurrence_no` | the same value as the root's |
 | `oldpbdb_reid_no` | `reid_no` | |
-| `created_at` | `created` | |
+| `created_at` | — | not carried (rule 6) |
 | `identification.legacyIDs.oldpbdbID`, `.oldpbdbReidID` | `occurrence_no`, `reid_no` | |
 | `identification.identification`, `.comments` | as for roots | |
 | `identification.plantOrgans` | `plant_organ` | no second organ column |
@@ -80,7 +80,7 @@ There is nothing for abundance here: `reidentifications` has no abundance column
 with the root's `collection_id`, `reference_id` and `oldpbdb_occurrence_no`, and:
 
 - the **winning identification**: the one citing the reference with the latest `publicationYear`, undated references
-  last; ties go to the lineage entered most recently (`created_at`, NULL last), then the highest lineage id;
+  last; ties go to the lineage entered most recently (`created_at`, NULL last; equal on every migrated row, see rule 6), then the highest lineage id;
 - that identification's `taxon_permid` and name block (`identification`);
 - `plant_organs` from the highest-ranked identification that has any, so a reidentification silent about the organs
   does not erase them.
@@ -109,8 +109,12 @@ compete is with Andrew; changing it is one ORDER BY term in `derive_occurrences(
 5. **Reference fallback.** For a root whose `reference_no` is unset or unresolvable, use its collection's reference
    (11 rows); for a reidentification whose reference is unresolvable, use the root's (1 row). Fail the run if a
    remaining row has no reference.
-6. **`created_at`:** pass an explicit NULL where Classic has none (66 occurrences) instead of letting the column
-   default stamp the migration time. The tie-break reads it.
+6. **`created_at` and load order:** do not carry Classic's `created` or `modified`; let `created_at` default.
+   Every migrated row then has the same `created_at` (one transaction), so the winner tie-break falls to the
+   lineage's first id, which is load order. Load roots in `occurrence_no` order, then reidentifications in
+   `reid_no` order: that is Classic's own tie-break (`pubyr DESC, reid_no DESC`), and it differs from ranking
+   by Classic's `created` on 1 occurrence. Decided 2026-11-24 (`create-occurrences-migration` D4); whether to
+   keep Classic entry dates at all is the backlog item "Classic entry dates".
 7. **Resolutions:** map `''` and NULL to "key omitted"; keep `"` verbatim.
 8. **Log the 12 collection conflicts** (below) and the 10 unresolvable `taxon_no` rows.
 9. **After the load, call `rebuild_occurrences()` once**, then assert the `occurrences` count equals the number of
