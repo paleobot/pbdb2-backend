@@ -88,14 +88,22 @@ with the root's `collection_id`, `reference_id` and `oldpbdb_occurrence_no`, and
 Over Classic's data the winner differs from "most recently entered" on 1,360 of the 32,979 occurrences that have
 reidentifications (770 of them go to the original identification), and 1,104 share a top year so entry time decides.
 
+Against Classic's own rule (see rule 2) the only difference is that the original identification competes. On
+`pbdb_2026_10_18` that gives a different winner on 775 of 33,370 reidentified occurrences (712 resolve to a different
+taxon); every other winner, tie-breaks included, is Classic's. **Open (2026-11-24):** whether the original should
+compete is with Andrew; changing it is one ORDER BY term in `derive_occurrences()` and does not affect this load.
+
 ## Rules the migration must follow
 
 1. **Never choose a current identification.** There is no flag and no filter. Load every row as an identification; the
    winner is derived.
 2. **Do not read `occurrences.reid_no` or `reidentifications.most_recent`.** `reid_no` is NULL on 9,070 occurrences
-   that have reidentifications and dangles or mismatches on 16 more; in 555 of 1,802 multi-reidentification chains
-   the `most_recent = 'YES'` row is not the chronologically last one. Neither is needed: nothing orders or heads a
-   chain at load time any more, and rows can be inserted in any order.
+   that have reidentifications and dangles or mismatches on 16 more. `most_recent` is not arbitrary: it is Classic's
+   `setMostRecentReID` rule (latest reference `pubyr`, then latest `reid_no`, original never a candidate), which is
+   why the `YES` row is often not the last one entered (554 chains on `pbdb_2026_10_18`; 549 of them are exactly the
+   rule's pick). It goes stale when a reference's year is edited (17 occurrences), and `derive_occurrences()` computes
+   the same ranking live, so neither column is needed: nothing orders or heads a chain at load time any more, and rows
+   can be inserted in any order. See `reidentification-current-rule.md`.
 3. **`0` and NULL are one condition** on every foreign-key column.
 4. **Exclude, do not load, the rows in `docs/occurrences-excluded.csv`** (see below), and assert the count.
 5. **Reference fallback.** For a root whose `reference_no` is unset or unresolvable, use its collection's reference

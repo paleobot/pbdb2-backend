@@ -754,7 +754,8 @@ for ordering (see Storage and ordering).
 | name_opinions | `authorities.taxon_no` for rows migrated from Classic authorities (the authority-opinions root rows). Every other row gets a sequence number: concept and misspelling rows, name backfills from the opinions migration, and lineage rows. One Classic opinion can produce two `name_opinions` rows, so `opinion_no` cannot be used. |
 | assignment_opinions, validity_opinions | the sequence for every row. `opinion_no` is not used, so it doesn't need to be carried through. |
 | schemas, characters, states | the sequence (PBot only). |
-| occurrences | Classic `occurrence_no`. Reidentifications and new occurrences get a sequence number: `reid_no` overlaps `occurrence_no`, so it stays in `legacyIDs.oldpbdbReidID`. (Added by `prefix-occurrence-permids`.) |
+| identifications | Classic `occurrence_no` for a root identification, which is also the occurrence's permid (the derived `occurrences` cache has no prefix of its own). Reidentifications and new identifications get a sequence number: `reid_no` overlaps `occurrence_no`, so it stays in `legacyIDs.oldpbdbReidID`. (Added for `occurrences` by `prefix-occurrence-permids`; moved to `identifications` 2026-11-23.) |
+| occurrence_abundances | the sequence for every row (`ABD`): Classic has no abundance number. |
 
 `name_opinions` is the only table that draws on more than one Classic table (`taxon_no` and
 `opinion_no`). That's why a single source is fixed for it.
@@ -791,7 +792,9 @@ The leaning above was adopted, with these decisions the backlog didn't have. The
   whose number is the Classic `taxon_no`. (Revised 2026-10-29: name_opinions was `NOP`, and `TXL`
   and `TXC` were reserved for the derived taxa tables. `TXN` is Classic's taxon prefix, used so
   that taxa read as taxa; see design.md decision 20.) `OCC` occurrences, Classic's occurrence
-  prefix, was added by `prefix-occurrence-permids` (2026-11-19).
+  prefix, was added by `prefix-occurrence-permids` (2026-11-19); since 2026-11-23 it is on
+  `identifications` (an occurrence's permid is its root identification's, as with `TXN`), and `ABD`
+  `occurrence_abundances` was added by `port-identifications-to-prefixed-permids`.
 - **One floor, 10,000,000, for every sequence**, above the largest Classic number that becomes a
   permid (`occurrence_no` 2,078,017). Legacy numbers at or above it are refused. (Raised from
   1,000,000, which was above `taxon_no` 526,272, by `prefix-occurrence-permids`, so that occurrences
