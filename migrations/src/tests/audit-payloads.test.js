@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { parseArgs, roundTripDifferences, REGISTRY, UsageError } from '../audit-payloads.js';
 
 test('defaults to every entity', () => {
-  assert.deepEqual(parseArgs([]), { entities: ['collection', 'specimen', 'person', 'reference', 'authority', 'schema', 'character', 'state'], sample: 10, roundTrip: false });
+  assert.deepEqual(parseArgs([]), { entities: ['collection', 'specimen', 'person', 'reference', 'authority', 'schema', 'character', 'state', 'identification', 'occurrence-abundance'], sample: 10, roundTrip: false });
 });
 
 test('single and repeated --entity', () => {
@@ -20,17 +20,23 @@ test('person, reference, authority, schema, character and state are valid entiti
   assert.deepEqual(parseArgs(['--entity', 'character', '--entity', 'state']).entities, ['character', 'state']);
 });
 
+test('identification and occurrence-abundance are valid entities', () => {
+  assert.deepEqual(parseArgs(['--entity', 'identification', '--entity', 'occurrence-abundance']).entities,
+    ['identification', 'occurrence-abundance']);
+});
+
 test('unknown entity lists the valid names', () => {
   assert.throws(
     () => parseArgs(['--entity', 'opinion']),
-    (err) => err instanceof UsageError && /collection, specimen, person, reference, authority, schema, character, state/.test(err.message),
+    (err) => err instanceof UsageError && /collection, specimen, person, reference, authority, schema, character, state, identification, occurrence-abundance/.test(err.message),
   );
 });
 
 test('the registry states whether each entity is versioned', () => {
   assert.deepEqual(
     REGISTRY.map((r) => [r.entity, r.versioned]),
-    [['collection', true], ['specimen', true], ['person', false], ['reference', true], ['authority', true], ['schema', true], ['character', true], ['state', true]],
+    [['collection', true], ['specimen', true], ['person', false], ['reference', true], ['authority', true], ['schema', true], ['character', true], ['state', true],
+      ['identification', true], ['occurrence-abundance', true]],
   );
 });
 

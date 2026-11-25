@@ -21,6 +21,8 @@ import { authoritySource } from '../../payloadSchemas/authority.schema.js';
 import { schemaSource } from '../../payloadSchemas/schema.schema.js';
 import { characterSource } from '../../payloadSchemas/character.schema.js';
 import { stateSource } from '../../payloadSchemas/state.schema.js';
+import { identificationSource } from '../../payloadSchemas/identification.schema.js';
+import { occurrenceAbundanceSource } from '../../payloadSchemas/occurrenceAbundance.schema.js';
 import { resolveEnums } from '../../payloadSchemas/lib/enums.js';
 import { deriveVariant } from '../../payloadSchemas/lib/variants.js';
 import { createAjv } from '../../payloadSchemas/lib/ajv.js';
@@ -111,6 +113,26 @@ export const REGISTRY = [
     source: stateSource,
     versioned: true,
     columns: ['permid', 'quantitative'],
+    children: [],
+  },
+  // The derived `occurrences` table is not an entry: its identification column is a
+  // copy of part of the winning identification's payload, not a payload.
+  {
+    entity: 'identification',
+    table: 'identifications',
+    column: 'identification',
+    source: identificationSource,
+    versioned: true,
+    columns: ['permid'],
+    children: [],
+  },
+  {
+    entity: 'occurrence-abundance',
+    table: 'occurrence_abundances',
+    column: 'abundance',
+    source: occurrenceAbundanceSource,
+    versioned: true,
+    columns: ['permid'],
     children: [],
   },
 ];

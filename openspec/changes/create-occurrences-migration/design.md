@@ -187,6 +187,21 @@ with the row and the ajv errors.
 - [`rebuild_occurrences()` inside the transaction lengthens it] → accepted for atomicity (D1).
 - [The 775-occurrence rule question is unresolved] → it lives in `derive_occurrences()`; if it changes, run
   `rebuild_occurrences()` again, with no reload.
+- [Planner statistics inside the load transaction] (found during implementation, 2026-11-24) → two failures,
+  both quadratic, both from row estimates near zero on a table the transaction has filled:
+  - `rebuild_occurrences()` in the load transaction: `identifications` has never been analyzed, the planner
+    takes 2M roots for 36 and loops over the head index once per root (killed after 37 min). The script runs
+    `ANALYZE identifications` in the transaction first, which counts its own uncommitted rows (0.3 s; the
+    rebuild then takes 85–94 s).
+  - A retry after a rolled-back run: autovacuum records the leftover pages as `reltuples = 0`, so the planner
+    takes the table for empty however much it grows, and `place_in_lineage()`'s per-row head lookup scans the
+    whole `*_one_head_per_number` partial index instead of `*_permid_head_idx` (1.1M rows in 19 min). The
+    script vacuums the three empty tables before `BEGIN`, which truncates them to 0 pages, so estimates come
+    from tuple width as on a fresh database. The same hazard applies to any versioned table loaded after a
+    rolled-back load; the DDL (two partial indexes either of which serves the lookup) is not changed here.
+- [Sequences are not transactional] → a failed or `--dry-run` run still advances `permid_occ_seq` and
+  `permid_abd_seq`, so a retry in the same database mints higher numbers than a fresh one. Permids are
+  identical across rebuilds from `--createdb` (the D3 guarantee), not across a retry; a rebuild is the remedy.
 
 ## Migration Plan
 

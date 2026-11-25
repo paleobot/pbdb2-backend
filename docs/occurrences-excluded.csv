@@ -530,6 +530,7 @@ occurrences,253488,253488,,tombstone,0,0,24653,4123,Error,error,H. Lindon,2002-0
 occurrences,253689,253689,,tombstone,0,0,33102,6498,Error,unidentified leaf 2,H. Lindon,2002-08-15T18:55:27.000Z,Classic blanked this row when its collection was deleted
 occurrences,253690,253690,,tombstone,0,0,33102,6498,Error,unidentified fruit 2,H. Lindon,2002-08-15T18:55:27.000Z,Classic blanked this row when its collection was deleted
 occurrences,253691,253691,,tombstone,0,0,33102,6498,Error,indet.,H. Lindon,2002-08-15T18:55:27.000Z,Classic blanked this row when its collection was deleted
+occurrences,285891,285891,,collection-not-migrated,27182,6340,,,Cooksonia,sp.,C. Bernard,2002-11-21T20:36:42.000Z,collection exists in Classic but was not migrated (empty country)
 occurrences,304331,304331,,tombstone,0,0,31102,8382,ERROR,marylandensis sp. nov.,J. Fosdick,2003-04-11T17:54:51.000Z,Classic blanked this row when its collection was deleted
 occurrences,304333,304333,,tombstone,0,0,31102,8382,ERROR,vermimurus,J. Fosdick,2003-04-11T18:11:39.000Z,Classic blanked this row when its collection was deleted
 occurrences,335927,335927,,tombstone,0,0,11181,8501,ERROR,decandra,M. Arakaki,2003-05-14T23:37:33.000Z,Classic blanked this row when its collection was deleted
@@ -639,4 +640,3 @@ occurrences,499204,499204,,collection-lost,0,13541,,,Tichkaella,hamata,P. Wagner
 occurrences,499205,499205,,collection-lost,0,13541,,,Protowenella,sp.,P. Wagner,2005-05-17T20:20:47.000Z,reference 13541 has 12 collections (50546 50547 50548 50549 50550 50551 56966 56967 56968 56969 56970 99940); same-batch neighbour occurrence 499207 is in collection 50549
 occurrences,499206,499206,,collection-lost,0,13541,,,Marocella,tichkaensis,P. Wagner,2005-05-17T20:20:47.000Z,reference 13541 has 12 collections (50546 50547 50548 50549 50550 50551 56966 56967 56968 56969 56970 99940); same-batch neighbour occurrence 499207 is in collection 50549
 occurrences,520036,520036,,collection-deleted,52944,14247,,,Douvilleiceras,mammillatum,K. Bulinski,2005-08-29T16:12:04.000Z,
-occurrences,926337,926337,,collection-deleted,3122352,35358,,,Hallex,sp.,M. Clapham,2011-02-28T13:30:00.000Z,

@@ -5,10 +5,11 @@ import assert from 'node:assert/strict';
 import { auditEntitiesFor, stepsByName, parseAuditSummary } from '../run-migrations.js';
 
 const ALL = ['persons', 'pbot-persons', 'refs', 'pbot-refs', 'pbot-schemas', 'authorities',
-  'authority-opinions', 'opinions', 'collections', 'specimens'];
+  'authority-opinions', 'opinions', 'collections', 'specimens', 'taxa', 'occurrences'];
 
 test('full run audits every entity', () => {
-  assert.deepEqual(auditEntitiesFor(stepsByName(ALL)), ['collection', 'specimen', 'person', 'reference', 'authority', 'schema', 'character', 'state']);
+  assert.deepEqual(auditEntitiesFor(stepsByName(ALL)), ['collection', 'specimen', 'person', 'reference', 'authority', 'schema', 'character', 'state',
+    'identification', 'occurrence-abundance']);
 });
 
 test('--from collections audits both', () => {
@@ -37,6 +38,15 @@ test('the authorities step audits authority', () => {
 
 test('the pbot-schemas step audits schema, character and state', () => {
   assert.deepEqual(auditEntitiesFor(stepsByName(['pbot-schemas'])), ['schema', 'character', 'state']);
+});
+
+test('the occurrences step audits identification and occurrence-abundance', () => {
+  // occurrences, the third table it writes, is a derived cache and not audited.
+  assert.deepEqual(auditEntitiesFor(stepsByName(['occurrences'])), ['identification', 'occurrence-abundance']);
+});
+
+test('the taxa step audits nothing', () => {
+  assert.deepEqual(auditEntitiesFor(stepsByName(['taxa'])), []);
 });
 
 test('a step writing no audited table audits nothing', () => {

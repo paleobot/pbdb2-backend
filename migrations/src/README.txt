@@ -36,10 +36,12 @@ table in openspec/specs/migration-runner/spec.md):
      9  collections         src/collections-migration/migrate-collections.js
     10  specimens           src/specimens-migration/migrate-specimens.js
     11  taxa                src/rebuild-taxa.js
+    12  occurrences         src/occurrences-migration/migrate-occurrences.js
 
 After the last selected step, the runner audits stored payloads
 (src/audit-payloads.js) for the audited entities those steps wrote: persons,
-refs, authorities, schemas, characters, states, collections and specimens. A
+refs, authorities, schemas, characters, states, collections, specimens,
+identifications and occurrence_abundances. A
 run whose steps write none of them (e.g. --only authority-opinions) skips the
 audit. To audit the whole database outside a run:
     node src/audit-payloads.js                 # every row vs. the db schema
@@ -71,9 +73,20 @@ To run one step, or to resume from one:
     node src/run-migrations.js --from collections
     node src/run-migrations.js --list
 
-The specimens step migrates classic `specimens` only (167,150 rows). Occurrences
-and measurements are separate, later migrations; `oldpbdb_occurrence_no` is the
-join key they will attach to. Most specimens carry no taxon of their own, so
+The specimens step migrates classic `specimens` only (167,150 rows). Measurements
+are a separate, later migration; `oldpbdb_occurrence_no` is the join key to
+occurrences. Most specimens carry no taxon of their own, so
 `name_opinions_permid` is NULL on 144,690 rows by design — see
 openspec/specs/specimen-migration/spec.md and D1 of
 openspec/changes/archive/2026-09-17-create-specimens-migration/design.md.
+
+The occurrences step loads classic `occurrences` and `reidentifications` as
+identifications (one root per occurrence, one more per reidentification) plus
+occurrence_abundances, then calls rebuild_occurrences() to derive the
+occurrences table, all in one transaction. It fails before COMMIT unless the
+rows it excludes and the reidentification collection conflicts it logs are
+exactly those listed in docs/occurrences-excluded.csv and
+docs/occurrences-collection-conflicts.csv at the repository root; regenerate
+them for a new dump with the queries in
+src/occurrences-migration/docs/occurrences.md. Load order is the winner's
+tie-break; see openspec/specs/occurrence-migration/spec.md.

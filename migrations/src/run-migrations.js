@@ -1,12 +1,12 @@
-// Runs the ten migrations, then the taxa rebuild, in a frozen order and asserts the
-// database state that order exists to produce. The order is not a convenience: every
-// step below reads from PostgreSQL what an earlier step wrote, and five of the ten
-// migrations duplicate their rows outright on a second run. See
+// Runs the ten migrations, the taxa rebuild, then the occurrences migration, in a
+// frozen order and asserts the database state that order exists to produce. The order
+// is not a convenience: every step below reads from PostgreSQL what an earlier step
+// wrote, and five of the migrations duplicate their rows outright on a second run. See
 // openspec/specs/migration-runner/spec.md.
 //
 //   node src/run-migrations.js [--createdb] [--from <step>] [--only <step>] [--pbot-include-private] [--list]
 //
-// Steps are spawned as child processes, never imported: six of the eleven entry
+// Steps are spawned as child processes, never imported: six of the twelve entry
 // points call main() unconditionally at module load, so importing one to inspect it
 // would run the step as a side effect.
 import { spawn } from 'node:child_process';
@@ -80,7 +80,8 @@ const someHave = (table, expr, label) => ({
 //             └─▶ refs ──────────┤
 //                                ├─▶ authorities ─▶ authority-opinions ─▶ opinions ─▶ taxa
 //                                ├─▶ collections ──────────────┐
-//                                └─▶ (name_opinions) ──────────┴─▶ specimens
+//                                ├─▶ (name_opinions) ──────────┼─▶ specimens
+//                                └─────────────────────────────┴─▶ occurrences
 //
 // `firstWriterOf` is declared rather than derived positionally: persons, refs and
 // name_opinions each have two writers, and deriving "first" from position would
@@ -235,6 +236,25 @@ const STEPS = [
       nonEmpty('name_opinions'),
       nonEmpty('assignment_opinions'),
       nonEmpty('validity_opinions'),
+    ],
+  },
+  {
+    // Appended rather than placed after specimens: inserting it would renumber taxa.
+    // It reads what specimens reads (persons, refs, collections, name_opinions) and
+    // derives occurrences itself, inside its own transaction.
+    name: 'occurrences',
+    script: 'src/occurrences-migration/migrate-occurrences.js',
+    env: ['PG', 'MARIADB'],
+    inputs: [],
+    writes: ['identifications', 'occurrence_abundances', 'occurrences'],
+    firstWriterOf: ['identifications', 'occurrence_abundances', 'occurrences'],
+    preconditions: () => [
+      empty('identifications'),
+      empty('occurrence_abundances'),
+      empty('occurrences'),
+      nonEmpty('collections'),
+      nonEmpty('name_opinions'),
+      someHave('refs', OLDPBDB_ID.refs, 'legacyIDs.oldpbdbID'),
     ],
   },
 ];
@@ -511,7 +531,7 @@ async function countTables(pg, tables) {
   return counts;
 }
 
-// Spawned, never imported: six of the eleven entry points call main() at module load,
+// Spawned, never imported: six of the twelve entry points call main() at module load,
 // so importing one would run the migration as a side effect of the import.
 function spawnStep(step, args = []) {
   return new Promise((resolve, reject) => {

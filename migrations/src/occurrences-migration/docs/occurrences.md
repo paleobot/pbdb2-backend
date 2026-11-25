@@ -1,6 +1,6 @@
 # Classic occurrences + reidentifications → 2.0 `identifications`, `occurrence_abundances` [‡]
 
-Every row of classic `occurrences` (1,984,733) and `reidentifications` (35,098) becomes one `identifications` row,
+Every row of classic `occurrences` (2,011,484) and `reidentifications` (35,492) becomes one `identifications` row,
 and each occurrence that records a count also becomes one `occurrence_abundances` row. The 2.0 `occurrences` table is
 **not loaded**: it is a cache that `rebuild_occurrences()` derives from the identifications, as `taxa` is derived from
 `name_opinions`.
@@ -25,10 +25,10 @@ Targets: `db/02-core.sql` (`identifications`, `occurrence_abundances`) and `db/0
 | --- | --- | --- |
 | `permid` | `occurrence_no` | `register_permids('OCC', …)` → `OCC-<occurrence_no>-<CC>`, in batches (`prefixed-permids`). Becomes the occurrence's permid |
 | `occurrence_permid` | — | the same value as `permid`: that is what makes the row the root |
-| `authorizer_person_id`, `enterer_person_id` | `authorizer_no`, `enterer_no` | resolves to `persons.id` = `person_no`. The 20 rows holding `0` are all excluded blank placeholders, so no fallback is needed |
-| `collection_id` | `collection_no` | via collections `legacyIDs.oldpbdbID`. **NOT NULL** on the root. The 626 occurrences with no resolvable collection (621 zero + 5 orphan) are not migrated: see "Excluded rows" |
-| `taxon_permid` | `taxon_no` | the `TXN` permid of the root name opinion. Its number is the Classic `taxon_no`, so this is `TXN-<taxon_no>-<CC>` (format with `format_permid('TXN', …)`), but only after checking the root name opinion exists (`name_opinions.oldpbdb_taxon_no`). `0` and NULL are both unset (52,787 + 7, less the excluded rows) → NULL. 10 rows (2 distinct values) are orphans → NULL, logged |
-| `reference_id` | `reference_no` | via refs `legacyIDs.oldpbdbID`. **NOT NULL.** When unset or not in `refs` (11 rows), use the collection's reference |
+| `authorizer_person_id`, `enterer_person_id` | `authorizer_no`, `enterer_no` | resolves to `persons.id` = `person_no` through `resolvePersons()`. No migrated row holds `0`, so the shared 0-sentinel never fires |
+| `collection_id` | `collection_no` | via collections `legacyIDs.oldpbdbID`. **NOT NULL** on the root. The 626 occurrences with no PostgreSQL collection (621 zero, 4 absent from Classic, 1 in collection 27182, which Classic has but was not migrated) are not migrated: see "Excluded rows" |
+| `taxon_permid` | `taxon_no` | the `TXN` permid of the root name opinion. Its number is the Classic `taxon_no`, so this is `TXN-<taxon_no>-<CC>` (format with `format_permid('TXN', …)`), but only after checking the root name opinion exists (`name_opinions.oldpbdb_taxon_no`). `0` and NULL are both unset (51,339 + 0 among migrated rows) → NULL. 10 rows (2 distinct values, 62702 and 67942) are orphans → NULL, logged |
+| `reference_id` | `reference_no` | via refs `legacyIDs.oldpbdbID`. **NOT NULL.** When unset or not in `refs` (13 rows, all `reference_no = 0`), use the collection's reference |
 | `oldpbdb_occurrence_no` | `occurrence_no` | |
 | `oldpbdb_reid_no` | — | NULL |
 | `created_at` | — | not carried: the column default (the load time), as on every other migrated table. See rule 6 |
@@ -41,7 +41,7 @@ Targets: `db/02-core.sql` (`identifications`, `occurrence_abundances`) and `db/0
 ## Abundances (from `occurrences`)
 
 One `occurrence_abundances` row for each migrated occurrence whose `abund_value` or `abund_unit` is non-empty:
-800,729 with a value plus 1,171 with a unit and no value = **801,900**. A unit with no value carries little, but it
+807,678 with a value plus 1,171 with a unit and no value = **808,849**. A unit with no value carries little, but it
 is data, so it is kept rather than dropped.
 
 | 2.0 column / payload field | Source | Notes |
@@ -62,8 +62,8 @@ At most one abundance lineage may exist per occurrence; the table enforces it.
 | `permid` | — | minted: `mint_permids('OCC', …)`, numbered from 10,000,000. `reid_no` overlaps `occurrence_no`, so it is not the number |
 | `occurrence_permid` | the root's `permid` | found through `occurrence_no`. The 15 reidentifications whose occurrence does not exist (or is excluded) are not migrated |
 | `collection_id` | — | **NULL.** Only the root carries the collection. The reidentification's own `collection_no` is ignored; see "Collection conflicts" |
-| `taxon_permid` | the reidentification's own `taxon_no` | as for roots; 452 zeros → NULL |
-| `reference_id` | the reidentification's own `reference_no` | 1 orphan → the root's `reference_id` |
+| `taxon_permid` | the reidentification's own `taxon_no` | as for roots; 428 zeros → NULL, no orphans |
+| `reference_id` | the reidentification's own `reference_no` | else the root's `reference_id`; none needed on `pbdb_2026_10_18` |
 | persons | the reidentification's own `authorizer_no`, `enterer_no` | not inherited from the occurrence |
 | `oldpbdb_occurrence_no` | `occurrence_no` | the same value as the root's |
 | `oldpbdb_reid_no` | `reid_no` | |
@@ -76,7 +76,7 @@ There is nothing for abundance here: `reidentifications` has no abundance column
 
 ## What the derived `occurrences` row is
 
-`rebuild_occurrences()` produces one row per root whose head is not removed (expect **1,984,107** after this load),
+`rebuild_occurrences()` produces one row per root whose head is not removed (expect **2,010,858** after this load),
 with the root's `collection_id`, `reference_id` and `oldpbdb_occurrence_no`, and:
 
 - the **winning identification**: the one citing the reference with the latest `publicationYear`, undated references
@@ -85,13 +85,20 @@ with the root's `collection_id`, `reference_id` and `oldpbdb_occurrence_no`, and
 - `plant_organs` from the highest-ranked identification that has any, so a reidentification silent about the organs
   does not erase them.
 
-Over Classic's data the winner differs from "most recently entered" on 1,360 of the 32,979 occurrences that have
-reidentifications (770 of them go to the original identification), and 1,104 share a top year so entry time decides.
+On the older Postgres mirror (2026-11-23) the winner differed from "most recently entered" on 1,360 of the 32,979
+occurrences that had reidentifications (770 of them going to the original identification), and 1,104 shared a top
+year so entry time decided.
 
 Against Classic's own rule (see rule 2) the only difference is that the original identification competes. On
 `pbdb_2026_10_18` that gives a different winner on 775 of 33,370 reidentified occurrences (712 resolve to a different
 taxon); every other winner, tie-breaks included, is Classic's. **Open (2026-11-24):** whether the original should
 compete is with Andrew; changing it is one ORDER BY term in `derive_occurrences()` and does not affect this load.
+
+Measured after the load (2026-11-24, localhost): of the 33,355 reidentified occurrences that were migrated (the
+33,370 less the 15 whose occurrence does not exist), a reidentification wins on 32,581, every one Classic's rule's
+pick, including the 17 whose stored `YES` is stale; the original wins on **774**. The 775 above ranked by Classic's
+`created`; with load order as the tie-break (rule 6) the one occurrence whose original was entered after its
+reidentification goes to Classic's winner.
 
 ## Rules the migration must follow
 
@@ -107,7 +114,7 @@ compete is with Andrew; changing it is one ORDER BY term in `derive_occurrences(
 3. **`0` and NULL are one condition** on every foreign-key column.
 4. **Exclude, do not load, the rows in `docs/occurrences-excluded.csv`** (see below), and assert the count.
 5. **Reference fallback.** For a root whose `reference_no` is unset or unresolvable, use its collection's reference
-   (11 rows); for a reidentification whose reference is unresolvable, use the root's (1 row). Fail the run if a
+   (13 rows); for a reidentification whose reference is unresolvable, use the root's (0 rows). Fail the run if a
    remaining row has no reference.
 6. **`created_at` and load order:** do not carry Classic's `created` or `modified`; let `created_at` default.
    Every migrated row then has the same `created_at` (one transaction), so the winner tie-break falls to the
@@ -125,13 +132,35 @@ compete is with Andrew; changing it is one ORDER BY term in `derive_occurrences(
 
 | Table | Rows |
 | --- | --- |
-| `identifications` | 1,984,733 − 626 = **1,984,107** roots + 35,098 − 15 = **35,083** non-roots = **2,019,190** |
-| `occurrence_abundances` | **801,900** |
-| `occurrences` (derived) | **1,984,107** |
+| `identifications` | 2,011,484 − 626 = **2,010,858** roots + 35,492 − 15 = **35,477** non-roots (on 33,355 occurrences) = **2,046,335** |
+| `occurrence_abundances` | **808,849** |
+| `occurrences` (derived) | **2,010,858** |
+
+## Measured load
+
+All targets above were met exactly, with no payload violations and a clean round trip; the 641 excluded rows and
+12 conflicts matched the CSVs.
+
+| | localhost `pbdb` (PG 16.15), 2026-11-24 | Aurora `pbdb2_migration_test` |
+| --- | --- | --- |
+| Step total | 356.5 s | (pending) |
+| Pass 1: roots + abundances | 260.5 s | |
+| Pass 2: non-roots | 4.9 s | |
+| `ANALYZE identifications` | 0.3 s | |
+| `rebuild_occurrences()` | 88.6 s (85.1–94.0 s over four runs) | |
+| COMMIT (deferred one-head checks) | 0.0 s | |
+| Peak RSS of the script | 470 MB | |
+| Full runner, 12 steps | 17 min 31 s | |
+| Registry `permids` | 2,452,459 → 5,307,643 (+2,046,335 `OCC`, +808,849 `ABD`) | |
+| Sizes: `identifications` / `occurrence_abundances` / `occurrences` / `permids` | 1,058 / 264 / 801 / 542 MB | |
+| Database | 4,550 MB | |
+
+First minted permids: `OCC-10000000-29` (reidentification 1) and `ABD-10000000-93` (occurrence 1). Two rebuilds
+from `--createdb` gave identical permids on every row.
 
 ## Collection conflicts
 
-Conceptually an occurrence never changes collection, and only the root carries one. In Classic, 12 of the 35,083
+Conceptually an occurrence never changes collection, and only the root carries one. In Classic, 12 of the 35,477
 reidentifications name a different `collection_no` from their occurrence. They are listed, with both collections,
 both references, both names and both enterers, in `docs/occurrences-collection-conflicts.csv`.
 
@@ -143,18 +172,118 @@ right, so the migration uses the occurrence's collection and leaves the 12 for a
 ## Excluded rows
 
 An occurrence has no meaning outside its collection (`collection_id` is NOT NULL on the root), so 626 source occurrences
-and 15 reidentifications are not migrated. `docs/occurrences-excluded.csv` lists each with a category:
+and 15 reidentifications are not migrated. Whether an occurrence is loaded is decided against PostgreSQL, not Classic: its
+`collection_no` must resolve to a `collections` head. `docs/occurrences-excluded.csv` lists each excluded row with a
+category, and the migration fails before COMMIT if the rows it excludes are not exactly the rows the file lists:
 
 | Category | Rows | Meaning |
 | --- | --- | --- |
 | `tombstone` | 594 | Classic blanked these when it deleted a collection; the comment records ` was collection_no N reference_no M` |
 | `blank-placeholder` | 21 | empty genus, no taxon, `collection_no = 0` |
 | `test-data` | 3 | orphan collections 9590 and 10463 (`Crapphyllum shitvillensis`, `Big cow`) |
-| `collection-deleted` | 2 | real taxa whose collection no longer exists |
+| `collection-deleted` | 1 | a real taxon whose collection no longer exists (occurrence 520036, collection 52944) |
 | `collection-lost` | 6 | P. Wagner, reference 13541, no collection recorded: **needs human curation**, 12 candidate collections |
+| `collection-not-migrated` | 1 | occurrence 285891 (*Cooksonia* sp.) in collection 27182, which Classic has but the collections step skipped |
 | `orphan-reidentification` | 15 | a reidentification whose occurrence does not exist |
 
-Specimen 20612 references excluded occurrence 926337; its `oldpbdb_occurrence_no` will have no occurrence row.
+The query also has a category `occurrence-excluded` for a reidentification of an excluded occurrence; there are none.
 
-[‡] Source counts measured 2026-11-17 and 2026-11-23 on the Postgres-ported classic mirror; the abundance counts and the
-conflict list on 2026-11-23.
+Against the mirror list, occurrence 926337 is no longer excluded (the dump gives it collection 122352, which exists), so
+no specimen now points at an excluded occurrence; 285891 is new.
+
+**Collection 27182.** Classic `collections` has it (*Lochkov-Kalke, Pridoli-Schichten, Czech Republic*, reference 6340),
+but its `country` is empty (`state` is `Bohemia`), so `migrate-collections.js` skips it as "no toponym match"
+(`resolveToponym` returns `no country`). It is the one collection in Classic and not in PostgreSQL (279,600 vs.
+279,599 heads). Fixing it is a collections question, not this migration's; when it is migrated, its occurrence leaves
+the CSV and the run's check says so.
+
+### How the two CSVs are generated
+
+Both are generated on MariaDB `pbdb_2026_10_18` and written with Python's `csv` module (minimal quoting). `created`
+is Classic's `datetime`, read as MST (UTC−7, the server's zone) and written as UTC. The excluded list needs the
+PostgreSQL collection heads, loaded into a MariaDB temporary table first:
+
+```sql
+-- PostgreSQL:
+SELECT collection->'legacyIDs'->>'oldpbdbID' FROM collections
+WHERE succeeded_by_id IS NULL AND collection->'legacyIDs' ? 'oldpbdbID';
+-- MariaDB, same session as the query below:
+CREATE TEMPORARY TABLE pg_collections (collection_no int unsigned PRIMARY KEY);
+INSERT INTO pg_collections VALUES (...);  -- the numbers above
+```
+
+`docs/occurrences-excluded.csv`:
+
+```sql
+-- Occurrences and reidentifications the occurrences migration does not load.
+-- Needs pg_collections(collection_no): the oldpbdbIDs of the PostgreSQL collection heads.
+WITH occ AS (
+  SELECT o.*,
+         REGEXP_SUBSTR(o.comments, '(?<= was collection_no )[0-9]+(?= reference_no [0-9]+$)') AS was_collection_no,
+         REGEXP_SUBSTR(o.comments, '(?<= reference_no )[0-9]+$') AS was_reference_no,
+         c.collection_no AS classic_collection,
+         pc.collection_no AS pg_collection
+  FROM occurrences o
+  LEFT JOIN collections c ON c.collection_no = o.collection_no
+  LEFT JOIN pg_collections pc ON pc.collection_no = o.collection_no
+),
+excluded_occ AS (
+  SELECT occ.*,
+    CASE
+      WHEN COALESCE(collection_no, 0) = 0 AND was_collection_no IS NOT NULL THEN 'tombstone'
+      WHEN COALESCE(collection_no, 0) = 0 AND reference_no = 13541 THEN 'collection-lost'
+      WHEN COALESCE(collection_no, 0) = 0 AND genus_name = '' THEN 'blank-placeholder'
+      WHEN collection_no IN (9590, 10463) THEN 'test-data'
+      WHEN classic_collection IS NULL AND COALESCE(collection_no, 0) <> 0 THEN 'collection-deleted'
+      WHEN classic_collection IS NOT NULL THEN 'collection-not-migrated'
+    END AS category
+  FROM occ
+  WHERE pg_collection IS NULL
+)
+SELECT 'occurrences' AS source_table, occurrence_no AS source_no, occurrence_no, '' AS reid_no, category,
+       collection_no, reference_no, COALESCE(was_collection_no, '') AS was_collection_no,
+       COALESCE(was_reference_no, '') AS was_reference_no, genus_name, species_name, COALESCE(enterer, '') AS enterer,
+       DATE_FORMAT(CONVERT_TZ(created, '-07:00', '+00:00'), '%Y-%m-%dT%H:%i:%s.000Z') AS created,
+       CASE category
+         WHEN 'tombstone' THEN 'Classic blanked this row when its collection was deleted'
+         WHEN 'collection-lost' THEN 'reference 13541 has 12 collections (50546 50547 50548 50549 50550 50551 56966 56967 56968 56969 56970 99940); same-batch neighbour occurrence 499207 is in collection 50549'
+         WHEN 'collection-not-migrated' THEN 'collection exists in Classic but was not migrated (empty country)'
+         ELSE ''
+       END AS note
+FROM excluded_occ
+UNION ALL
+SELECT 'reidentifications', r.reid_no, r.occurrence_no, r.reid_no,
+       CASE WHEN eo.occurrence_no IS NULL THEN 'orphan-reidentification' ELSE 'occurrence-excluded' END,
+       r.collection_no, r.reference_no, '', '', r.genus_name, r.species_name, COALESCE(r.enterer, ''),
+       DATE_FORMAT(CONVERT_TZ(r.created, '-07:00', '+00:00'), '%Y-%m-%dT%H:%i:%s.000Z'), ''
+FROM reidentifications r
+LEFT JOIN occurrences o ON o.occurrence_no = r.occurrence_no
+LEFT JOIN excluded_occ eo ON eo.occurrence_no = r.occurrence_no
+WHERE o.occurrence_no IS NULL OR eo.occurrence_no IS NOT NULL
+ORDER BY source_table DESC, source_no;
+```
+
+`docs/occurrences-collection-conflicts.csv` (the names join resolution and name, leaving out `informal`):
+
+```sql
+-- Reidentifications naming a different collection from their occurrence.
+SELECT o.occurrence_no, r.reid_no,
+       o.collection_no AS occ_collection_no, r.collection_no AS reid_collection_no,
+       o.reference_no AS occ_reference_no, r.reference_no AS reid_reference_no,
+       DATE_FORMAT(CONVERT_TZ(o.created, '-07:00', '+00:00'), '%Y-%m-%dT%H:%i:%s.000Z') AS occ_created,
+       DATE_FORMAT(CONVERT_TZ(r.created, '-07:00', '+00:00'), '%Y-%m-%dT%H:%i:%s.000Z') AS reid_created,
+       CONCAT_WS(' ', NULLIF(NULLIF(o.genus_reso, ''), 'informal'), o.genus_name,
+                 IF(o.subgenus_name <> '', CONCAT('(', o.subgenus_name, ')'), NULL),
+                 NULLIF(NULLIF(o.species_reso, ''), 'informal'), o.species_name) AS occ_name,
+       CONCAT_WS(' ', NULLIF(NULLIF(r.genus_reso, ''), 'informal'), r.genus_name,
+                 IF(r.subgenus_name <> '', CONCAT('(', r.subgenus_name, ')'), NULL),
+                 NULLIF(NULLIF(r.species_reso, ''), 'informal'), r.species_name) AS reid_name,
+       o.enterer AS occ_enterer, r.enterer AS reid_enterer
+FROM reidentifications r
+JOIN occurrences o ON o.occurrence_no = r.occurrence_no
+WHERE r.collection_no <> o.collection_no
+ORDER BY o.occurrence_no, r.reid_no;
+```
+
+[‡] Counts measured 2026-11-24 on MariaDB `pbdb_2026_10_18` against localhost `pbdb` (collections, refs and name opinions
+as migrated); both CSVs regenerated the same day. Earlier figures came from the Postgres-ported classic mirror.
