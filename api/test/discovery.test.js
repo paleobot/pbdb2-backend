@@ -34,8 +34,10 @@ test('each index lists its children in data.resources, derived from the route tr
   // specimens, a stub, is hidden; so are the description's own routes.
   const v1 = (await app.inject({ method: 'GET', url: '/api/v1' })).json();
   assert.deepEqual(hrefs(v1.data.resources), Object.fromEntries(
-    ['authorities', 'collections', 'references', 'schemas', 'taxa'].map((r) => [r, `${BASE}/api/v1/${r}`]),
+    ['authorities', 'collections', 'occurrences', 'references', 'schemas', 'taxa'].map((r) => [r, `${BASE}/api/v1/${r}`]),
   ));
+  // An occurrence's identifications are nested under it, not a child of the version root.
+  assert.equal('identifications' in v1.data.resources, false);
   assert.equal(v1.data.name, 'PBDB2 API', 'the node is still described beside its children');
 });
 

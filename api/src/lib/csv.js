@@ -14,7 +14,9 @@
  * An array's elements are joined with `|`, an array inside one with `;`. Inside
  * any array, an element's own `\`, `|` and `;` are escaped with `\`; the
  * separators are written bare. A link gives its permid and label, never `href`;
- * a link inside an array gives only its permid.
+ * a link inside an array gives only its permid. No other `href` is a column
+ * either (an occurrence's embedded identification has one): a CSV row carries
+ * permids, from which every URL is derived.
  */
 
 import { deriveVariant } from '../../../payloadSchemas/lib/variants.js';
@@ -41,6 +43,7 @@ export function csvColumns(source) {
 
 function walk(schema, path, depth, columns) {
   for (const [name, prop] of Object.entries(schema.properties ?? {})) {
+    if (name === 'href') continue;
     const at = [...path, name];
 
     if (prop['x-link']) {

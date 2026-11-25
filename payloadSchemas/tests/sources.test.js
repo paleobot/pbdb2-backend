@@ -1,4 +1,4 @@
-// The real collection, specimen, person, reference, authority, schema, character, state and taxon sources: every variant resolves and
+// The real collection, specimen, person, reference, authority, schema, character, state, taxon and occurrence sources: every variant resolves and
 // compiles in strict mode, and the variant rules hold on them. DB-free (fixture
 // enums).
 import { test } from 'node:test';
@@ -15,6 +15,7 @@ import * as schemaModule from '../schema.schema.js';
 import * as characterModule from '../character.schema.js';
 import * as stateModule from '../state.schema.js';
 import * as taxonModule from '../taxon.schema.js';
+import * as occurrenceModule from '../occurrence.schema.js';
 import { opinionAttributionSchema } from '../opinionAttribution.schema.js';
 import { applyEnums, collectEnumSources } from '../lib/enums.js';
 import { deriveVariant, VARIANTS } from '../lib/variants.js';
@@ -47,6 +48,7 @@ const sources = {
   character: characterModule.characterSource,
   state: stateModule.stateSource,
   taxon: taxonModule.taxonSource,
+  occurrence: occurrenceModule.occurrenceSource,
 };
 // A read-only source (root readOnly: true) has only db and out.
 const variantsOf = (entity) => (sources[entity].readOnly ? ['db', 'out'] : VARIANTS);
@@ -64,6 +66,7 @@ test('modules export only the annotated source', () => {
   assert.deepEqual(Object.keys(characterModule).sort(), ['characterSource', 'default']);
   assert.deepEqual(Object.keys(stateModule).sort(), ['default', 'stateSource']);
   assert.deepEqual(Object.keys(taxonModule).sort(), ['default', 'taxonSource']);
+  assert.deepEqual(Object.keys(occurrenceModule).sort(), ['default', 'occurrenceSource']);
   // Plus the publication type table, which the PBot refs migration filters fields by.
   assert.deepEqual(Object.keys(referenceModule).sort(), ['PUBLICATION_TYPES', 'SHARED_FIELDS', 'default', 'referenceSource']);
 });
@@ -210,6 +213,36 @@ test('identification payload admits the data quirks Classic holds', () => {
 test('abundance is not an identification field', () => {
   const validate = compile('identification', 'db');
   assert.equal(validate({ abundance: { value: '3', unit: 'specimens' } }), false);
+});
+
+test('identification links are not stored: db declares neither, and rejects either key', () => {
+  const db = deriveVariant(sources.identification, 'db');
+  assert.ok(!('taxon' in db.properties) && !('reference' in db.properties));
+  const validate = compile('identification', 'db');
+  assert.equal(validate({ taxon: { permid: 'TXN-1-00' } }), false);
+  assert.equal(validate({ reference: { permid: 'REF-1-00' } }), false);
+});
+
+test('identification out declares the taxon and reference links', () => {
+  const out = deriveVariant(sources.identification, 'out');
+  assert.deepEqual(out.properties.taxon['x-link'], { target: 'taxa', label: 'name' });
+  assert.deepEqual(out.properties.reference['x-link'], { target: 'references', label: 'title' });
+  const validate = compile('identification', 'out');
+  const read = {
+    permid: 'OCC-1-00', identification: { genus: { name: 'Dielasma' } },
+    taxon: { permid: 'TXN-1-00', name: 'Dielasma', href: 'http://x/taxa/TXN-1-00' },
+    reference: { permid: 'REF-1-00', title: 'T', href: 'http://x/references/REF-1-00' },
+  };
+  assert.equal(validate(read), true, JSON.stringify(validate.errors));
+  assert.equal(validate({ ...read, taxon: { permid: 'TXN-2-00' } }), true, 'an orphan taxon: permid alone');
+  assert.equal(validate({ ...read, taxon: null }), true, 'an unresolved name');
+});
+
+test('identification codec sources: taxa by plain column, refs by payload', () => {
+  assert.deepEqual(collectCodecSources(sources.identification), [
+    { table: 'taxa', key: 'permid', value: 'permid', labelColumns: true, labels: ['name'] },
+    { table: 'refs', key: 'id', value: 'permid', versioned: true, payload: 'reference', labels: ['title'] },
+  ]);
 });
 
 test('occurrence abundance example is a valid stored payload', () => {
@@ -706,4 +739,61 @@ test('taxon out validates a taxon read, with null status, authority and accepted
     { table: 'taxonomy_ranks', column: 'taxonomy_rank' },
     { table: 'nomenclatural_statuses', column: 'status' },
   ]);
+});
+
+// ---------- occurrence ----------
+
+test('occurrence is read-only: no write variants, and nothing in jsonb', () => {
+  assert.equal(sources.occurrence.readOnly, true);
+  for (const v of ['in-create', 'patch-guard']) assert.throws(() => deriveVariant(sources.occurrence, v), /read-only/);
+  assert.deepEqual(deriveVariant(sources.occurrence, 'db').properties, {});
+  for (const [name, prop] of Object.entries(sources.occurrence.properties)) assert.ok(prop['x-storage'], name);
+});
+
+test('occurrence properties are in response order', () => {
+  assert.deepEqual(Object.keys(sources.occurrence.properties), [
+    'permid', 'collection', 'reference', 'identification', 'acceptedTaxon', 'plantOrgans', 'abundance', 'legacyIDs',
+  ]);
+  assert.deepEqual(Object.keys(sources.occurrence.properties.identification.properties), [
+    'permid', 'href', 'name', 'genus', 'subgenus', 'species', 'subspecies', 'taxon', 'reference',
+  ]);
+});
+
+test('occurrence resolutions and organs have one definition, the identification source\'s', () => {
+  const own = sources.occurrence.properties.identification.properties;
+  const theirs = sources.identification.properties.identification.properties;
+  for (const rank of ['genus', 'subgenus', 'species', 'subspecies']) {
+    assert.equal(own[rank].properties.resolution.enum, theirs[rank].properties.resolution.enum, rank);
+  }
+  assert.equal(sources.occurrence.properties.plantOrgans.items, sources.identification.properties.plantOrgans.items);
+});
+
+test('occurrence out validates an occurrence read, with an orphan taxon, null links and no abundance', () => {
+  const validate = compile('occurrence', 'out');
+  const occurrence = {
+    permid: 'OCC-1-00',
+    collection: { permid: 'COL-1-00', name: 'A quarry', href: 'http://x/collections/COL-1-00' },
+    reference: { permid: 'REF-1-00', title: 'First', href: 'http://x/references/REF-1-00' },
+    identification: {
+      permid: 'OCC-2-00', href: 'http://x/occurrences/OCC-1-00/identifications/OCC-2-00', name: 'Dielasma cf. bovidens',
+      genus: { name: 'Dielasma' }, species: { resolution: 'cf.', name: 'bovidens' },
+      taxon: { permid: 'TXN-1-00', name: 'Dielasma bovidens', href: 'http://x/taxa/TXN-1-00' },
+      reference: { permid: 'REF-2-00', title: 'Second', href: 'http://x/references/REF-2-00' },
+    },
+    acceptedTaxon: { permid: 'TXN-1-00', name: 'Dielasma bovidens', href: 'http://x/taxa/TXN-1-00' },
+    plantOrgans: ['leaf'],
+    abundance: { value: '3', unit: 'specimens' },
+    legacyIDs: { oldpbdbID: '1' },
+  };
+  assert.equal(validate(occurrence), true, JSON.stringify(validate.errors));
+  const orphan = {
+    ...occurrence, acceptedTaxon: null, abundance: null,
+    identification: { ...occurrence.identification, name: null, taxon: { permid: 'TXN-9-00' } },
+  };
+  assert.equal(validate(orphan), true, JSON.stringify(validate.errors));
+  assert.equal(validate({ ...occurrence, identification: { ...occurrence.identification, identification: {} } }), false,
+    'the ranks are lifted, not nested');
+  assert.equal(validate({ ...occurrence, winningIdentificationId: '7' }), false, 'no internal columns');
+  assert.equal(validate({ ...occurrence, identification: { ...occurrence.identification, genus: { resolution: 'n. sp.' } } }), false,
+    'the resolution enums apply');
 });

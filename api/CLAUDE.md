@@ -57,7 +57,12 @@ src/
   config.js             env → config
   lib/crud-routes.js    shared CRUD route factory (readOnly option → 405)
   lib/query-schemas.js  GET querystring schemas, query normalizer, 400 formatter
-  lib/field-filter-ops.js  field-filter match kinds (eq, doi, foldedEq, allWords, …)
+  lib/field-filter-ops.js  filter match kinds: field (eq, doi, foldedEq, allWords, …) and link
+                        (linkPermid, taxonExact, taxonSubtree)
+  lib/taxa-repository.js       reads the derived `taxa` table
+  lib/occurrence-repository.js reads the derived `occurrences` cache, and each occurrence's
+                        identifications through `merge()`
+  lib/identified-name.js  the formatted `name` of an identification
   lib/published-schemas.js  published response components (Collection, ReferenceLink, …)
   lib/formats.js        non-JSON format registry (text/csv, RIS) + negotiate(accept, offered)
   lib/csv.js            CSV columns from a source's `out` variant, cells, RFC 4180 lines
@@ -74,6 +79,8 @@ src/
                         (specimens: stub reads, hidden from the description)
     schemas/            CRUD + aggregate schema→characters→states read
     taxa/               READ-ONLY (405 on writes); derived table, no JSONB
+    occurrences/        READ-ONLY (405 on writes); derived cache, no JSONB; nested
+                        /{permid}/identifications (GET only, no CSV)
 test/                   node:test suites, driven via app.inject()
 assets/                 docs-page logo + favicon (PBDB Classic's, a stopgap)
 docs/                   design notes (e.g. response-envelope rationale)
@@ -94,7 +101,7 @@ docs/                   design notes (e.g. response-envelope rationale)
   (`/api/v1/openapi.json`, `/api/v1/docs`), CSV and RIS.
 - **Formats by `Accept` only:** a route offering a non-JSON format declares it
   in `config.formats` (`registerCrudRoutes({ formats, singleFormats, exportSource })`);
-  today the four large lists offer `text/csv`, and references also offer
+  today the five large lists offer `text/csv`, and references also offer
   `application/x-research-info-systems` (RIS) on the list and, through
   `singleFormats`, on the single read, which sends one record as
   `<permid>.ris`. A single read never offers CSV. Serializers are built once per
@@ -132,6 +139,31 @@ docs/                   design notes (e.g. response-envelope rationale)
   that do not exist) but reuses the shared `linkProjections()`. Its decisions and
   their evidence are in `openspec/changes/add-taxa-reads/design.md`; the
   measurements are in `docs/taxa-classification-reads.md`.
+- **`occurrences` is the second derived, read-only group**, beside `taxa`: a
+  cache (`rebuild_occurrences()`) of the `identifications` ledger, with its own
+  `lib/occurrence-repository.js`, no stub (503 with no database) and no
+  `removed` predicate. A page is chosen from `occurrences` alone in a subquery
+  and only its rows are joined to the winning identification (`w`), the
+  identified taxon (`it`) and the current abundance; descriptor links name
+  the joined row they are on (`row`), and `linkProjections()` is correlated to
+  its alias. Two references are kept apart: `reference` is the root
+  identification's (where the occurrence was recorded), `identification.reference`
+  the winner's (where its current name was published). The embedded
+  `identification` is the winner with its ranks lifted; its `href` points to the
+  nested full record. **Nested identifications** (`/{permid}/identifications`,
+  `/{permid}/identifications/{identificationPermid}`) are not a route group: GET
+  only, no 405s, no CSV, 404 for an unknown occurrence or another occurrence's
+  identification; they read through `merge(identificationSource, …)`. A taxon
+  permid with no `taxa` row is `{ permid }` with no `href` (`link-hydration.js`
+  skips a `taxa` link with no `name`). Client notes: `docs/occurrences.md`.
+- **Link filters** are descriptor `filters` whose kind matches a column, not a
+  payload field (`linkPermid`, `taxonExact`, `taxonSubtree` in
+  `lib/field-filter-ops.js`): one permid of a declared `prefix`, enforced by the
+  querystring schema (wrong prefix or not a permid → 400; a well-formed permid
+  naming nothing → empty 200). They have no `predicate`: the resource's own
+  repository translates them. `occurrences` declares `collection`, `taxon`
+  (exact) and `withinTaxon` (subtree, synonyms resolved; the names are resolved
+  once per request and hidden from the planner behind an InitPlan).
 - **Reads through a payload source:** a descriptor naming a `source` (from
   `payloadSchemas/`) is read with `merge()` and one codec-context query per
   page, plus one query per child table the descriptor lists in `children`
@@ -146,10 +178,11 @@ docs/                   design notes (e.g. response-envelope rationale)
   `schemas`): the generic repository refuses a descriptor with no `source`. A
   schema single read adds its characters tree (`lib/schema-tree.js`), each
   node merged through `characterSource`/`stateSource`, and is contract-tested
-  in one validation against the published `Schema`. Only `taxa` keeps descriptor
-  `links` (single-valued, through `linkProjections`) and has its own
-  repository; its response is described by the read-only
-  `payloadSchemas/taxon.schema.js`. `specimens` is a stub (see
+  in one validation against the published `Schema`. Only `taxa` and
+  `occurrences` keep descriptor `links` (single-valued, through
+  `linkProjections`) and have their own repositories; their responses are
+  described by the read-only `payloadSchemas/taxon.schema.js` and
+  `occurrence.schema.js`. `specimens` is a stub (see
   `api/docs/response-contracts.md`).
 - **Field order is the schema's.** `merge()` emits a record's fields in the order
   its payload source declares them (undeclared keys after), so `permid`, then
@@ -220,8 +253,8 @@ PostgreSQL integration and pagination have LANDED — `add-reads-pg-layer` and
 The backend is spec-driven via one OpenSpec root at the repository root
 (`openspec/config.yaml`, `schema: spec-driven`), shared with the DDL, payload
 schemas and migrations. The API's capability specs (`api-discovery`,
-`api-foundation`, `auth-stub`, `csv-output`, `data-access`, `list-pagination`,
-`reference-enrichment`, `resource-routes`, `ris-output`, `taxa-reads`) live in
+`api-description`, `api-foundation`, `auth-stub`, `csv-output`, `data-access`, `list-pagination`,
+`occurrence-reads`, `reference-enrichment`, `resource-routes`, `ris-output`, `taxa-reads`) live in
 `openspec/specs/` with the others; completed changes are in
 `openspec/changes/archive/`. The workflow is exposed as skills/slash commands:
 

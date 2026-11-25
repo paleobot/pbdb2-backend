@@ -1,7 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { FIELD_FILTER_OPS, filterOp } from '../src/lib/field-filter-ops.js';
+import { FIELD_FILTER_OPS, filterOp, permidPattern, patternMessage } from '../src/lib/field-filter-ops.js';
+import { listQuerySchema } from '../src/lib/query-schemas.js';
+import { createAjv } from '../../payloadSchemas/lib/ajv.js';
 
 /**
  * The match kinds, one stage at a time: each `parse` on its own, and the SQL
@@ -122,4 +124,28 @@ test('eq: the raw value, compared as before', () => {
 
 test('an unknown op is an error naming it', () => {
   assert.throws(() => filterOp('like'), /Unknown field-filter op 'like'/);
+});
+
+test('link kinds: one permid of the declared prefix, by form only', () => {
+  const filters = {
+    collection: { op: 'linkPermid', prefix: 'COL', target: 'collections' },
+    taxon: { op: 'taxonExact', prefix: 'TXN', target: 'taxa' },
+  };
+  const schema = listQuerySchema({ filters });
+  assert.equal(schema.properties.collection.pattern, permidPattern('COL'));
+  assert.equal(schema.properties.collection.minLength, 1);
+  assert.match(schema.properties.collection.description, /COL permid/);
+  const validate = createAjv().compile(schema);
+  assert.equal(validate({ collection: 'COL-12345-67' }), true, 'check digits are not verified');
+  for (const value of ['TXN-1-00', '123', 'COL-1-0', 'COL-x-00', ' COL-1-00', '']) {
+    assert.equal(validate({ collection: value }), false, JSON.stringify(value));
+  }
+  assert.equal(validate({ taxon: 'TXN-38613-69' }), true);
+  assert.equal(validate({ taxon: 'COL-1-00' }), false);
+});
+
+test('link kinds: a permid pattern error names the parameter and the prefix', () => {
+  assert.equal(patternMessage(permidPattern('COL'), 'collection'), '`collection` must be a COL permid (COL-<number>-<check digits>)');
+  assert.equal(patternMessage('^nothing$', 'p'), undefined);
+  for (const op of ['linkPermid', 'taxonExact', 'taxonSubtree']) assert.equal(parse(op, 'TXN-1-00'), 'TXN-1-00', op);
 });

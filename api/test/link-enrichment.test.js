@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 
 import { linkProjections } from '../src/lib/repository.js';
 import { descriptorFor, targetFor, RESOURCE_DESCRIPTORS } from '../src/lib/resource-tables.js';
-import { groupBase, hydrateLinkHrefs } from '../src/lib/link-hydration.js';
+import { groupBase, hydrateLinkHrefs, hydrateSourceLinks } from '../src/lib/link-hydration.js';
+import { identificationSource } from '../../payloadSchemas/identification.schema.js';
 
 const BASE = 'https://pbdb2.example.org';
 
@@ -16,13 +17,13 @@ const BASE = 'https://pbdb2.example.org';
  * two different groups.
  */
 
-test('no descriptor declares a join-table link, and only taxa declares links', () => {
+test('no descriptor declares a join-table link, and only taxa and occurrences declare links', () => {
   for (const [resource, descriptor] of Object.entries(RESOURCE_DESCRIPTORS)) {
     for (const [as, link] of Object.entries(descriptor.links ?? {})) {
       assert.equal('joinTable' in link, false, `${resource}.${as}`);
       assert.equal('joinKey' in link, false, `${resource}.${as}`);
     }
-    assert.equal(Boolean(descriptor.links), resource === 'taxa', resource);
+    assert.equal(Boolean(descriptor.links), ['taxa', 'occurrences'].includes(resource), resource);
   }
 });
 
@@ -159,4 +160,38 @@ test('the link-target registry keys are route group names', () => {
     () => linkProjections({ x: { target: 'nope', on: 'id', via: 'x_id' } }, '"taxa"'),
     /Unknown link target/,
   );
+});
+
+test('collections is a link target labelled by the collection name', () => {
+  assert.deepEqual(targetFor('collections'), { table: 'collections', payloadColumn: 'collection', label: 'name' });
+  const [expr] = linkProjections({ collection: { target: 'collections', on: 'id', via: 'collection_id' } }, 'o');
+  assert.match(expr, /json_build_object\('permid', r\.permid, 'name', r\.collection->>'name'\) FROM collections r WHERE r\.id = o\."collection_id"/);
+});
+
+test('a taxa link with no name names no row, and gets no href', () => {
+  const links = { accepted: conceptLink };
+  const orphan = { accepted: { permid: 'TXN-9-00' } };
+  hydrateLinkHrefs(orphan, links, '/api/v1/occurrences', BASE);
+  assert.deepEqual(orphan.accepted, { permid: 'TXN-9-00' });
+
+  const record = { taxon: { permid: 'TXN-9-00' }, reference: { permid: 'REF-1-00', title: 'T' } };
+  hydrateSourceLinks(record, identificationSource, '/api/v1/occurrences', BASE);
+  assert.equal('href' in record.taxon, false, 'through a source link too');
+  assert.equal(record.reference.href, `${BASE}/api/v1/references/REF-1-00`);
+});
+
+test('every other link keeps its href, with or without its label', () => {
+  const links = { reference: { target: 'references', on: 'id', via: 'reference_id' }, accepted: conceptLink };
+  const record = { reference: { permid: 'REF-1-00' }, accepted: { permid: 'TXN-1-00', name: 'Dielasma' } };
+  hydrateLinkHrefs(record, links, '/api/v1/taxa', BASE);
+  assert.equal(record.reference.href, `${BASE}/api/v1/references/REF-1-00`, 'an untitled reference');
+  assert.equal(record.accepted.href, `${BASE}/api/v1/taxa/TXN-1-00`);
+});
+
+test('a dotted link field is a path into the record', () => {
+  const links = { 'identification.reference': { target: 'references', on: 'id', via: 'reference_id', row: 'winner' } };
+  const record = { identification: { reference: { permid: 'REF-2-00', title: 'T' } } };
+  hydrateLinkHrefs(record, links, '/api/v1/occurrences', BASE);
+  assert.equal(record.identification.reference.href, `${BASE}/api/v1/references/REF-2-00`);
+  hydrateLinkHrefs({ identification: null }, links, '/api/v1/occurrences', BASE);
 });

@@ -9,9 +9,20 @@
  * as `base` so this module stays free of Fastify) followed by the path.
  * Because hydration runs over data already filtered for soft-removal
  * (suppression happens in SQL), no `href` can ever point at a removed resource.
+ *
+ * One link can name a permid with no row behind it: an identification's taxon,
+ * whose permid is a root name opinion's, which need not have a `taxa` row (the
+ * taxa orphans). Such a link is `{ permid }` with no `name`, and gets no `href`,
+ * which would answer 404 (occurrence-reads; design D4). `taxa.name` is NOT NULL,
+ * so for a `taxa` link a missing name means a missing row. For every other target
+ * the row exists whenever its FK is set, and a missing label (an untitled
+ * reference) says nothing about the row: those links always get an `href`.
  */
 
 import path from 'node:path';
+
+/** Targets whose label is never NULL on a row, so a link lacking it names no row. */
+const LABEL_PROVES_ROW = { taxa: 'name' };
 
 /**
  * Derive a target route group's base path from a citing route group's mounted
@@ -35,7 +46,8 @@ export function groupBase(prefix, group) {
 /**
  * Add `href = <base><target group path>/{permid}` to each resolved link object on a
  * record, for every field named by the `links` config. Each link's base comes
- * from its own `target`, so one record may carry links into different groups.
+ * from its own `target`, so one record may carry links into different groups. A
+ * field name with dots (`identification.reference`) is a path into the record.
  * Mutates and returns the record. Safe for a `null` single-valued link, an empty
  * array, a missing field, or a missing `links` config — all no-ops.
  *
@@ -49,13 +61,13 @@ export function groupBase(prefix, group) {
 export function hydrateLinkHrefs(record, links, prefix, base) {
   if (!record || !links) return record;
   for (const [as, link] of Object.entries(links)) {
-    const value = record[as];
+    const value = as.split('.').reduce((node, key) => node?.[key], record);
     if (value == null) continue;
     const url = base + groupBase(prefix, link.target);
     if (Array.isArray(value)) {
-      for (const item of value) addHref(item, url);
+      for (const item of value) addHref(item, url, link.target);
     } else {
-      addHref(value, url);
+      addHref(value, url, link.target);
     }
   }
   return record;
@@ -80,17 +92,28 @@ export function hydrateSourceLinks(record, source, prefix, base) {
   for (const [name, prop] of Object.entries(source.properties ?? {})) {
     const value = record[name];
     if (prop['x-link']) {
-      addHref(value, base + groupBase(prefix, prop['x-link'].target));
+      addHref(value, base + groupBase(prefix, prop['x-link'].target), prop['x-link'].target);
     } else if (prop.items?.['x-link'] && Array.isArray(value)) {
       const url = base + groupBase(prefix, prop.items['x-link'].target);
-      for (const item of value) addHref(item, url);
+      for (const item of value) addHref(item, url, prop.items['x-link'].target);
     }
   }
   return record;
 }
 
-function addHref(link, groupUrl) {
-  if (link && link.permid) link.href = `${groupUrl}/${link.permid}`;
+/**
+ * Add `href` to one link object. A link into `target` whose label proves its row
+ * ({@link LABEL_PROVES_ROW}) and lacks that label is left without one.
+ *
+ * @param {object | null | undefined} link
+ * @param {string} groupUrl  the target group's absolute URL
+ * @param {string} [target]  the target route group
+ */
+export function addHref(link, groupUrl, target) {
+  if (!link || !link.permid) return;
+  const label = LABEL_PROVES_ROW[target];
+  if (label && link[label] == null) return;
+  link.href = `${groupUrl}/${link.permid}`;
 }
 
 /**

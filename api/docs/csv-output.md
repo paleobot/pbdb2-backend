@@ -1,8 +1,9 @@
 # CSV output
 
-The lists of `references`, `authorities`, `collections` and `taxa`, and their `ids` reads, can be
-returned as CSV. The decisions behind this are in the OpenSpec change `add-csv-list-output` and the
-`csv-output` spec.
+The lists of `references`, `authorities`, `collections`, `taxa` and `occurrences`, and their `ids`
+reads, can be returned as CSV. The decisions behind this are in the OpenSpec change
+`add-csv-list-output` and the `csv-output` spec. An occurrence's identifications
+(`/occurrences/{permid}/identifications`) are not offered as CSV.
 
 ## Asking for CSV
 
@@ -61,10 +62,14 @@ records. A field with no value is an empty cell.
 |---|---|---|
 | nested object | one column per field, dotted path | `location.coordinates.latitude` |
 | link | its permid and its label; no `href` | `reference.permid`, `reference.title` |
+| link inside an object | the same | `identification.taxon.permid`, `identification.taxon.name` |
 | list of values | one column, joined with `\|` | `descriptors` |
 | list of objects | one column per field, joined with `\|` in the same order | `authors.familyName`, `authors.givenName` |
 | list inside a list of objects | joined with `;` inside each `\|` part | `lithofacies.adjectives` |
 | list of links | permids only | `additionalReferences.permid` |
+
+No column is an `href`, including an occurrence's `identification.href`: every URL can be built from
+the permids.
 
 Lists of objects stay aligned: the n-th part of `authors.familyName` and of `authors.givenName` are
 the same author, and a missing value keeps its place (`A||C`).
@@ -105,6 +110,24 @@ adjectives = [[unescape(a) for a in split_cell(p, ";")] for p in split_cell(row[
 
 An empty cell is an empty list, so a list holding one empty value cannot be told apart from an
 empty list.
+
+## Occurrence columns
+
+An occurrence row carries two references and two taxa, named apart on purpose (see
+`occurrences.md`):
+
+| Column | What it is |
+|---|---|
+| `reference.permid`, `reference.title` | where the occurrence was first recorded (its original identification) |
+| `identification.reference.permid`, `.title` | where its current name was published (the identification that currently wins) |
+| `identification.name` | that name formatted for display; the rank columns are the authoritative form |
+| `identification.genus.resolution`, `identification.genus.name`, … `subspecies` | the ranks as written, with their qualifiers |
+| `identification.taxon.permid`, `.name` | the taxon the name resolved to. A permid with an empty name is a name opinion with no derived taxon |
+| `acceptedTaxon.permid`, `.name` | the accepted name of that taxon's concept; empty when the name did not resolve to a taxon |
+| `abundance.value`, `abundance.unit` | how many were recorded, as text (`3-5` and `common` occur) |
+
+`withinTaxon=<permid>` with no `limit` exports a whole subtree; Mammalia (about 94,000 occurrences)
+takes about 15 seconds on a development machine.
 
 ## Known limits
 

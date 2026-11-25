@@ -123,7 +123,7 @@ export const REGISTRY = [
     column: 'identification',
     source: identificationSource,
     versioned: true,
-    columns: ['permid'],
+    columns: ['permid', 'taxon_permid', 'reference_id'],
     children: [],
   },
   {

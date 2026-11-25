@@ -15,6 +15,10 @@
  *   nullable where `out` allows `null`.
  * No `x-` keyword is left.
  *
+ * The occurrence's `Identification` is the identification source's `out`
+ * variant plus the `name` the API composes (lib/identified-name.js), after
+ * `permid`, as the nested identification reads return it.
+ *
  * Responses are tested against these schemas, not raw `out`, so the transform is
  * itself under test. See openspec/changes/add-openapi-for-reads/design.md, D3–D5
  * and D9.
@@ -28,9 +32,11 @@ import { schemaSource } from '../../../payloadSchemas/schema.schema.js';
 import { characterSource } from '../../../payloadSchemas/character.schema.js';
 import { stateSource } from '../../../payloadSchemas/state.schema.js';
 import { taxonSource } from '../../../payloadSchemas/taxon.schema.js';
+import { occurrenceSource } from '../../../payloadSchemas/occurrence.schema.js';
+import { identificationSource } from '../../../payloadSchemas/identification.schema.js';
 
 /** A link target route group → the singular its component is named for. */
-const LINK_TARGET_NAMES = { references: 'Reference', authorities: 'Authority', taxa: 'Taxon' };
+const LINK_TARGET_NAMES = { references: 'Reference', authorities: 'Authority', collections: 'Collection', taxa: 'Taxon' };
 
 /**
  * Each dictionary a published property draws from, in words. A new dictionary
@@ -131,9 +137,25 @@ const arrayOf = (name, description) => ({ type: 'array', items: ref(name), descr
  */
 export function publishedComponents() {
   const links = new Map();
-  const [collection, reference, authority, schema, character, state, taxon] = [
+  const [collection, reference, authority, schema, character, state, taxon, occurrence, identification] = [
     collectionSource, referenceSource, authoritySource, schemaSource, characterSource, stateSource, taxonSource,
+    occurrenceSource, identificationSource,
   ].map((source) => publishSource(source, links));
+
+  // An identification's full record (lib/occurrence-repository.js): `name` after
+  // `permid`, and `taxon` null rather than absent when the name did not resolve.
+  const { permid: identificationPermid, ...identificationRest } = identification.properties;
+  identification.properties = {
+    permid: identificationPermid,
+    name: {
+      type: ['string', 'null'],
+      description:
+        'the name formatted for display from the ranks in `identification`; null when no rank has a name. ' +
+        'The ranks are the authoritative form',
+    },
+    ...identificationRest,
+  };
+  identification.required = ['permid', 'name', 'taxon', 'reference'];
 
   // The schema tree (lib/schema-tree.js): a single read adds `characters`, each
   // character nests characters and states, each state nests states.
@@ -172,6 +194,6 @@ export function publishedComponents() {
 
   return [
     ...[...links.values()].map((link) => link.schema),
-    collection, reference, authority, schema, character, state, taxon, containingTaxon,
+    collection, reference, authority, schema, character, state, taxon, containingTaxon, occurrence, identification,
   ];
 }

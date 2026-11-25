@@ -11,19 +11,26 @@
  *
  * Every version-chained resource here names a payload `source`, and its links
  * come from that source's x-link properties and items. The optional `links`
- * field is descriptor-declared enrichment for a resource with no source, which
- * today is only `taxa` (read by taxa-repository.js through linkProjections). A
- * descriptor link is single-valued: a column on the resource's own table. A
- * multi-valued link is declared in a payload source, as an array of links. Other
+ * field is descriptor-declared enrichment for a resource with no source: `taxa`
+ * and `occurrences`, read by their own repositories through linkProjections. A
+ * descriptor link is single-valued: a column on the resource's own row, or on a
+ * row its repository joins one-to-one with it (`row`). A multi-valued link is
+ * declared in a payload source, as an array of links. Other
  * FKs (`early_age_id`, `enterer_person_id`, …) remain unenriched. See design.md
  * for the head-resolution rationale (the backend swing trigger keeps these FKs
  * pointed at the current head, so a plain join resolves the current label +
  * lineage permid).
  *
  * @typedef {object} FieldFilter
- * @property {string} jsonPath  JSONB key within the payload to match (e.g. 'publicationType')
- * @property {'eq'|'doi'|'foldedEq'|'allWords'|'familyNames'|'firstFamilyName'|'yearRange'} op
- *   the match kind (field-filter-ops.js): its parameter schema, value parsing and predicate
+ * @property {string} [jsonPath]  JSONB key within the payload to match (e.g. 'publicationType');
+ *   a field filter's
+ * @property {'eq'|'doi'|'foldedEq'|'allWords'|'familyNames'|'firstFamilyName'|'yearRange'|'linkPermid'|'taxonExact'|'taxonSubtree'} op
+ *   the match kind (field-filter-ops.js): its parameter schema, value parsing and predicate.
+ *   The last three are LINK filters: they match a column holding a foreign key rather than a
+ *   payload field, take one permid of `prefix`, and are translated to SQL by the resource's
+ *   own repository (occurrence-repository.js)
+ * @property {string} [prefix]  a link filter's permid prefix (e.g. 'COL')
+ * @property {string} [target]  a link filter's target route group, for its description
  * @property {string} [note]    appended to the kind's parameter description
  *
  * @typedef {object} ResourceDescriptor
@@ -39,7 +46,7 @@
  *   resource, each keyed back to the parent row by `fk`. Which column joins a child
  *   table to its parent is a fact about tables, so it lives here, not in the source.
  * @property {Record<string, LinkDeclaration>} [links]      declared link enrichment (output field → link)
- * @property {Record<string, FieldFilter>}     [filters]    declared field filters (param → match spec)
+ * @property {Record<string, FieldFilter>}     [filters]    declared field and link filters (param → match spec)
  * @property {Record<string, Expansion>}       [expansions] declared expansion params (param → spec)
  *
  * @typedef {object} ChildTable
@@ -103,20 +110,25 @@ import { schemaSource } from '../../../payloadSchemas/schema.schema.js';
 export const LINK_TARGETS = {
   references: { table: 'refs', payloadColumn: 'reference', label: 'title' },
   authorities: { table: 'authorities', payloadColumn: 'authority', label: 'citation' },
+  collections: { table: 'collections', payloadColumn: 'collection', label: 'name' },
   taxa: { table: 'taxa', labelColumn: 'name' },
 };
 
 /**
  * A declared link from a resource to a target route group, keyed in `links` by
- * the output field name it produces. `via` names the column on this resource's
- * table carrying the foreign key; a descriptor link is single-valued. `on`
- * states what that column holds — the target's internal serial id, or the
- * target lineage's `permid` (which needs no id→permid translation).
+ * the output field name it produces. `via` names the column carrying the
+ * foreign key; a descriptor link is single-valued. `on` states what that column
+ * holds — the target's internal serial id, or the target lineage's `permid`
+ * (which needs no id→permid translation). `row` names a row the resource's
+ * repository joins one-to-one with its own, when `via` is on that row rather
+ * than the resource's own: the repository maps the name to its alias.
  *
  * @typedef {object} LinkDeclaration
  * @property {string} target        target route group name (a {@link LINK_TARGETS} key)
  * @property {'id'|'permid'} on     what the `via` column holds
  * @property {string} via           FK column (e.g. 'authority_id')
+ * @property {string} [row]         the joined row `via` is on (occurrences: 'winner',
+ *   'identifiedTaxon'); absent for the resource's own row
  */
 
 /**
@@ -194,6 +206,28 @@ export const RESOURCE_DESCRIPTORS = {
       authority: { target: 'authorities', on: 'id', via: 'authority_id' },
       // Self-referential: a taxon's accepted name is the row for its concept.
       accepted: { target: 'taxa', on: 'permid', via: 'concept_permid' },
+    },
+  },
+  // `occurrences` is, like `taxa`, a derived table of typed columns with no
+  // version chain, read by its own repository (occurrence-repository.js). Its
+  // links are on the occurrence row (the root's collection and reference), on the
+  // winning identification (its own reference) and on the identified taxon's row
+  // (its accepted concept). The identified taxon itself is not a descriptor link:
+  // its permid is a column, and it must survive having no `taxa` row (D4).
+  // Its filters are link filters (a column, not a payload field).
+  occurrences: {
+    table: 'occurrences',
+    readOnly: true,
+    links: {
+      collection: { target: 'collections', on: 'id', via: 'collection_id' },
+      reference: { target: 'references', on: 'id', via: 'reference_id' },
+      'identification.reference': { target: 'references', on: 'id', via: 'reference_id', row: 'winner' },
+      acceptedTaxon: { target: 'taxa', on: 'permid', via: 'concept_permid', row: 'identifiedTaxon' },
+    },
+    filters: {
+      collection: { op: 'linkPermid', prefix: 'COL', target: 'collections' },
+      taxon: { op: 'taxonExact', prefix: 'TXN', target: 'taxa' },
+      withinTaxon: { op: 'taxonSubtree', prefix: 'TXN', target: 'taxa' },
     },
   },
 };

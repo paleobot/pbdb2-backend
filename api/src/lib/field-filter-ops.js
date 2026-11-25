@@ -3,8 +3,10 @@
  * defined once, with the part each stage of a filter needs:
  *
  *   schema      the parameter's JSON Schema beyond `{ type: 'string', minLength: 1 }`
- *               (query-schemas.js merges it in)
- *   describe    the parameter's description in the API document
+ *               (query-schemas.js merges it in), or a function of the filter's
+ *               declaration that returns it
+ *   describe    the parameter's description in the API document, from the
+ *               filter's `jsonPath` and its whole declaration
  *   parse       the validated string → what the predicate binds; throws a 400 for
  *               what the schema cannot express (list-filters.js calls it, before
  *               any query)
@@ -14,8 +16,14 @@
  * JSONB key from the trusted descriptor) and `bind`, which pushes a value as a
  * query parameter and returns its `$n`; request values are only ever bound.
  *
- * See openspec/changes/add-reference-shared-filters/design.md, D1–D6, and
- * openspec/changes/add-reference-type-filters/design.md, D3 (`foldedEq`).
+ * LINK filters (`linkPermid`, `taxonExact`, `taxonSubtree`) match a column
+ * holding a foreign key, not a payload field. Each takes one permid of the
+ * declared `prefix`, enforced by its schema; they have no `predicate` here,
+ * because the resource's own repository translates them (occurrence-repository.js).
+ *
+ * See openspec/changes/add-reference-shared-filters/design.md, D1–D6,
+ * openspec/changes/add-reference-type-filters/design.md, D3 (`foldedEq`), and
+ * openspec/changes/add-occurrence-reads/design.md, D8 (link filters).
  */
 
 /** A leading DOI resolver URL or `doi:` label, removed from both sides of a `doi` match. */
@@ -25,10 +33,40 @@ const DOI_PREFIX_RE = new RegExp(DOI_PREFIX, 'i');
 /** `YYYY` or `YYYY-YYYY`. */
 export const YEAR_PATTERN = '^\\d{4}(-\\d{4})?$';
 
-/** Messages for a kind's `pattern` error, keyed by the pattern (query-schemas.js `messageFor`). */
-export const PATTERN_MESSAGES = {
+/**
+ * A permid of `prefix`: `<PREFIX>-<digits>-<two digits>`. Only the form: the
+ * check digits are the database's business (cursor.js), so a well-formed permid
+ * naming nothing matches nothing.
+ *
+ * @param {string} prefix
+ */
+export const permidPattern = (prefix) => `^${prefix}-\\d+-\\d{2}$`;
+
+const PERMID_PATTERN = /^\^([A-Z]{3})-/;
+
+/** Messages for a kind's `pattern` error, keyed by the pattern. */
+const PATTERN_MESSAGES = {
   [YEAR_PATTERN]: (param) => `\`${param}\` must be a year (YYYY) or a range (YYYY-YYYY)`,
 };
+
+/**
+ * The message for a `pattern` error on `param` (query-schemas.js `messageFor`),
+ * or undefined for a pattern no kind declares.
+ *
+ * @param {string} pattern
+ * @param {string} param
+ */
+export function patternMessage(pattern, param) {
+  if (PATTERN_MESSAGES[pattern]) return PATTERN_MESSAGES[pattern](param);
+  const prefix = PERMID_PATTERN.exec(pattern)?.[1];
+  if (prefix && pattern === permidPattern(prefix)) {
+    return `\`${param}\` must be a ${prefix} permid (${prefix}-<number>-<check digits>)`;
+  }
+  return undefined;
+}
+
+/** A link filter's schema: one permid of its declared prefix. */
+const permidSchema = (def) => ({ pattern: permidPattern(def.prefix) });
 
 /** Case- and accent-folded text, compared on both sides of a family-name match. */
 const folded = (expression) => `lower(unaccent(${expression}))`;
@@ -136,6 +174,31 @@ export const FIELD_FILTER_OPS = {
     predicate: ({ payload, key, bind }, { from, to }) =>
       `(CASE WHEN ${payload}->>${key} ~ '^[0-9]{4}$' THEN (${payload}->>${key})::int END) ` +
       `BETWEEN ${bind(from)} AND ${bind(to)}`,
+  },
+
+  linkPermid: {
+    schema: permidSchema,
+    describe: (_jsonPath, { prefix, target }) =>
+      `A ${prefix} permid. Only items linked to the item of \`${target}\` with this permid. ` +
+      'A well-formed permid that names nothing matches nothing.',
+    parse: (value) => value,
+  },
+
+  taxonExact: {
+    schema: permidSchema,
+    describe: (_jsonPath, { prefix }) =>
+      `A ${prefix} permid. Only items identified as exactly this taxon name, as stored: not its ` +
+      'synonyms, and nothing within it (see `withinTaxon`).',
+    parse: (value) => value,
+  },
+
+  taxonSubtree: {
+    schema: permidSchema,
+    describe: (_jsonPath, { prefix }) =>
+      `A ${prefix} permid. Only items identified as a taxon within this one: its accepted concept, ` +
+      "every concept contained in it at any depth, and every name of each. A junior synonym's permid " +
+      "selects its senior's whole subtree. Never matches an identification whose taxon was not derived.",
+    parse: (value) => value,
   },
 };
 

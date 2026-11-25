@@ -44,7 +44,7 @@ function storageGroups(properties) {
 
 const sourceKey = ({ table, key, value }) => `${table}.${key}->${value}`;
 
-const OPTIONAL_SOURCE_KEYS = ['versioned', 'payload', 'labels'];
+const OPTIONAL_SOURCE_KEYS = ['versioned', 'payload', 'labelColumns', 'labels'];
 
 function checkSource(codecName, source) {
   const shown = JSON.stringify(source);
@@ -56,8 +56,14 @@ function checkSource(codecName, source) {
   if ('versioned' in source && source.versioned !== true) {
     throw new Error(`${codecName}: a source's versioned flag, when given, must be true: ${shown}`);
   }
-  if ('labels' in source && !('payload' in source)) {
-    throw new Error(`${codecName}: a source with labels must name its payload column: ${shown}`);
+  if ('labelColumns' in source && source.labelColumns !== true) {
+    throw new Error(`${codecName}: a source's labelColumns flag, when given, must be true: ${shown}`);
+  }
+  if ('payload' in source && 'labelColumns' in source) {
+    throw new Error(`${codecName}: a source reads labels from its payload column or from plain columns, not both: ${shown}`);
+  }
+  if ('labels' in source && !('payload' in source) && !('labelColumns' in source)) {
+    throw new Error(`${codecName}: a source with labels must name its payload column or declare labelColumns: ${shown}`);
   }
   if ('labels' in source && !Array.isArray(source.labels)) {
     throw new Error(`${codecName}: a source's labels must be an array: ${shown}`);
@@ -188,7 +194,9 @@ const quoted = (table) => table.split('.').map((p) => `"${p}"`).join('.');
 export const isDictionarySource = (source) => source.table.startsWith('dictionaries.');
 
 // Map each source's table to { byKey, byValue }, both filled by one read. The
-// same read fills `labels` (key -> { <label>: value }, a NULL label left out)
+// same read fills `labels` (key -> { <label>: value }, a NULL label left out;
+// read from the jsonb column `payload` names, or as plain columns when the
+// source declares `labelColumns`, as the derived taxa table does)
 // for a source asking for labels, and `removed` (the keys of soft-removed heads)
 // for a versioned one. Removed heads stay in byKey and byValue, so a codec that
 // ignores `removed` resolves exactly as before.
@@ -214,7 +222,7 @@ export const isDictionarySource = (source) => source.table.startsWith('dictionar
 export async function loadCodecContext(pg, sources, selection = {}, reuse) {
   const ctx = new Map(reuse);
   for (const source of sources) {
-    const { table, key, value, versioned, payload, labels = [] } = checkSource('loadCodecContext', source);
+    const { table, key, value, versioned, payload, labelColumns, labels = [] } = checkSource('loadCodecContext', source);
     if (ctx.has(table)) continue;
     const restrict = isDictionarySource(source) ? undefined : selection[table];
     const where = versioned ? ['succeeded_by_id IS NULL'] : [];
@@ -227,7 +235,7 @@ export async function loadCodecContext(pg, sources, selection = {}, reuse) {
       params.push([...restrict.values]);
     }
     const cols = [`"${key}" AS k`, `"${value}" AS v`];
-    labels.forEach((label, i) => cols.push(`"${payload}"->>'${label}' AS l${i}`));
+    labels.forEach((label, i) => cols.push(labelColumns ? `"${label}" AS l${i}` : `"${payload}"->>'${label}' AS l${i}`));
     if (versioned) cols.push('COALESCE(removed, false) AS removed');
     let sql = `SELECT ${cols.join(', ')} FROM ${quoted(table)}`;
     if (where.length) sql += ` WHERE ${where.join(' AND ')}`;

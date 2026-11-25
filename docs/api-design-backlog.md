@@ -253,6 +253,24 @@ The API's occurrence response is the same either way; dropping the column change
 in the repository. The winner's reference is not cached either (decided 2026-11-25): it is shown
 in the response, read through `winning_identification_id`.
 
+### Occurrence reads: open follow-ups
+
+**Open (raised by `add-occurrence-reads`, 2026-11-25).**
+
+- **`name` formatting vs. Classic.** An identification's `name` is composed by
+  `api/src/lib/identified-name.js`: `?`, `cf.`, `aff.`, `ex gr.` before a rank's name; `n. gen.`,
+  `n. sp.`, `sensu lato` and the like after it; `informal` and the ditto mark `"` dropped. It has
+  not been compared with Classic's display. In particular, does Classic mark informal names (with
+  angle brackets, say)? Changing that is one rule. The structured ranks carry the full information
+  either way.
+- **`withinTaxon` strategy.** The subtree is found by walking `containing_concept_permid` down from
+  the accepted concept (0.2 s for a 30,000-name subtree, a few ms for a genus), once per request.
+  For large subtrees a scan of `classification_path` would be faster (Brachiopoda: 1–4 ms vs.
+  0.3 s); for small ones it is much slower (0.8–2 s). Choosing per query by subtree size is
+  deferred until someone needs it. Measurements: the change's design.md, D8 and "Verification".
+- **A name filter** (`?genus=…` or name search) is what would reach the 51,317 occurrences with no
+  `taxon_permid`. See the name-block question above.
+
 ## Database-level validation
 
 **Deferred.** Payloads are validated in the application (migrations, and later routes) and after the
@@ -352,6 +370,10 @@ for more in one call. Three different things go by that name:
   whether an `href` such as `/specimens?collection=…` is enough are questions for the first caller.
   A cheap first step is the `href` alone, which also helps discoverability.
 - Field blocks: open, and a separate axis from includes.
+- Occurrences now exist (`add-occurrence-reads`, 2026-11-25), so a collection's occurrences are
+  readable as `/occurrences?collection=<permid>`. A collection does not yet link to them: the
+  `collection` → occurrences reverse `href` (and a count) is still open, and is the first candidate
+  for the "`href` alone" step above.
 
 Decided: no general mechanism until there is a second caller. When the first real need arrives,
 add it as `?include=<name>` on that one route, not a per-route boolean such as

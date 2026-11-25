@@ -19,8 +19,9 @@
  * (through a codec's select expression where it has one); the descriptor's
  * `children` are read for the page's head ids; and each record is `merge()`d
  * with one codec context per read (see sourceRecords). Links come from the
- * source's x-link properties and items. Descriptor `links` are for `taxa`
- * alone, which has its own repository and uses linkProjections from here.
+ * source's x-link properties and items. Descriptor `links` are for `taxa` and
+ * `occurrences`, which have their own repositories and use linkProjections
+ * from here.
  */
 
 import {
@@ -108,7 +109,8 @@ function labelObject(target, group) {
 /**
  * Build the SELECT-list expressions that resolve a resource's declared links
  * into embedded `{ <label>, permid }` objects, from the descriptor's `links`
- * config (today only `taxa`'s; see taxa-repository.js). Each link is
+ * config (`taxa`'s and `occurrences`'; see taxa-repository.js and
+ * occurrence-repository.js). Each link is
  * single-valued: a multi-valued link belongs in a payload source. The target route group supplies the table and the label source (see
  * LINK_TARGETS); the declaration supplies the FK column and whether it holds
  * the target's serial id or its `permid`. The persistence layer stays

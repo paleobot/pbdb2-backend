@@ -18,7 +18,7 @@
  */
 
 import { MAX_IDS, MAX_LIMIT, DEFAULT_LIMIT } from './list-filters.js';
-import { filterOp, PATTERN_MESSAGES } from './field-filter-ops.js';
+import { filterOp, patternMessage } from './field-filter-ops.js';
 
 /** The universal list parameters. No `default`: Ajv must not invent a `limit` before the `ids` rule reads it. */
 const UNIVERSAL_PROPERTIES = {
@@ -51,9 +51,9 @@ const IDS_EXCLUDE = {
  * The querystring schema of a list read.
  *
  * @param {object} [opts]
- * @param {Record<string, { jsonPath: string, op: string, note?: string }>} [opts.filters]  the
- *   descriptor's field filters; each one's match kind (field-filter-ops.js) supplies its schema and
- *   description, and a filter's `note` is appended to that description
+ * @param {Record<string, { jsonPath?: string, op: string, note?: string }>} [opts.filters]  the
+ *   descriptor's field and link filters; each one's match kind (field-filter-ops.js) supplies its
+ *   schema and description, and a filter's `note` is appended to that description
  * @param {object} [opts.source]  the payload source, whose inline `enum` on an
  *   `eq` filter's field becomes the filter's legal values
  * @param {Record<string, { type: 'boolean' }>} [opts.expansions]  declared expansions
@@ -63,12 +63,13 @@ export function listQuerySchema({ filters = {}, source, expansions = {} } = {}) 
   for (const [param, def] of Object.entries(filters)) {
     const kind = filterOp(def.op);
     const values = def.op === 'eq' ? source?.properties?.[def.jsonPath]?.enum : undefined;
+    const description = kind.describe(def.jsonPath, def);
     properties[param] = {
       type: 'string',
       minLength: 1,
-      ...kind.schema,
+      ...(typeof kind.schema === 'function' ? kind.schema(def) : kind.schema),
       ...(Array.isArray(values) ? { enum: [...values] } : {}),
-      description: def.note ? `${kind.describe(def.jsonPath)} ${def.note}` : kind.describe(def.jsonPath),
+      description: def.note ? `${description} ${def.note}` : description,
     };
   }
   for (const [param, def] of Object.entries(expansions)) {
@@ -137,7 +138,7 @@ function messageFor(error) {
       return `\`${param}\` must have a value`;
     case 'pattern':
       if (param === 'ids') return '`ids` must contain at least one id';
-      return PATTERN_MESSAGES[error.params.pattern]?.(param) ?? `\`${param}\` must have a value`;
+      return patternMessage(error.params.pattern, param) ?? `\`${param}\` must have a value`;
     case 'maximum':
       return `\`${param}\` accepts at most ${error.params.limit}`;
     case 'type':

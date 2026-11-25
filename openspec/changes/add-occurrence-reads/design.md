@@ -100,13 +100,16 @@ SELECT o.permid, o.identification, o.plant_organs, o.oldpbdb_occurrence_no,
        it.name  AS taxon_name,                  -- NULL when taxon_permid has no taxa row
        a.abundance,
        <linkProjections: collection (o), reference (o), identification.reference (w), acceptedTaxon (it)>
-FROM occurrences o
+FROM (SELECT * FROM occurrences o WHERE … ORDER BY o.permid_no LIMIT n+1) o   -- the page, from the bare table
 JOIN identifications w      ON w.id = o.winning_identification_id
 LEFT JOIN taxa it           ON it.permid = o.taxon_permid
 LEFT JOIN occurrence_abundances a
        ON a.occurrence_permid = o.permid AND a.succeeded_by_id IS NULL AND a.removed IS NOT TRUE
-WHERE … ORDER BY o.permid_no LIMIT n+1
+ORDER BY o.permid_no
 ```
+
+Only the page's rows are joined: choosing the page in the same query block as the joins made a
+filter with many matches join all of them first (see Verification, "Two plan findings").
 
 Measured with every join:
 
@@ -359,3 +362,75 @@ localhost and Aurora. Rolling back means removing the route group: nothing else 
 - **For Andrew, not blocking:**
   - root-competes (`docs/occurrences.md`);
   - whether the cache keeps its name-block copy (`docs/api-design-backlog.md`).
+
+## Verification
+
+### Payload audit round trip (task 2.2), 2026-11-25
+
+`node src/audit-payloads.js --entity identification --round-trip` from `migrations/`, against localhost
+`pbdb`, with the identification entry now selecting `taxon_permid` and `reference_id`:
+
+```
+== identification (identifications)
+   rows checked 2046335 (heads 2046335, superseded 0)
+   violations   0 (heads 0, superseded 0)
+   round trip   2046335 head rows, 0 with differences
+```
+
+35 s. Every head was merged and split back, not a sample. Among them, 759 heads carry a `taxon_permid`
+with no `taxa` row (30 distinct permids; 547 of them are occurrences' winners), 51,777 have no
+`taxon_permid`, and none lacks a `reference_id`. All round-trip with no difference.
+
+### Counts on localhost (task 8.1), 2026-11-25
+
+Read through `build({ pg })` against localhost `pbdb`, the same app `server.js` listens with:
+
+| Check | Expected | API |
+|---|---|---|
+| `collection=COL-123927-36`, every page of 1,000 | 1,227 | 1,227 |
+| `taxon=TXN-38613-69` (*Tyrannosaurus*) | 14 | 14 |
+| `withinTaxon=TXN-38613-69` | 167 | 167 |
+| `OCC-131786-68` `reference` / `identification.reference` | two references | `REF-4024-05` / `REF-4032-78` |
+
+### Two plan findings (task 8.2)
+
+The first full-query timings were worse than the exploration's, for two reasons, both fixed in
+`occurrence-repository.js`:
+
+1. **The joins ran on every match.** With the winner, taxon and abundance joins in the same query
+   block as the filter, a plan that sorts the matches joined all of them first (Mammalia: 94,121
+   joins for a page of 100, 1.1 s). The page is now chosen from `occurrences` alone in a subquery,
+   and only its rows are joined.
+2. **The bound subtree misled the planner.** Bound as `ANY($n)`, the planner sees the subtree's
+   concrete names, overestimates the matches (*Tyrannosaurus*: 3,469 estimated, 167 real), and
+   walks the `permid_no` index filtering out 808,502 rows (270 ms). Hidden behind an InitPlan,
+   `ANY(ARRAY(SELECT unnest($n::text[])))`, it takes the `taxon_permid` index and sorts. The names
+   are still resolved once per request. Bare-table page of 1,000, first page / a later page:
+
+   | Taxon | Bound | Behind an InitPlan (chosen) |
+   |---|---|---|
+   | *Tyrannosaurus* | 5 / 2 ms | 2 / 2 ms |
+   | Productidae | 293 / 56 ms | 5 / 4 ms |
+   | Mammalia | 257 / 110 ms | 115 / 92 ms |
+   | Brachiopoda | 92 / 95 ms | 177 / 164 ms |
+
+   Only Brachiopoda is slower, by under 0.1 s. Choosing per query by subtree size stays deferred.
+
+### Timings on localhost (task 8.2), 2026-11-25
+
+Warm (the second of two identical requests), through `app.inject()`, so HTTP framing is excluded:
+
+| Read | Time |
+|---|---|
+| Page of 100 | 10 ms |
+| Page of 1,000 | 43 ms |
+| `collection=` largest collection, page of 1,000 | 43 ms |
+| `withinTaxon` *Tyrannosaurus*, page of 100 | 7 ms |
+| `withinTaxon` Productidae, page of 100 | 12 ms |
+| `withinTaxon` Mammalia, page of 100 | 388 ms |
+| `withinTaxon` Brachiopoda, page of 100 | 418 ms |
+| An occurrence's identifications | 5 ms |
+| CSV `withinTaxon=TXN-99798-38` (Mammalia), streamed whole | 94,121 records, 14.8 s, **1** subtree walk |
+
+The Mammalia and Brachiopoda pages are each about 0.2 s of walk plus the page. The streamed export
+walks once and reuses the names across its 95 batches.

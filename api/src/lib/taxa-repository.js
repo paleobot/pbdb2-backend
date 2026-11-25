@@ -12,8 +12,9 @@
  * is an aggregate; this one's TABLE is a different shape).
  *
  * What is NOT forked: link resolution. `linkProjections()` is imported from the
- * generic repository and correlated to this module's `t` alias. Taxa are its only
- * caller: every other resource takes its links from its payload source.
+ * generic repository and correlated to this module's `t` alias. Taxa and
+ * occurrences are its only callers: every other resource takes its links from
+ * its payload source.
  *
  * NO `removed` PREDICATE. `taxa.removed` exists but is dead: `rebuild_taxa()`
  * names it in neither its INSERT column list nor its `ON CONFLICT DO UPDATE SET`,

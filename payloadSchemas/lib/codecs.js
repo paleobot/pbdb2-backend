@@ -129,6 +129,34 @@ const referenceLinks = {
   },
 };
 
+// A taxon link <-> a column holding the taxon's permid itself
+// (identifications.taxon_permid). The column holds a root name opinion's
+// permid, which is not a foreign key to `taxa`: a name opinion whose taxon was
+// not derived (a taxa orphan) is data, not a broken invariant. So merge emits
+// { permid } alone when taxa has no row, rather than throwing as lookup() does,
+// and nothing for NULL. taxa is a derived table with no jsonb, so its label is a
+// plain column (labelColumns).
+// split writes the permid unchanged and needs no lookup: the column's FK to the
+// permid registry and its TXN check refuse a bad value. Requiring a root
+// name_opinions row is the write path's business.
+const TAXA_SOURCE = { table: 'taxa', key: 'permid', value: 'permid', labelColumns: true };
+const taxonPermid = {
+  sources: [TAXA_SOURCE],
+  split(values, storage) {
+    const link = values[storage.property];
+    if (link === undefined || link === null) return {};
+    return { columns: { [storage.column]: link.permid } };
+  },
+  merge({ columns }, storage, ctx) {
+    const permid = columns?.[storage.column];
+    if (permid === undefined || permid === null) return {};
+    const entry = ctx?.get(TAXA_SOURCE.table);
+    if (!entry) throw new Error(`taxonPermid: no codec context loaded for ${TAXA_SOURCE.table}`);
+    if (!entry.byKey?.has(permid)) return { [storage.property]: { permid } };
+    return { [storage.property]: linkObject(entry, storage, permid, permid) };
+  },
+};
+
 // role name <-> persons.role_id. The payload carries the role's name and never
 // its id: this project exposes permids rather than internal ids, dictionaries.roles
 // has no permid, and a bare id means nothing to a client without a roles route.
@@ -164,7 +192,7 @@ const personPermid = {
   },
 };
 
-export const codecs = { wgs84Point, referencePermid, referenceLinks, roleName, personPermid };
+export const codecs = { wgs84Point, referencePermid, referenceLinks, taxonPermid, roleName, personPermid };
 
 export function getCodec(name) {
   const codec = codecs[name];

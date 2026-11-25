@@ -24,7 +24,7 @@ before(async () => {
 });
 after(() => app.close());
 
-const RESOURCES = ['authorities', 'collections', 'references', 'schemas', 'taxa'];
+const RESOURCES = ['authorities', 'collections', 'occurrences', 'references', 'schemas', 'taxa'];
 
 test('the document is valid OpenAPI 3.1 and is not enveloped', async () => {
   assert.match(doc.openapi, /^3\.1\./);
@@ -48,6 +48,9 @@ test('its paths are exactly the GET operations discovery reaches, single reads i
     }
   };
   await walk('/');
+  // The nested reads are reached through each embedded identification's href.
+  reached.add('/api/v1/occurrences/{permid}/identifications');
+  reached.add('/api/v1/occurrences/{permid}/identifications/{identificationPermid}');
 
   assert.deepEqual(Object.keys(doc.paths).sort(), [...reached].sort());
   for (const [path, operations] of Object.entries(doc.paths)) {
@@ -78,8 +81,8 @@ test('a list documents its filters and bounds; an expansion is a boolean', () =>
 const RIS = 'application/x-research-info-systems';
 const JSON_CSV = ['application/json', 'text/csv'];
 
-test('the four large lists document a CSV response beside JSON; nothing else does', () => {
-  const CSV_LISTS = ['/api/v1/authorities', '/api/v1/collections', '/api/v1/references', '/api/v1/taxa'];
+test('the five large lists document a CSV response beside JSON; nothing else does', () => {
+  const CSV_LISTS = ['/api/v1/authorities', '/api/v1/collections', '/api/v1/occurrences', '/api/v1/references', '/api/v1/taxa'];
   for (const [path, { get }] of Object.entries(doc.paths)) {
     const content = get.responses['200'].content ?? {};
     if (CSV_LISTS.includes(path)) {

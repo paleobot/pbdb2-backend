@@ -5,6 +5,7 @@ import { getCodec } from '../lib/codecs.js';
 import { authoritySource } from '../authority.schema.js';
 import { collectionSource } from '../collection.schema.js';
 import { schemaSource } from '../schema.schema.js';
+import { identificationSource } from '../identification.schema.js';
 import { deriveVariant } from '../lib/variants.js';
 import { createAjv } from '../lib/ajv.js';
 
@@ -376,9 +377,14 @@ test('collectCodecSources asks a link\'s source for its label, merging labels ac
   assert.deepEqual(collectCodecSources(twoLinks)[0].labels.sort(), ['doi', 'title']);
 });
 
-test('a source with labels must name its payload column, and its labels must be identifiers', async () => {
+test('a source with labels must name its payload column or declare labelColumns, and its labels must be identifiers', async () => {
   const fakePg = { async query() { return { rows: [] }; } };
-  await assert.rejects(() => loadCodecContext(fakePg, [{ table: 'refs', key: 'id', value: 'permid', labels: ['title'] }]), /must name its payload column/);
+  await assert.rejects(() => loadCodecContext(fakePg, [{ table: 'refs', key: 'id', value: 'permid', labels: ['title'] }]), /must name its payload column or declare labelColumns/);
+  await assert.rejects(
+    () => loadCodecContext(fakePg, [{ table: 'taxa', key: 'permid', value: 'permid', payload: 'taxon', labelColumns: true, labels: ['name'] }]),
+    /loadCodecContext: a source reads labels from its payload column or from plain columns, not both/,
+  );
+  await assert.rejects(() => loadCodecContext(fakePg, [{ table: 'taxa', key: 'permid', value: 'permid', labelColumns: 'yes' }]), /labelColumns flag/);
   await assert.rejects(() => loadCodecContext(fakePg, [{ table: 'refs', key: 'id', value: 'permid', payload: 'reference', labels: ["title'; --"] }]), /unsafe identifier/);
 });
 
@@ -401,6 +407,76 @@ test('loadCodecContext reads labels and the removed set in the same query', asyn
   assert.deepEqual(refsEntry.labels.get('9'), {}, 'a NULL label is left out');
   assert.deepEqual([...refsEntry.removed], ['12']);
   assert.equal(refsEntry.byKey.get('12'), 'r-12', 'a removed head stays resolvable');
+});
+
+test('loadCodecContext reads a labelColumns source\'s labels as plain columns', async () => {
+  const issued = [];
+  const rows = [{ k: 'TXN-1-00', v: 'TXN-1-00', l0: 'Dielasma' }];
+  const fakePg = { async query(sql, params) { issued.push({ sql, params }); return { rows }; } };
+  const taxa = { table: 'taxa', key: 'permid', value: 'permid', labelColumns: true, labels: ['name'] };
+  const ctx = await loadCodecContext(fakePg, [taxa], { taxa: { column: 'permid', values: ['TXN-1-00'] } });
+  assert.equal(issued.length, 1);
+  assert.equal(issued[0].sql, 'SELECT "permid" AS k, "permid" AS v, "name" AS l0 FROM "taxa" WHERE "permid" = ANY($1)');
+  assert.deepEqual(ctx.get('taxa').labels.get('TXN-1-00'), { name: 'Dielasma' });
+});
+
+test('a codec declaring both label forms is refused naming the codec', () => {
+  const codec = getCodec('taxonPermid');
+  const original = codec.sources;
+  codec.sources = [{ ...original[0], payload: 'taxon' }];
+  try {
+    assert.throws(() => collectCodecSources(identificationSource), /taxonPermid: a source reads labels from its payload column or from plain columns, not both/);
+  } finally {
+    codec.sources = original;
+  }
+});
+
+// ---------- taxonPermid (identification) ----------
+
+// A taxa context as loadCodecContext builds it: TXN-1-00 named, TXN-3-00 with a
+// NULL name; TXN-2-00 (an orphan name opinion) has no row.
+const taxaContext = () => new Map([
+  ['taxa', {
+    byKey: new Map([['TXN-1-00', 'TXN-1-00'], ['TXN-3-00', 'TXN-3-00']]),
+    byValue: new Map([['TXN-1-00', 'TXN-1-00'], ['TXN-3-00', 'TXN-3-00']]),
+    labels: new Map([['TXN-1-00', { name: 'Dielasma' }], ['TXN-3-00', {}]]),
+  }],
+  ...labelledRefs(),
+]);
+
+test('taxonPermid merges a resolved taxon to a labelled link', () => {
+  const merged = merge(identificationSource, { jsonb: {}, columns: { taxon_permid: 'TXN-1-00', reference_id: '7' } }, taxaContext());
+  assert.deepEqual(merged.taxon, { permid: 'TXN-1-00', name: 'Dielasma' });
+  assert.deepEqual(merged.reference, { permid: 'r-7', title: 'Fossil leaves' });
+});
+
+test('taxonPermid merges a taxon with no taxa row to its permid alone, without throwing', () => {
+  const merged = merge(identificationSource, { jsonb: {}, columns: { taxon_permid: 'TXN-2-00', reference_id: '7' } }, taxaContext());
+  assert.deepEqual(merged.taxon, { permid: 'TXN-2-00' });
+});
+
+test('taxonPermid: NULL merges to no key; a missing context throws', () => {
+  const merged = merge(identificationSource, { jsonb: {}, columns: { taxon_permid: null, reference_id: '7' } }, taxaContext());
+  assert.equal('taxon' in merged, false);
+  assert.throws(() => merge(identificationSource, { jsonb: {}, columns: { taxon_permid: 'TXN-1-00' } }, new Map()), /taxonPermid: no codec context loaded for taxa/);
+});
+
+test('taxonPermid split writes the permid unchanged and ignores the label', () => {
+  const { columns, jsonb } = split(identificationSource, { taxon: { permid: 'TXN-38613-69', name: 'Tyrannosaurus' }, comments: 'c' }, taxaContext());
+  assert.deepEqual(columns, { taxon_permid: 'TXN-38613-69' });
+  assert.deepEqual(jsonb, { comments: 'c' });
+  assert.deepEqual(split(identificationSource, { taxon: null }, taxaContext()).columns, {});
+  assert.deepEqual(split(identificationSource, {}, taxaContext()).columns, {});
+});
+
+test('identification round trip reproduces taxon_permid and reference_id, orphan or not', () => {
+  for (const taxon_permid of ['TXN-1-00', 'TXN-2-00', null]) {
+    const stored = { jsonb: { identification: { genus: { name: 'Dielasma' } } }, columns: { permid: 'OCC-1-00', taxon_permid, reference_id: '7' } };
+    const { permid, legacyIDs, ...writable } = merge(identificationSource, stored, taxaContext());
+    const back = split(identificationSource, writable, taxaContext());
+    assert.deepEqual(back.columns, { ...(taxon_permid ? { taxon_permid } : {}), reference_id: '7' }, String(taxon_permid));
+    assert.deepEqual(back.jsonb, stored.jsonb);
+  }
 });
 
 test('storageColumns lists the columns x-storage names, and no child tables', () => {
