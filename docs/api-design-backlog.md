@@ -233,6 +233,26 @@ has 22 columns.
 for GET. `intervals` and `timescales` are reference data whose editability is undecided. None has
 a jsonb payload.
 
+### The winner's name block in the `occurrences` cache
+
+**Open; for Andrew (raised 2026-11-25).** `occurrences.identification` is a verbatim copy of the
+winning identification's name block, reachable through `winning_identification_id`. Projecting it
+through that join costs one primary-key lookup per row, the same as the winner's reference, which
+the cache does not copy. Measured on localhost (warm): a page of 100 and the largest collection
+(1,227 occurrences) read in the same time with or without the join, and a whole-table read of
+2,010,858 rows goes from 1.0 s to 1.6 s. The copy is 176 MB of the cache's 801 MB, and the upsert
+has to keep it in step.
+
+- **For keeping it:** a future name filter (`?genus=…`, name search) could index the cache
+  directly. That matters most for the 51,317 occurrences with no `taxon_permid`, where the name is
+  the only handle. An index on the identification heads could serve the same filter.
+- **Not the same case as `taxon_permid`:** that column is the key for "occurrences of taxon X", the
+  main query, and needs an index on the occurrence row, so it stays.
+
+The API's occurrence response is the same either way; dropping the column changes one projection
+in the repository. The winner's reference is not cached either (decided 2026-11-25): it is shown
+in the response, read through `winning_identification_id`.
+
 ## Database-level validation
 
 **Deferred.** Payloads are validated in the application (migrations, and later routes) and after the
