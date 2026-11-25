@@ -37,6 +37,6 @@
 
 ## 6. Aurora and records
 
-- [ ] 6.1 With the user's go-ahead and the VPN up, rebuild Aurora `pbdb2_migration_test` at the implementation commit; compare counts and permids with localhost and record the step time
-- [ ] 6.2 Record in `occurrences.md` the measured counts, runtime, registry growth and `rebuild_occurrences()` time on both databases
+- [x] 6.1 With the user's go-ahead and the VPN up, rebuild Aurora `pbdb2_migration_test` at the implementation commit; compare counts and permids with localhost and record the step time
+- [x] 6.2 Record in `occurrences.md` the measured counts, runtime, registry growth and `rebuild_occurrences()` time on both databases
 - [x] 6.3 `openspec validate create-occurrences-migration --strict`

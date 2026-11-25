@@ -141,22 +141,28 @@ reidentification goes to Classic's winner.
 All targets above were met exactly, with no payload violations and a clean round trip; the 641 excluded rows and
 12 conflicts matched the CSVs.
 
-| | localhost `pbdb` (PG 16.15), 2026-11-24 | Aurora `pbdb2_migration_test` |
+| | localhost `pbdb` (PG 16.15), 2026-11-24 | Aurora `pbdb2_migration_test` (PG 18.3), 2026-11-25 |
 | --- | --- | --- |
-| Step total | 356.5 s | (pending) |
-| Pass 1: roots + abundances | 260.5 s | |
-| Pass 2: non-roots | 4.9 s | |
-| `ANALYZE identifications` | 0.3 s | |
-| `rebuild_occurrences()` | 88.6 s (85.1–94.0 s over four runs) | |
-| COMMIT (deferred one-head checks) | 0.0 s | |
-| Peak RSS of the script | 470 MB | |
-| Full runner, 12 steps | 17 min 31 s | |
-| Registry `permids` | 2,452,459 → 5,307,643 (+2,046,335 `OCC`, +808,849 `ABD`) | |
-| Sizes: `identifications` / `occurrence_abundances` / `occurrences` / `permids` | 1,058 / 264 / 801 / 542 MB | |
-| Database | 4,550 MB | |
+| Step total | 356.5 s | 2,278.0 s |
+| Pass 1: roots + abundances | 260.5 s | 2,021.7 s (network round trips per batch) |
+| Pass 2: non-roots | 4.9 s | 30.1 s |
+| `ANALYZE identifications` | 0.3 s | 0.3 s |
+| `rebuild_occurrences()` | 88.6 s (85.1–94.0 s over four runs; 36.5 s with nested loops off, as the script now runs it) | 217.7 s (nested loops off) |
+| COMMIT (deferred one-head checks) | 0.0 s | 0.1 s |
+| Peak RSS of the script | 470 MB | 337 MB |
+| Full runner, 12 steps | 17 min 31 s | about 94 min (steps 1–11 56 min, then the step re-run alone) |
+| Registry `permids` | 2,452,459 → 5,307,643 (+2,046,335 `OCC`, +808,849 `ABD`) | the same |
+| Sizes: `identifications` / `occurrence_abundances` / `occurrences` / `permids` | 1,058 / 264 / 801 / 542 MB | 1,063 / 264 / 782 / 552 MB |
+| Database | 4,550 MB | 4,548 MB |
 
 First minted permids: `OCC-10000000-29` (reidentification 1) and `ABD-10000000-93` (occurrence 1). Two rebuilds
-from `--createdb` gave identical permids on every row.
+from `--createdb` gave identical permids on every row. Aurora matches localhost on every identification and abundance
+permid, on md5s of the identification and abundance rows (payload, taxon, reference, collection, persons) and of the
+derived occurrences (winner, name block, organs), and on the registry count.
+
+The Aurora figure is from a re-run of the step alone. The first attempt's `rebuild_occurrences()` took a nested-loop
+plan on PG 18 and was stopped after 31 min (design.md, Risks); it rolled back, the two sequences were reset with
+`ALTER SEQUENCE … RESTART` (no minted permid was registered), and the step re-run with nested loops off.
 
 ## Collection conflicts
 

@@ -416,6 +416,13 @@ async function main() {
     timings.analyze = (Date.now() - t) / 1000;
     console.log(`  ANALYZE identifications (${timings.analyze.toFixed(1)}s)`);
 
+    // Even analyzed, roots are estimated at ~0.5% of the table (occurrence_permid =
+    // permid compares two columns, which no statistic covers): 10K for 2M. PG 16 still
+    // hash-joins the candidates; Aurora's PG 18 drives a nested loop from the roots and
+    // did not finish in 31 min. A full rebuild reads every occurrence, so a nested loop
+    // is never the right plan for it (35-90 s with hash joins). SET LOCAL ends with the
+    // transaction.
+    await client.query('SET LOCAL enable_nestloop = off');
     t = Date.now();
     const { rows: [{ changed }] } = await client.query('SELECT rebuild_occurrences() AS changed');
     timings.rebuild = (Date.now() - t) / 1000;

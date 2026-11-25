@@ -199,6 +199,12 @@ with the row and the ajv errors.
     script vacuums the three empty tables before `BEGIN`, which truncates them to 0 pages, so estimates come
     from tuple width as on a fresh database. The same hazard applies to any versioned table loaded after a
     rolled-back load; the DDL (two partial indexes either of which serves the lookup) is not changed here.
+  - Even analyzed, `derive_occurrences()`'s roots are estimated at ~0.5% of the table (`occurrence_permid =
+    permid` compares two columns, which no statistic covers): about 10K for 2M. PG 16 on localhost still
+    hash-joins the candidates (85–94 s); Aurora's PG 18 drove a nested loop from the roots and had not
+    finished after 31 min. The script sets `enable_nestloop = off` (`SET LOCAL`) for the rebuild: a full
+    rebuild reads every occurrence, so a nested loop is never right for it (36 s on localhost). The API's
+    seeded derives are unaffected.
 - [Sequences are not transactional] → a failed or `--dry-run` run still advances `permid_occ_seq` and
   `permid_abd_seq`, so a retry in the same database mints higher numbers than a fresh one. Permids are
   identical across rebuilds from `--createdb` (the D3 guarantee), not across a retry; a rebuild is the remedy.
