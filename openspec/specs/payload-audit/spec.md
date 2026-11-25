@@ -8,8 +8,11 @@ Define `src/audit-payloads.js`: validating every stored jsonb payload of the con
 column, and annotated source, and SHALL state whether the entity's table is versioned. The registry SHALL
 contain collection (`collections.collection`), specimen (`specimens.specimen`), person (`persons.person`),
 reference (`refs.reference`), authority (`authorities.authority`), schema (`schemas.schema`), character
-(`characters.character`) and state (`states.state`). Collection, specimen, reference, authority, schema,
-character and state are versioned; person is not.
+(`characters.character`), state (`states.state`), identification (`identifications.identification`) and
+occurrence-abundance (`occurrence_abundances.abundance`). Collection, specimen, reference, authority,
+schema, character, state, identification and occurrence-abundance are versioned; person is not. The derived
+`occurrences` table is not an entry: its `identification` column is a copy of part of the winning
+identification's payload, not a payload.
 
 For each entry the script SHALL:
 - resolve and compile the `db` variant once;
@@ -47,6 +50,10 @@ rather than audit anything. `permid` SHALL still be selected for every entry.
 #### Scenario: Every stored character and state validates at rest
 - **WHEN** the character and state entries are audited on a freshly migrated database
 - **THEN** every row is checked (336 characters and 1,325 states on localhost `pbdb` on 2026-09-23, all heads, numbers the live PBot API grows), with zero violations, and no row carries `definition: null`
+
+#### Scenario: Every stored identification and abundance validates at rest
+- **WHEN** the identification and occurrence-abundance entries are audited on a freshly migrated database
+- **THEN** every row is checked (about 2.05M identifications and 0.81M abundances on `pbdb_2026_10_18`, all heads), with zero violations, including identifications that carry the ditto mark `"` as a resolution
 
 ### Requirement: The audit reports violations and exits accordingly
 The script SHALL print, per entity:
@@ -89,7 +96,7 @@ It SHALL write the same report as a run artifact beside itself. It SHALL exit 0 
 
 #### Scenario: Unknown entity
 - **WHEN** `--entity opinion` is passed
-- **THEN** the script exits non-zero listing `collection`, `specimen`, `person`, `reference`, `authority`, `schema`, `character` and `state`
+- **THEN** the script exits non-zero listing `collection`, `specimen`, `person`, `reference`, `authority`, `schema`, `character`, `state`, `identification` and `occurrence-abundance`
 
 #### Scenario: Schema is a valid entity
 - **WHEN** `--entity schema` is passed
@@ -98,6 +105,10 @@ It SHALL write the same report as a run artifact beside itself. It SHALL exit 0 
 #### Scenario: Character and state are valid entities
 - **WHEN** `--entity character --entity state` is passed
 - **THEN** only `characters` and `states` are read and reported
+
+#### Scenario: Identification and occurrence-abundance are valid entities
+- **WHEN** `--entity identification --entity occurrence-abundance` is passed
+- **THEN** only `identifications` and `occurrence_abundances` are read and reported
 
 ### Requirement: Round-trip mode verifies split and merge on stored data
 With `--round-trip`, for every head row of an entity — every row, for an unversioned entity — the script SHALL additionally:
@@ -124,7 +135,7 @@ with `column: "reference_id"`, so `codecKeyColumns` names the column the batch's
 
 #### Scenario: Stable round trip
 - **WHEN** `--round-trip` runs on a freshly migrated database
-- **THEN** every head collection, specimen, reference, authority, schema, character and state, and every person, round-trips with zero differences
+- **THEN** every head collection, specimen, reference, authority, schema, character, state, identification and occurrence-abundance, and every person, round-trips with zero differences
 
 #### Scenario: Codec defect detected
 - **WHEN** a codec swaps latitude and longitude on merge

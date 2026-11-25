@@ -25,11 +25,12 @@ the authoritative statement of the sequence:
 | 9 | `collections` | `src/collections-migration/migrate-collections.js` |
 | 10 | `specimens` | `src/specimens-migration/migrate-specimens.js` |
 | 11 | `taxa` | `src/rebuild-taxa.js` |
+| 12 | `occurrences` | `src/occurrences-migration/migrate-occurrences.js` |
 
 Every entry point in this table sits under `src/`. The table is the runner's own `STEPS` array restated,
 so it is verifiable by reading `src/run-migrations.js` rather than by trusting this specification.
 
-Rows 1–10 are migrations. Row 11 is not: `taxa` reads no legacy system, and its script calls
+Rows 1–10 and 12 are migrations. Row 11 is not: `taxa` reads no legacy system, and its script calls
 `rebuild_taxa_full()` (`db/03-taxa.sql`) to derive `taxa_linnaean`, `taxa_clades`, `taxa_attachments` and
 `taxa` from the opinion tables earlier steps loaded. It is a step so that a full run leaves the taxa tables
 populated, and so that it is held to the same ordering, precondition, postcondition and logging rules as
@@ -46,7 +47,8 @@ persons ──┬─▶ pbot-persons ──┐
                              ├─────────────────────────────────────────────▶ (refs)
                              ├─▶ collections ───────────────┐
                              ├──────────────────────────────┼─▶ specimens
-                             └─▶ (name_opinions) ───────────┘
+                             ├─▶ (name_opinions) ───────────┤
+                             └──────────────────────────────┴─▶ occurrences
 ```
 
 - `pbot-persons` matches and updates the rows `persons` created.
@@ -63,6 +65,8 @@ persons ──┬─▶ pbot-persons ──┐
   `oldpbdb_taxon_no`. It is the only step that reads from three other steps' output at once.
 - `taxa` reads `name_opinions`, `assignment_opinions` and `validity_opinions`, which `authority-opinions`
   and `opinions` wrote. Nothing reads from it.
+- `occurrences` reads `persons`, `refs` and `collections` through `legacyIDs.oldpbdbID`, and `name_opinions`
+  through `oldpbdb_taxon_no`, the same inputs as `specimens`. It does not read `specimens` or the taxa tables.
 
 The order SHALL NOT be changed except by a change that records the new order in this specification.
 
@@ -70,13 +74,15 @@ Rows 10 and 11 are additions rather than relocations: each introduces a step tha
 exist, where the nine preceding rows reached their current form by moving scripts already in the
 repository. `taxa` could run as early as position 9, since it depends only on `opinions`; it is appended
 instead, so that rows 1–10 keep their positions and a `--from` selection keeps the meaning it had.
+Row 12 is likewise appended: `occurrences` could run as early as position 10, but inserting it would
+renumber `taxa`.
 
 #### Scenario: Full pipeline runs in the specified order
 - **WHEN** `src/run-migrations.js` is invoked with no step-selection flag
-- **THEN** it runs all eleven steps in the order given in the table, and does not begin a step until the preceding step has completed successfully
+- **THEN** it runs all twelve steps in the order given in the table, and does not begin a step until the preceding step has completed successfully
 
 #### Scenario: Every entry point resolves under src/
-- **WHEN** the runner spawns any of the eleven steps
+- **WHEN** the runner spawns any of the twelve steps
 - **THEN** the path it spawns is under `src/`, because no migration entry point remains at the repository root
 
 #### Scenario: A new migration is appended, not inserted
@@ -90,6 +96,14 @@ instead, so that rows 1–10 keep their positions and a `--from` selection keeps
 #### Scenario: A full run populates the taxa tables
 - **WHEN** a full run completes against an empty database
 - **THEN** `taxa_linnaean`, `taxa_clades`, `taxa_attachments` and `taxa` are all non-empty, because the `taxa` step has called `rebuild_taxa_full()` over the loaded opinion tables
+
+#### Scenario: The occurrences step is appended after taxa
+- **WHEN** `occurrences` is added to the run order
+- **THEN** it takes position 12, and rows 1–11 are left unchanged, even though its dependencies are all satisfied by position 10
+
+#### Scenario: A full run populates the occurrence tables
+- **WHEN** a full run completes against an empty database
+- **THEN** `identifications`, `occurrence_abundances` and `occurrences` are all non-empty
 
 ### Requirement: Steps are addressed by name
 The runner SHALL identify steps by the step names in the run-order table, and SHALL NOT require or accept
@@ -249,6 +263,7 @@ precondition SHALL be a per-step predicate rather than a uniform "target table i
 | `collections` | `collections` and `additional_collection_refs` are empty; at least one `refs` row has `reference->'legacyIDs'->>'oldpbdbID'` |
 | `specimens` | `specimens` is empty; `collections` is non-empty; `name_opinions` is non-empty; at least one `refs` row has `reference->'legacyIDs'->>'oldpbdbID'` |
 | `taxa` | `taxa` is empty; `name_opinions`, `assignment_opinions` and `validity_opinions` are non-empty |
+| `occurrences` | `identifications`, `occurrence_abundances` and `occurrences` are empty; `collections` is non-empty; `name_opinions` is non-empty; at least one `refs` row has `reference->'legacyIDs'->>'oldpbdbID'` |
 
 `taxa` is the first writer of `taxa_linnaean`, `taxa_clades`, `taxa_attachments` and `taxa`, so preflight
 also requires all four to be empty when it is selected. `rebuild_taxa_full()` is itself safe to re-run,
@@ -279,6 +294,10 @@ opinion tables change is a direct `rebuild_taxa_full()` call, not a runner invoc
 - **WHEN** `--only taxa` is passed against a database whose `taxa` table already has rows
 - **THEN** preflight fails on `taxa` not being empty and nothing is spawned, and the operator refreshes the tables by calling `rebuild_taxa_full()` directly
 
+#### Scenario: Occurrences requires collections and name opinions
+- **WHEN** `--only occurrences` is passed against a database where `name_opinions` is empty
+- **THEN** its precondition fails and the step is not spawned, rather than loading every identification with a NULL `taxon_permid`
+
 ### Requirement: Per-step postconditions verify the step produced rows
 Exit code 0 SHALL NOT by itself be treated as step success. After each step exits, the runner SHALL verify
 that the exit code is 0 **and** that the row count of every table that step writes increased relative to
@@ -289,7 +308,8 @@ Tables written per step: `persons` → `persons`; `pbot-persons` → `persons`; 
 `refs`; `pbot-schemas` → `schemas`, `characters`, `states`, `additional_schema_refs`; `authorities` →
 `authorities`; `authority-opinions` → `name_opinions`; `opinions` → `assignment_opinions`,
 `name_opinions`, `validity_opinions`; `collections` → `collections`, `additional_collection_refs`;
-`specimens` → `specimens`; `taxa` → `taxa_linnaean`, `taxa_clades`, `taxa_attachments`, `taxa`.
+`specimens` → `specimens`; `taxa` → `taxa_linnaean`, `taxa_clades`, `taxa_attachments`, `taxa`;
+`occurrences` → `identifications`, `occurrence_abundances`, `occurrences`.
 
 `rebuild_taxa_full()` also rewrites `cycle_cuts`, but `cycle_cuts` is not among the tables `taxa` writes
 for this purpose: it is a snapshot of the current cycle cuts and may legitimately be empty, so "the count
@@ -308,11 +328,15 @@ drift as the source data changes.
 
 #### Scenario: Specimens writes exactly one table
 - **WHEN** `specimens` completes
-- **THEN** the runner verifies that `specimens` gained rows, and asserts nothing about `collections`, `occurrences`, or any measurement table, because the step writes none of them
+- **THEN** the runner verifies that `specimens` gained rows, and asserts nothing about `collections`, `identifications`, `occurrences`, or any measurement table, because the step writes none of them
 
 #### Scenario: Taxa must fill all four ledgers
 - **WHEN** `taxa` exits 0 but `taxa_attachments` is still empty
 - **THEN** the runner reports the step as failed and halts, and makes no assertion about `cycle_cuts`
+
+#### Scenario: Occurrences must fill all three tables
+- **WHEN** `occurrences` exits 0 but `occurrence_abundances` is still empty
+- **THEN** the runner reports the step as failed and halts
 
 ### Requirement: The pbot-schemas step is verified beyond its exit code
 The runner SHALL capture the `pbot-schemas` step's standard output, parse its final summary lines, and
@@ -458,7 +482,7 @@ audited table, the block SHALL say so. The block SHALL end with the overall outc
 - **THEN** the run's block records the audit's exit code and, per entity, rows checked and violations
 
 ### Requirement: The runner audits stored payloads after the last selected step
-After the last selected step has passed its postconditions, the runner SHALL spawn `src/audit-payloads.js` as a child process, as it does for steps. The audit SHALL be scoped the same way postconditions are: the runner passes one `--entity` for each audit-registry entity whose table is written by a selected step (per the tables-written list in the postconditions requirement). Today `persons` → `person`, `refs` → `reference`, `authorities` → `authority`, `schemas` → `schema`, `characters` → `character`, `states` → `state`, `collections` → `collection` and `specimens` → `specimen`; the `pbot-persons` and `pbot-refs` steps write the same tables as `persons` and `refs`. The tables `taxa` writes carry no payload and are not in the audit registry, so `taxa` adds no entity.
+After the last selected step has passed its postconditions, the runner SHALL spawn `src/audit-payloads.js` as a child process, as it does for steps. The audit SHALL be scoped the same way postconditions are: the runner passes one `--entity` for each audit-registry entity whose table is written by a selected step (per the tables-written list in the postconditions requirement). Today `persons` → `person`, `refs` → `reference`, `authorities` → `authority`, `schemas` → `schema`, `characters` → `character`, `states` → `state`, `collections` → `collection`, `specimens` → `specimen`, `identifications` → `identification` and `occurrence_abundances` → `occurrence-abundance`; the `pbot-persons` and `pbot-refs` steps write the same tables as `persons` and `refs`. The tables `taxa` writes carry no payload and are not in the audit registry, so `taxa` adds no entity. `occurrences`, which the `occurrences` step also writes, is a derived cache with no payload of its own and is not in the registry either.
 
 - When no selected step writes an audited table, the runner SHALL NOT spawn the audit, and it SHALL record in the run log that no audited tables were written.
 - A non-zero audit exit SHALL be a run failure: the runner reports it and exits non-zero.
@@ -466,8 +490,8 @@ After the last selected step has passed its postconditions, the runner SHALL spa
 - The audit SHALL NOT run when a step or check has already failed.
 
 #### Scenario: Full run audits every audited entity
-- **WHEN** `taxa` passes its postconditions in a full run
-- **THEN** the runner spawns the audit with one `--entity` for each of `collection`, `specimen`, `person`, `reference`, `authority`, `schema`, `character` and `state`, and reports the run successful only if the audit exits 0
+- **WHEN** `occurrences`, the last step, passes its postconditions in a full run
+- **THEN** the runner spawns the audit with one `--entity` for each of `collection`, `specimen`, `person`, `reference`, `authority`, `schema`, `character`, `state`, `identification` and `occurrence-abundance`, and reports the run successful only if the audit exits 0
 
 #### Scenario: Audit failure fails the run
 - **WHEN** every step succeeds but the audit reports a violation
@@ -501,3 +525,6 @@ After the last selected step has passed its postconditions, the runner SHALL spa
 - **WHEN** the runner is invoked with `--only pbot-schemas`
 - **THEN** the audit is spawned with `--entity schema`, `--entity character` and `--entity state`, and no other entity
 
+#### Scenario: The occurrences step audits identification and occurrence-abundance
+- **WHEN** the runner is invoked with `--only occurrences`
+- **THEN** the audit is spawned with `--entity identification` and `--entity occurrence-abundance`, and no other entity
